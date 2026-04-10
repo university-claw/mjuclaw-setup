@@ -21,7 +21,10 @@ services:
       - agent-data:/home/agent/.openclaw
       # mju-news 스크래핑 데이터 영속화
       - news-data:/opt/mju-news/data
+      # 유저별 크리덴셜 영속화 (온보딩 데이터)
+      - user-data:/data/users
 
 volumes:
   agent-data:
   news-data:
+  user-data:

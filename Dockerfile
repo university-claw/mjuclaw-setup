@@ -51,6 +51,9 @@ RUN npm install --include=dev
 COPY src/ /opt/view-server/src/
 RUN npx tsc -p src/tsconfig.json
 
+# ── 유저 데이터 디렉토리 (root에서 생성 후 agent에게 소유권) ────
+RUN mkdir -p /data/users && chown agent:agent /data/users
+
 # ── OpenClaw 디렉토리 구조 ──────────────────────────────────────
 USER agent
 WORKDIR /home/agent
@@ -58,8 +61,10 @@ WORKDIR /home/agent
 RUN mkdir -p /home/agent/.openclaw/workspace/skills
 
 # ── SKILL.md 설치 ───────────────────────────────────────────────
+# mju-cli 기본 skills → 에이전트 전용 skills로 오버라이드 (mju-shared, mju-onboarding)
 COPY --chown=agent:agent mju-cli/skills/ /home/agent/.openclaw/workspace/skills/
 COPY --chown=agent:agent mju-news/skills/ /home/agent/.openclaw/workspace/skills/
+COPY --chown=agent:agent skills/ /home/agent/.openclaw/workspace/skills/
 
 # ── entrypoint ───────────────────────────────────────────────────
 COPY --chown=agent:agent entrypoint.sh /home/agent/entrypoint.sh
