@@ -1,0 +1,24 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mjuclaw-agent
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-google/gemma-4-31b-it}
+      - DISCORD_SERVER_ID=${DISCORD_SERVER_ID:-1492100109997969499}
+      - DISCORD_USER_ID=${DISCORD_USER_ID:-415349075274104832}
+    volumes:
+      # 에이전트 세션/데이터 영속화 (컨테이너 재생성해도 유지)
+      - agent-data:/home/agent/.openclaw
+      # mju-news 스크래핑 데이터 영속화
+      - news-data:/opt/mju-news/data
+
+volumes:
+  agent-data:
+  news-data:

@@ -1,0 +1,9 @@
+mju-cli/node_modules
+mju-cli/dist
+mju-cli/.DS_Store
+mju-news/node_modules
+mju-news/dist
+mju-news/.DS_Store
+.env
+.DS_Store
+.git
