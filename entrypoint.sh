@@ -100,5 +100,10 @@ echo "  │  Discord: enabled                           │"
 echo "  └─────────────────────────────────────────────┘"
 echo ""
 
-# ── gateway 시작 ─────────────────────────────────────────────────
+# ── view-server 시작 (백그라운드) ─────────────────────────────────
+node /opt/view-server/dist/view-server.js &
+VIEW_PID=$!
+echo "  view-server: http://localhost:${VIEW_PORT:-3001} (PID $VIEW_PID)"
+
+# ── gateway 시작 (포그라운드) ─────────────────────────────────────
 exec openclaw gateway

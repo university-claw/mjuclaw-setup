@@ -1,0 +1,17 @@
+{
+  "name": "mjuclaw-setup",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p src/tsconfig.json",
+    "start": "node dist/view-server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -44,6 +44,13 @@ RUN npx tsc
 RUN ln -s /opt/mju-news/dist/main.js /usr/local/bin/mju-news \
     && chmod +x /opt/mju-news/dist/main.js
 
+# ── view-server 빌드 ─────────────────────────────────────────────
+COPY package.json package-lock.json* /opt/view-server/
+WORKDIR /opt/view-server
+RUN npm install --include=dev
+COPY src/ /opt/view-server/src/
+RUN npx tsc -p src/tsconfig.json
+
 # ── OpenClaw 디렉토리 구조 ──────────────────────────────────────
 USER agent
 WORKDIR /home/agent
@@ -54,10 +61,9 @@ RUN mkdir -p /home/agent/.openclaw/workspace/skills
 COPY --chown=agent:agent mju-cli/skills/ /home/agent/.openclaw/workspace/skills/
 COPY --chown=agent:agent mju-news/skills/ /home/agent/.openclaw/workspace/skills/
 
-# ── openclaw.json (토큰은 환경변수로 런타임 주입) ────────────────
-# entrypoint.sh가 환경변수를 읽어 config를 생성
+# ── entrypoint ───────────────────────────────────────────────────
 COPY --chown=agent:agent entrypoint.sh /home/agent/entrypoint.sh
 
-EXPOSE 18789
+EXPOSE 18789 3001
 
 ENTRYPOINT ["/bin/bash", "/home/agent/entrypoint.sh"]
