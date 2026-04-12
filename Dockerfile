@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # OpenClaw CLI 설치
-RUN npm install -g openclaw@2026.3.11
+RUN npm install -g openclaw@2026.4.11
 
 # 작업 유저 생성
 RUN groupadd -r agent && useradd -r -g agent -m -d /home/agent agent
@@ -30,9 +30,9 @@ WORKDIR /opt/mju-cli
 RUN npm ci --include=dev
 COPY mju-cli/ /opt/mju-cli/
 RUN npx tsc
-# skill의 requires.bins: ["mju"]에 매핑
-RUN ln -s /opt/mju-cli/dist/main.js /usr/local/bin/mju \
-    && chmod +x /opt/mju-cli/dist/main.js
+# skill의 requires.bins: ["mju"]에 매핑 — node wrapper script
+RUN printf '#!/bin/sh\nexec node /opt/mju-cli/dist/main.js "$@"\n' > /usr/local/bin/mju \
+    && chmod +x /usr/local/bin/mju
 
 # ── mju-news 빌드 ───────────────────────────────────────────────
 COPY mju-news/package.json mju-news/package-lock.json /opt/mju-news/
@@ -40,9 +40,9 @@ WORKDIR /opt/mju-news
 RUN npm ci --include=dev
 COPY mju-news/ /opt/mju-news/
 RUN npx tsc
-# skill의 requires.bins: ["mju-news"]에 매핑
-RUN ln -s /opt/mju-news/dist/main.js /usr/local/bin/mju-news \
-    && chmod +x /opt/mju-news/dist/main.js
+# skill의 requires.bins: ["mju-news"]에 매핑 — node wrapper script
+RUN printf '#!/bin/sh\nexec node /opt/mju-news/dist/main.js "$@"\n' > /usr/local/bin/mju-news \
+    && chmod +x /usr/local/bin/mju-news
 
 # ── view-server 빌드 ─────────────────────────────────────────────
 COPY package.json package-lock.json* /opt/view-server/
@@ -65,6 +65,9 @@ RUN mkdir -p /home/agent/.openclaw/workspace/skills
 COPY --chown=agent:agent mju-cli/skills/ /home/agent/.openclaw/workspace/skills/
 COPY --chown=agent:agent mju-news/skills/ /home/agent/.openclaw/workspace/skills/
 COPY --chown=agent:agent skills/ /home/agent/.openclaw/workspace/skills/
+
+# ── 에이전트 시스템 프롬프트 (BOOTSTRAP, IDENTITY, SOUL) ─────────
+COPY --chown=agent:agent workspace/*.md /home/agent/.openclaw/workspace/
 
 # ── entrypoint ───────────────────────────────────────────────────
 COPY --chown=agent:agent entrypoint.sh /home/agent/entrypoint.sh
