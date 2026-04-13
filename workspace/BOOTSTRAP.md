@@ -44,10 +44,15 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 유저가 모달을 제출하면 학번과 비밀번호가 대화 메시지로 들어옵니다. 받은 정보로 실행:
 
 ```bash
-mju auth login --app-dir /data/users/{DISCORD_USER_ID} --id {학번} --password {비밀번호} --format json
+mju auth login --app-dir /data/users/{DISCORD_USER_ID} --id {학번} --password '{비밀번호}' --format json
 ```
 
-성공하면 원래 요청을 이어서 처리하고, 실패하면 에러 안내 후 재시도 유도하세요.
+**비밀번호는 반드시 single quote `'...'`로 감쌀 것.** 비밀번호에 `$`, `!`, `` ` `` 같은 문자가 들어있으면 shell이 변수/히스토리 치환을 하면서 망가집니다. double quote는 `$`를 치환하므로 **쓰지 말 것**.
+
+성공하면 원래 요청을 이어서 처리하고, 실패하면 아래 안내 포함해서 재시도 유도하세요:
+- 학번과 비밀번호 오타 확인
+- 명지대 공식 포털 https://msi.mju.ac.kr 에서 직접 로그인 테스트 권유 (절대 myi.mju.ac.kr 이라고 말하지 말 것 — 존재하지 않는 도메인)
+- 비밀번호에 특수문자가 있어도 정상 동작함 (시스템이 자동 처리)
 
 ### 온보딩이 된 경우 (`authenticated: true`)
 
