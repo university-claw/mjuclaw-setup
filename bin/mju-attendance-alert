@@ -98,7 +98,16 @@ for e in entries:
     cron_expr = f'{alert_m} {alert_h} * * {dow}'
     job_name = f'$(job_prefix "$ID")-{dow}-{alert_h:02d}{alert_m:02d}-{re.sub(r"[^가-힣a-zA-Z0-9]", "", title)[:20]}'
 
-    msg = f'mju-attendance-alert check $ID \"{title}\" 를 exec로 실행하고 stdout이 비어있지 않으면 그 내용을 유저에게 그대로 전달. stdout이 비어있으면 아무 메시지도 보내지 말 것.'
+    # cron이 announce delivery로 DM 채널을 resolve 못하는 문제가 있어서,
+    # 에이전트에게 openclaw message send CLI를 직접 호출하게 지시.
+    # 참고: message send는 user:<id>를 정상 처리한다 (cron delivery는 안 함).
+    msg = (
+        f'다음을 정확히 실행: '
+        f'1) exec로 "mju-attendance-alert check $ID \\"{title}\\""를 실행. '
+        f'2) stdout이 비어있으면 아무것도 하지 말고 <final></final>로 종료. '
+        f'3) stdout에 내용이 있으면 exec로 "openclaw message send --channel discord --target \\"user:$ID\\" --message \\"<stdout 내용>\\""를 실행. '
+        f'4) 그 후 <final></final>로 종료 (유저에게 직접 답할 필요 없음).'
+    )
 
     subprocess.run([
         'openclaw', 'cron', 'add',
@@ -107,12 +116,9 @@ for e in entries:
         '--tz', 'Asia/Seoul',
         '--session', 'isolated',
         '--message', msg,
-        '--announce',
-        '--channel', 'discord',
-        '--to', f'user:$ID',
+        '--no-deliver',
         '--tools', 'exec',
-        '--timeout-seconds', '60',
-        '--best-effort-deliver',
+        '--timeout-seconds', '90',
     ], check=False, capture_output=True)
     registered.append({'day': dow, 'time': f'{alert_h:02d}:{alert_m:02d}', 'course': title})
 

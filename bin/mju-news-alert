@@ -65,15 +65,15 @@ with open('$UDIR/news-subscription.json', 'w') as f:
 print(json.dumps(prefs, ensure_ascii=False))
 "
     # OpenClaw cron 등록
+    # cron의 announce delivery가 DM을 못 resolve하는 문제로 message send CLI를 직접 호출하게 지시
+    MSG="다음을 정확히 실행: 1) exec로 \"mju-news-alert deliver $DISCORD_ID\"를 실행. 2) stdout이 '신규 공지 없음'이거나 비어있으면 아무것도 하지 말고 <final></final>로 종료. 3) 그 외엔 exec로 'openclaw message send --channel discord --target \"user:$DISCORD_ID\" --message \"<stdout 내용>\"'를 실행 후 <final></final> 종료."
     openclaw cron add \
       --name "$(job_name "$DISCORD_ID")" \
       --cron "$CRON_EXPR" \
       --tz "Asia/Seoul" \
       --session isolated \
-      --message "mju-news-alert deliver $DISCORD_ID 를 exec로 실행하고 결과(stdout)를 유저에게 그대로 전달. 결과가 비어있거나 '신규 공지 없음'이면 아무것도 보내지 말 것." \
-      --announce \
-      --channel discord \
-      --to "user:$DISCORD_ID" \
+      --message "$MSG" \
+      --no-deliver \
       --tools "exec" \
       --timeout-seconds 90 > /dev/null
     echo "OK: subscribed $DISCORD_ID to $CRON_EXPR"
