@@ -30,9 +30,9 @@ WORKDIR /opt/mju-cli
 RUN npm ci --include=dev
 COPY mju-cli/ /opt/mju-cli/
 RUN npx tsc
-# skill의 requires.bins: ["mju"]에 매핑 — node wrapper script
-RUN printf '#!/bin/sh\nexec node /opt/mju-cli/dist/main.js "$@"\n' > /usr/local/bin/mju \
-    && chmod +x /usr/local/bin/mju
+# skill의 requires.bins: ["mju"]에 매핑 — view-server 자동 연동 wrapper
+COPY bin/mju /usr/local/bin/mju
+RUN chmod +x /usr/local/bin/mju
 
 # ── mju-news 빌드 ───────────────────────────────────────────────
 COPY mju-news/package.json mju-news/package-lock.json /opt/mju-news/
@@ -41,8 +41,16 @@ RUN npm ci --include=dev
 COPY mju-news/ /opt/mju-news/
 RUN npx tsc
 # skill의 requires.bins: ["mju-news"]에 매핑 — node wrapper script
-RUN printf '#!/bin/sh\nexec node /opt/mju-news/dist/main.js "$@"\n' > /usr/local/bin/mju-news \
+RUN printf '#!/bin/sh\nexec node /opt/mju-news/dist/main.js --data-dir /opt/mju-news/data "$@"\n' > /usr/local/bin/mju-news \
     && chmod +x /usr/local/bin/mju-news
+
+# mju-news-alert — 유저별 뉴스 알림 구독/해제/전달 helper
+COPY bin/mju-news-alert /usr/local/bin/mju-news-alert
+RUN chmod +x /usr/local/bin/mju-news-alert
+
+# mju-attendance-alert — 출석 체크 누락 선제 알림 helper
+COPY bin/mju-attendance-alert /usr/local/bin/mju-attendance-alert
+RUN chmod +x /usr/local/bin/mju-attendance-alert
 
 # ── view-server 빌드 ─────────────────────────────────────────────
 COPY package.json package-lock.json* /opt/view-server/

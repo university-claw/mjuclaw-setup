@@ -1,0 +1,129 @@
+#!/bin/bash
+# mju wrapper: 실제 mju-cli 실행 후 결과를 view-server에 자동 POST하고
+# 반환 JSON에 viewUrl 필드를 주입한다. 에이전트는 그냥 출력의 viewUrl만 쓰면 됨.
+#
+# dataType은 서브커맨드를 보고 자동 매핑:
+#   lms +action-items  → action-items
+#   lms +unsubmitted   → unsubmitted
+#   lms +due-assignments → due-assignments
+#   lms +unread-notices → unread-notices
+#   msi timetable      → timetable
+#   msi grades         → grades
+#   msi graduation     → graduation
+#   ucheck ...         → attendance
+#   그 외              → generic
+#
+# view-server POST 실패해도 원본 출력은 그대로 반환 (에이전트 동작 방해 금지).
+
+REAL_MJU="/opt/mju-cli/dist/main.js"
+VIEW_API="${VIEW_API_URL:-http://localhost:3001/api/view}"
+
+# 서브커맨드에서 dataType 추출
+detect_datatype() {
+  local args="$*"
+  case "$args" in
+    *"lms +action-items"*) echo "action-items" ;;
+    *"lms +unsubmitted"*) echo "unsubmitted" ;;
+    *"lms +due-assignments"*) echo "due-assignments" ;;
+    *"lms +unread-notices"*) echo "unread-notices" ;;
+    *"lms +digest"*) echo "action-items" ;;
+    *"msi timetable"*) echo "timetable" ;;
+    *"msi grades"*) echo "grades" ;;
+    *"msi graduation"*) echo "graduation" ;;
+    *"lms courses list"*) echo "courses" ;;
+    *"ucheck"*) echo "attendance" ;;
+    *) echo "" ;;
+  esac
+}
+
+# 조회성 커맨드 (읽기 only)만 web view 생성 — auth/config 등은 제외
+should_view() {
+  local args="$*"
+  case "$args" in
+    *" +"*) return 0 ;;
+    *"timetable"*|*"grades"*|*"graduation"*|*"courses list"*|*"attendance"*) return 0 ;;
+    *"auth "*|*"config "*|*"doctor"*|*"skills"*) return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 실제 mju-cli 실행, stdout + stderr + exit code 캡처
+STDOUT=$(node "$REAL_MJU" "$@" 2>/tmp/mju-stderr.$$)
+EXIT=$?
+STDERR=$(cat /tmp/mju-stderr.$$ 2>/dev/null)
+rm -f /tmp/mju-stderr.$$
+
+# stderr 그대로 재출력
+[ -n "$STDERR" ] && echo "$STDERR" >&2
+
+# exit 실패이거나 view 대상 아니면 그냥 pass-through
+if [ $EXIT -ne 0 ] || ! should_view "$@"; then
+  echo "$STDOUT"
+  exit $EXIT
+fi
+
+# JSON이 아니면 그냥 pass-through (table format 등)
+case "$*" in
+  *"--format json"*|*"--format=json"*) : ;;
+  *) echo "$STDOUT"; exit $EXIT ;;
+esac
+
+DATA_TYPE=$(detect_datatype "$@")
+[ -z "$DATA_TYPE" ] && { echo "$STDOUT"; exit $EXIT; }
+
+# view-server에 POST (백그라운드로 하지 않고 동기 — URL 필요)
+TITLE=$(case "$DATA_TYPE" in
+  action-items) echo "남은 일" ;;
+  unsubmitted) echo "미제출 과제" ;;
+  due-assignments) echo "마감 임박 과제" ;;
+  unread-notices) echo "안 읽은 공지" ;;
+  timetable) echo "시간표" ;;
+  grades) echo "성적" ;;
+  graduation) echo "졸업요건" ;;
+  courses) echo "수강과목" ;;
+  attendance) echo "출석" ;;
+  *) echo "학사 데이터" ;;
+esac)
+
+VIEW_RESP=$(curl -s --max-time 3 -X POST "$VIEW_API" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c "
+import json, sys
+raw = sys.argv[1]
+try: data = json.loads(raw)
+except: data = None
+print(json.dumps({
+    'dataType': sys.argv[2],
+    'title': sys.argv[3],
+    'summary': '',
+    'rawData': data,
+    'aiResponse': ''
+}))
+" "$STDOUT" "$DATA_TYPE" "$TITLE")" 2>/dev/null)
+
+VIEW_URL=$(echo "$VIEW_RESP" | python3 -c "import json,sys;
+try: print(json.load(sys.stdin).get('url',''))
+except: pass
+" 2>/dev/null)
+
+# 원본 JSON에 viewUrl 필드 주입 후 출력
+if [ -n "$VIEW_URL" ]; then
+  echo "$STDOUT" | python3 -c "
+import json, sys
+raw = sys.stdin.read()
+try:
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        data['viewUrl'] = '$VIEW_URL'
+        print(json.dumps(data, ensure_ascii=False))
+    else:
+        # 배열 등 다른 형태면 래핑
+        print(json.dumps({'data': data, 'viewUrl': '$VIEW_URL'}, ensure_ascii=False))
+except:
+    print(raw)
+"
+else
+  echo "$STDOUT"
+fi
+
+exit $EXIT

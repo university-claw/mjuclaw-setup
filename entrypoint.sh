@@ -58,6 +58,10 @@ config = {
         'restart': True,
         'ownerDisplay': 'raw',
     },
+    # multi-user 환경: DM을 유저별로 격리 (기본값 'main'은 모든 DM 공유)
+    'session': {
+        'dmScope': 'per-channel-peer',
+    },
     'channels': {
         'defaults': {},
         'discord': {

@@ -1,0 +1,175 @@
+#!/bin/bash
+# mju-news-alert: 유저별 뉴스 알림 구독 helper
+#
+# Usage:
+#   mju-news-alert subscribe <discord_id> "<cron_expr>" "<sources>"
+#   mju-news-alert unsubscribe <discord_id>
+#   mju-news-alert status <discord_id>
+#   mju-news-alert deliver <discord_id>     # cron이 호출 (내부용)
+#
+# sources: comma-separated from general,scholarship,event,career (빈 문자열이면 전부)
+#
+# 동작:
+#   - /data/users/<id>/news-subscription.json에 구독 정보 저장
+#   - openclaw cron add/rm로 유저별 cron job 관리
+#   - deliver: mju-news new --since <마지막 전송 시각> 조회 후 필터링, 요약 반환
+
+set -e
+CMD="$1"; shift || true
+
+usage() {
+  cat <<EOF
+Usage:
+  mju-news-alert subscribe <discord_id> "<cron_expr>" "<sources>"
+  mju-news-alert unsubscribe <discord_id>
+  mju-news-alert status <discord_id>
+  mju-news-alert deliver <discord_id>
+
+sources: general,scholarship,event,career (comma-separated, or "" for all)
+EOF
+}
+
+user_dir() { echo "/data/users/$1"; }
+subs_file() { echo "$(user_dir "$1")/news-subscription.json"; }
+job_name() { echo "news-$1"; }
+
+case "$CMD" in
+  subscribe)
+    DISCORD_ID="$1"
+    CRON_EXPR="$2"
+    SOURCES="${3:-}"
+    [ -z "$DISCORD_ID" ] && { usage; exit 1; }
+    [ -z "$CRON_EXPR" ] && { usage; exit 1; }
+
+    UDIR=$(user_dir "$DISCORD_ID")
+    mkdir -p "$UDIR"
+
+    # 기존 구독이 있으면 먼저 해제
+    openclaw cron rm "$(job_name "$DISCORD_ID")" 2>/dev/null || true
+
+    # 구독 파일 기록
+    python3 -c "
+import json, os
+from datetime import datetime, timezone
+prefs = {
+    'enabled': True,
+    'cronExpr': '''$CRON_EXPR''',
+    'timezone': 'Asia/Seoul',
+    'sources': [s for s in '''$SOURCES'''.split(',') if s],
+    'cronJobName': '''$(job_name "$DISCORD_ID")''',
+    'subscribedAt': datetime.now(timezone.utc).isoformat(),
+    'lastSentAt': None,
+}
+with open('$UDIR/news-subscription.json', 'w') as f:
+    json.dump(prefs, f, indent=2, ensure_ascii=False)
+print(json.dumps(prefs, ensure_ascii=False))
+"
+    # OpenClaw cron 등록
+    openclaw cron add \
+      --name "$(job_name "$DISCORD_ID")" \
+      --cron "$CRON_EXPR" \
+      --tz "Asia/Seoul" \
+      --session isolated \
+      --message "mju-news-alert deliver $DISCORD_ID 를 exec로 실행하고 결과(stdout)를 유저에게 그대로 전달. 결과가 비어있거나 '신규 공지 없음'이면 아무것도 보내지 말 것." \
+      --announce \
+      --channel discord \
+      --to "user:$DISCORD_ID" \
+      --tools "exec" \
+      --timeout-seconds 90 > /dev/null
+    echo "OK: subscribed $DISCORD_ID to $CRON_EXPR"
+    ;;
+
+  unsubscribe)
+    DISCORD_ID="$1"
+    [ -z "$DISCORD_ID" ] && { usage; exit 1; }
+    openclaw cron rm "$(job_name "$DISCORD_ID")" 2>/dev/null || true
+    rm -f "$(subs_file "$DISCORD_ID")"
+    echo "OK: unsubscribed $DISCORD_ID"
+    ;;
+
+  status)
+    DISCORD_ID="$1"
+    F=$(subs_file "$DISCORD_ID")
+    if [ -f "$F" ]; then
+      cat "$F"
+    else
+      echo '{"enabled":false}'
+    fi
+    ;;
+
+  deliver)
+    DISCORD_ID="$1"
+    F=$(subs_file "$DISCORD_ID")
+    [ ! -f "$F" ] && { echo "신규 공지 없음"; exit 0; }
+
+    # since를 마지막 전송 시각(또는 24시간 전)으로
+    SINCE=$(python3 -c "
+import json
+from datetime import datetime, timezone, timedelta
+with open('$F') as f: p = json.load(f)
+last = p.get('lastSentAt')
+if last:
+    print(last)
+else:
+    print((datetime.now(timezone.utc) - timedelta(hours=24)).isoformat())
+")
+
+    SOURCES=$(python3 -c "
+import json
+with open('$F') as f: p = json.load(f)
+print(','.join(p.get('sources', [])))
+")
+
+    # 신규 공지 조회
+    RESULT=$(mju-news new --since "$SINCE" --format json 2>/dev/null || echo '{"items":[]}')
+
+    # 필터링 + 요약 생성
+    python3 <<PY
+import json, sys
+from datetime import datetime, timezone
+
+result = json.loads('''$RESULT''')
+items = result.get('items', [])
+
+sources_filter = [s for s in '$SOURCES'.split(',') if s]
+if sources_filter:
+    items = [i for i in items if i.get('source') in sources_filter]
+
+if not items:
+    print("신규 공지 없음")
+    sys.exit(0)
+
+LABEL = {
+    'general': '📢 일반공지',
+    'scholarship': '💰 장학/학자금공지',
+    'event': '🎉 행사공지',
+    'career': '💼 진로/취업공지',
+}
+
+by_source = {}
+for it in items:
+    by_source.setdefault(it.get('source',''), []).append(it)
+
+lines = [f"🦁 새 학교 공지 {len(items)}건"]
+for src, group in by_source.items():
+    lines.append("")
+    lines.append(f"**{LABEL.get(src, src)}** ({len(group)}건)")
+    for n in group[:5]:
+        title = n.get('title','')
+        url = n.get('url','')
+        lines.append(f"- [{title}]({url})")
+print('\n'.join(lines))
+
+# lastSentAt 갱신
+import json
+with open('$F') as f: p = json.load(f)
+p['lastSentAt'] = datetime.now(timezone.utc).isoformat()
+with open('$F', 'w') as f: json.dump(p, f, indent=2, ensure_ascii=False)
+PY
+    ;;
+
+  *)
+    usage
+    exit 1
+    ;;
+esac

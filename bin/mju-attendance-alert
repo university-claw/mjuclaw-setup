@@ -1,0 +1,223 @@
+#!/bin/bash
+# mju-attendance-alert: 수업 시작 N분 후에 출석 체크 안돼있으면 DM 알림
+#
+# 동작:
+#   subscribe  — mju msi timetable로 시간표 가져와서 각 수업마다 (시작+grace)분 cron 등록
+#   unsubscribe — 유저 관련 모든 attendance cron 제거
+#   check      — cron이 호출. 특정 과목 오늘 출석 상태 확인, 미체크면 알림 생성
+#   refresh    — 시간표 변경 시 cron 재생성 (unsubscribe + subscribe)
+#   status     — 현재 구독 정보 반환
+#
+# Storage:
+#   /data/users/<id>/attendance-alert.json  — 구독 정보 + 시간표 캐시
+
+set -e
+CMD="$1"; shift || true
+
+user_dir() { echo "/data/users/$1"; }
+config_file() { echo "$(user_dir "$1")/attendance-alert.json"; }
+job_prefix() { echo "attend-$1"; }
+
+usage() {
+  cat <<EOF
+Usage:
+  mju-attendance-alert subscribe <discord_id> [grace_min=10]
+  mju-attendance-alert unsubscribe <discord_id>
+  mju-attendance-alert refresh <discord_id>
+  mju-attendance-alert status <discord_id>
+  mju-attendance-alert check <discord_id> "<course_title>"
+EOF
+}
+
+# 유저의 모든 attendance-<id>-* cron 제거
+remove_all_crons() {
+  local ID="$1"
+  local PREFIX=$(job_prefix "$ID")
+  openclaw cron list --json 2>/dev/null | python3 -c "
+import json, sys, subprocess
+try:
+    data = json.load(sys.stdin)
+    jobs = data.get('jobs', []) if isinstance(data, dict) else data
+except Exception:
+    sys.exit(0)
+for j in jobs:
+    name = j.get('name','')
+    if name.startswith('$PREFIX'):
+        subprocess.run(['openclaw','cron','rm', j.get('id') or name], check=False, capture_output=True)
+" 2>/dev/null || true
+}
+
+case "$CMD" in
+  subscribe)
+    ID="$1"
+    GRACE="${2:-10}"
+    [ -z "$ID" ] && { usage; exit 1; }
+
+    UDIR=$(user_dir "$ID")
+    mkdir -p "$UDIR"
+
+    # 1) 기존 cron 제거
+    remove_all_crons "$ID"
+
+    # 2) 시간표 가져오기
+    TT=$(mju msi timetable --app-dir "$UDIR" --format json 2>&1) || {
+      echo "ERR: 시간표 조회 실패. 먼저 로그인이 필요합니다." >&2
+      exit 1
+    }
+
+    # 3) 각 수업마다 cron 등록
+    python3 <<PY
+import json, subprocess, re
+from datetime import datetime, timezone
+
+data = json.loads('''$TT''')
+entries = data.get('entries', [])
+grace = int('$GRACE')
+
+# 하나의 수업이 같은 요일에 여러 번 있지 않으므로 dayOfWeek + timeRange가 unique
+seen = set()
+registered = []
+for e in entries:
+    dow = e.get('dayOfWeek')  # 1=월 ~ 7=일
+    if not dow or dow > 5:  # 주말은 스킵
+        continue
+    tr = e.get('timeRange','')  # "14:00~15:50"
+    m = re.match(r'(\d{1,2}):(\d{2})', tr)
+    if not m: continue
+    h, mm = int(m.group(1)), int(m.group(2))
+    # grace 분 더함
+    total = h * 60 + mm + grace
+    alert_h = (total // 60) % 24
+    alert_m = total % 60
+
+    title = e.get('courseTitle','')
+    key = f'{dow}-{alert_h:02d}{alert_m:02d}-{title}'
+    if key in seen: continue
+    seen.add(key)
+
+    cron_expr = f'{alert_m} {alert_h} * * {dow}'
+    job_name = f'$(job_prefix "$ID")-{dow}-{alert_h:02d}{alert_m:02d}-{re.sub(r"[^가-힣a-zA-Z0-9]", "", title)[:20]}'
+
+    msg = f'mju-attendance-alert check $ID \"{title}\" 를 exec로 실행하고 stdout이 비어있지 않으면 그 내용을 유저에게 그대로 전달. stdout이 비어있으면 아무 메시지도 보내지 말 것.'
+
+    subprocess.run([
+        'openclaw', 'cron', 'add',
+        '--name', job_name,
+        '--cron', cron_expr,
+        '--tz', 'Asia/Seoul',
+        '--session', 'isolated',
+        '--message', msg,
+        '--announce',
+        '--channel', 'discord',
+        '--to', f'user:$ID',
+        '--tools', 'exec',
+        '--timeout-seconds', '60',
+        '--best-effort-deliver',
+    ], check=False, capture_output=True)
+    registered.append({'day': dow, 'time': f'{alert_h:02d}:{alert_m:02d}', 'course': title})
+
+# 4) 구독 정보 저장
+config = {
+    'enabled': True,
+    'graceMin': grace,
+    'timezone': 'Asia/Seoul',
+    'subscribedAt': datetime.now(timezone.utc).isoformat(),
+    'courses': registered,
+}
+with open('$UDIR/attendance-alert.json', 'w') as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+print(f'OK: {len(registered)}개 수업 알림 등록됨')
+for r in registered:
+    DAYS = ['','월','화','수','목','금']
+    print(f'  - {DAYS[r["day"]]} {r["time"]} : {r["course"]}')
+PY
+    ;;
+
+  unsubscribe)
+    ID="$1"
+    [ -z "$ID" ] && { usage; exit 1; }
+    remove_all_crons "$ID"
+    rm -f "$(config_file "$ID")"
+    echo "OK: unsubscribed $ID"
+    ;;
+
+  refresh)
+    ID="$1"
+    [ -z "$ID" ] && { usage; exit 1; }
+    F=$(config_file "$ID")
+    [ ! -f "$F" ] && { echo "ERR: 구독 정보 없음. subscribe 먼저 실행." >&2; exit 1; }
+    GRACE=$(python3 -c "import json; print(json.load(open('$F')).get('graceMin', 10))")
+    exec "$0" subscribe "$ID" "$GRACE"
+    ;;
+
+  status)
+    ID="$1"
+    F=$(config_file "$ID")
+    if [ -f "$F" ]; then
+      cat "$F"
+    else
+      echo '{"enabled":false}'
+    fi
+    ;;
+
+  check)
+    ID="$1"
+    COURSE="$2"
+    [ -z "$ID" ] || [ -z "$COURSE" ] && { usage; exit 1; }
+
+    UDIR=$(user_dir "$ID")
+    # ucheck attendance로 해당 과목 출석 조회
+    RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1) || {
+      # 로그인 문제 등. 조용히 종료 (알림 안 보냄)
+      exit 0
+    }
+
+    # 오늘 날짜 session이 있는지, 그 session의 statusLabel 확인
+    python3 <<PY
+import json, sys
+from datetime import datetime
+
+try:
+    data = json.loads('''$RES''')
+except Exception:
+    sys.exit(0)
+
+today = datetime.now().astimezone().strftime('%Y-%m-%d')
+sessions = data.get('sessions', [])
+today_sessions = [s for s in sessions if s.get('date') == today]
+
+if not today_sessions:
+    # 오늘 수업 없음 (휴강/공휴일)
+    sys.exit(0)
+
+# 오늘 세션 중 체크 안된 게 있는지
+unchecked = [s for s in today_sessions if not s.get('statusLabel')]
+if not unchecked:
+    # 다 체크됨
+    sys.exit(0)
+
+course_title = data.get('course', {}).get('courseTitle', '$COURSE')
+classroom = today_sessions[0].get('classroom','')
+time_range = today_sessions[0].get('timeRange','')
+
+lines = [
+    f'⏰ 출석 체크 누락 알림',
+    f'',
+    f'📚 **{course_title}**',
+    f'🕒 {time_range}',
+]
+if classroom:
+    lines.append(f'📍 {classroom}')
+lines.extend([
+    f'',
+    f'아직 출석 체크가 안 되어 있어요. 수업 중이면 얼른 확인해주세요!'
+])
+print('\n'.join(lines))
+PY
+    ;;
+
+  *)
+    usage
+    exit 1
+    ;;
+esac
