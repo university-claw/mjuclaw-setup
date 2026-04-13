@@ -3,8 +3,8 @@
 # NemoClaw sandbox 없이 plain Docker에서 OpenClaw + mju-cli + mju-news를 실행.
 # 프록시 없이 Discord WebSocket이 직접 연결됨.
 #
-# 사전 준비:
-#   git clone https://github.com/nullhyeon/mju-cli.git
+# 사전 준비 (./setup.sh로 자동화 가능):
+#   git clone https://github.com/university-claw/mju-cli.git
 #   git clone https://github.com/university-claw/mju-news.git
 #
 # Build:  docker compose build

@@ -38,29 +38,33 @@ OpenClaw가 Discord에 직접 연결되어 에이전트로 동작합니다. 유�
 ngrok http --domain=<your-domain>.ngrok-free.dev 3001
 ```
 
-## 설치 및 실행
+## 설치 및 실행 (한 방에)
 
 ```bash
 git clone https://github.com/university-claw/mjuclaw-setup.git
 cd mjuclaw-setup
 
+./setup.sh
+```
+
+첫 실행 시 `.env`가 자동 생성됩니다. 안내에 따라 값을 채우고 **다시 `./setup.sh`**를 실행하면 도구 레포 clone + Docker 빌드 + 기동까지 자동 완료됩니다.
+
+`docker logs -f mjuclaw-agent`로 `[discord] client initialized as ... (봇이름)`이 나오면 성공.
+
+### 수동 설치 (상세 제어)
+
+```bash
 # 도구 레포 clone (gitignore 됨)
 git clone https://github.com/university-claw/mju-cli.git
 git clone https://github.com/university-claw/mju-news.git
 
 # 환경변수 설정
-cp .env.example .env
-# .env 파일 편집 — 토큰/키/도메인 입력
+cp .env.example .env   # 편집 필요
 
 # 빌드 & 실행
 docker compose build
 docker compose up -d
-
-# 로그 확인
-docker logs -f mjuclaw-agent
 ```
-
-`[discord] client initialized as ... (봇이름)` 이 나오면 성공.
 
 ## 페어링 (선택 사항)
 
