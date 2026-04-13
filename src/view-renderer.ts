@@ -286,9 +286,94 @@ function renderNewsList(data: unknown): string {
 
 // ── 출석 ────────────────────────────────────────────────────────
 
+// ucheck가 반환하는 attendance JSON을 예쁘게 렌더링 (과거 카카오 호환으로 문자열도 지원)
 function renderAttendanceText(data: unknown): string {
-  if (typeof data !== "string") return renderGeneric(data);
-  return `<div class="card"><div class="card-title">출석 상세</div><div class="ai-text">${esc(data)}</div></div>`;
+  if (typeof data === "string") {
+    return `<div class="card"><div class="card-title">출석 상세</div><div class="ai-text">${esc(data)}</div></div>`;
+  }
+  const d = data as {
+    course?: { courseTitle?: string; professor?: string; scheduleSummary?: string };
+    summary?: { attendedCount?: number; tardyCount?: number; earlyLeaveCount?: number; absentCount?: number };
+    totalSessions?: number;
+    completedSessions?: number;
+    sessions?: Array<{
+      week?: number;
+      classNo?: number;
+      sessionLabel?: string;
+      date?: string;
+      dateLabel?: string;
+      timeRange?: string;
+      classroom?: string;
+      isPast?: boolean;
+      statusLabel?: string;
+      attendAt?: string;
+    }>;
+  };
+
+  let html = "";
+
+  // 과목 헤더
+  if (d.course) {
+    const c = d.course;
+    html += `<div class="card"><div class="card-title">${esc(c.courseTitle || "출석")}</div>`;
+    if (c.professor) html += `<div class="item-sub">${esc(c.professor)} 교수</div>`;
+    if (c.scheduleSummary) {
+      const sched = c.scheduleSummary.split("\n").map((s) => esc(s)).join("<br>");
+      html += `<div class="item-sub" style="margin-top:6px;">${sched}</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 요약 배지
+  if (d.summary) {
+    const s = d.summary;
+    const total = d.completedSessions ?? 0;
+    html += `<div class="card"><div class="card-title">요약</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="badge badge-blue">진행 ${total}회</span>
+        <span class="badge badge-green">출석 ${s.attendedCount ?? 0}</span>`;
+    if ((s.tardyCount ?? 0) > 0) html += `<span class="badge badge-yellow">지각 ${s.tardyCount}</span>`;
+    if ((s.earlyLeaveCount ?? 0) > 0) html += `<span class="badge badge-yellow">조퇴 ${s.earlyLeaveCount}</span>`;
+    if ((s.absentCount ?? 0) > 0) html += `<span class="badge badge-red">결석 ${s.absentCount}</span>`;
+    html += `</div></div>`;
+  }
+
+  // 세션 테이블
+  if (d.sessions && d.sessions.length > 0) {
+    html += `<div class="card"><div class="card-title">세션별 출석</div>`;
+    html += `<table><tr><th>주차</th><th>날짜</th><th>시간</th><th>상태</th><th>입실</th></tr>`;
+    // 지난 세션만, 날짜 내림차순 (최근 먼저)
+    const past = d.sessions.filter((s) => s.isPast).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    for (const s of past) {
+      const status = s.statusLabel || "-";
+      let badgeCls = "badge-gray";
+      if (status === "출석") badgeCls = "badge-green";
+      else if (status === "결석") badgeCls = "badge-red";
+      else if (status === "지각" || status === "조퇴") badgeCls = "badge-yellow";
+      html += `<tr>
+        <td>${esc(s.sessionLabel || "-")}</td>
+        <td>${esc(s.dateLabel || s.date || "-")}</td>
+        <td>${esc(s.timeRange || "-")}</td>
+        <td><span class="badge ${badgeCls}">${esc(status)}</span></td>
+        <td>${esc(s.attendAt || "-")}</td>
+      </tr>`;
+    }
+    html += `</table></div>`;
+
+    // 예정된 세션
+    const upcoming = d.sessions.filter((s) => !s.isPast).slice(0, 5);
+    if (upcoming.length > 0) {
+      html += `<div class="card"><div class="card-title">다가오는 수업</div>`;
+      for (const s of upcoming) {
+        html += `<div class="item"><div class="item-title">${esc(s.dateLabel || s.date || "")} · ${esc(s.timeRange || "")}</div>`;
+        if (s.classroom) html += `<div class="item-sub">${esc(s.classroom)}</div>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+  }
+
+  return html || renderGeneric(data);
 }
 
 // ── 기본 (JSON) ─────────────────────────────────────────────────
