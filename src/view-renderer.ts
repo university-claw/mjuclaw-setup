@@ -1,7 +1,10 @@
+import DOMPurify from "isomorphic-dompurify";
+import { marked } from "marked";
 import type { ViewEntry } from "./types";
 
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
+  const aiSummaryHtml = renderMarkdown(entry.aiResponse);
   const time = new Date(entry.createdAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
   return `<!DOCTYPE html>
@@ -56,12 +59,8 @@ td { padding: 8px; border-bottom: 1px solid #f0f0f0; color: #333; }
   </div>
   <div class="card">
     <div class="card-title">AI 요약</div>
-    <div class="ai-text" id="ai-summary"></div>
+    <div class="ai-text">${aiSummaryHtml}</div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script>
-    document.getElementById('ai-summary').innerHTML = marked.parse(${JSON.stringify(entry.aiResponse)});
-  </script>
   ${dataHtml}
   <div class="footer">${esc(time)} 조회 · 30분 후 만료</div>
 </div>
@@ -381,6 +380,11 @@ function renderAttendanceText(data: unknown): string {
 function renderGeneric(data: unknown): string {
   const json = JSON.stringify(data, null, 2);
   return `<div class="card"><div class="card-title">원본 데이터</div><pre style="font-size:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;color:#333;">${esc(json)}</pre></div>`;
+}
+
+function renderMarkdown(markdown: string): string {
+  const rendered = marked.parse(markdown, { async: false }) as string;
+  return DOMPurify.sanitize(rendered);
 }
 
 // ── HTML 이스케이프 ─────────────────────────────────────────────

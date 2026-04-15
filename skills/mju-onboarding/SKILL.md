@@ -44,15 +44,21 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 
 ### 2단계: 로그인 실행
 
+**반드시 `mju-login` helper를 heredoc으로 사용**하세요. 비밀번호 특수문자($, ', ", `, \)를 안전하게 처리합니다.
+
 ```bash
-mju auth login --app-dir /data/users/{DISCORD_USER_ID} --id {학번} --password '{비밀번호}' --format json
+mju-login {DISCORD_USER_ID} {학번} <<'PW_END'
+{비밀번호}
+PW_END
 ```
 
-**비밀번호는 반드시 single quote `'...'`로 감쌀 것.** 비밀번호에 `$`, `!`, `` ` `` 같은 문자가 있으면 bash가 치환해서 SSO 로그인 실패하니까 주의. double quote `"..."`는 `$`를 치환하므로 쓰지 말 것.
-
+- 반드시 `<<'PW_END'` 처럼 **single quote로 marker를 감쌀 것** (shell 치환 차단)
+- 비밀번호는 한 줄로만 입력
 - `{DISCORD_USER_ID}`: 현재 대화 유저의 Discord ID
-- 성공 시 JSON에 `profile` 필드가 포함됩니다 (이름, 학과 등)
+- 성공 시 JSON에 `profile` 필드가 포함됩니다
 - 실패 시 에러 메시지를 유저에게 전달하세요 (절대 `myi.mju.ac.kr`이라고 말하지 말 것, 실제 포털은 https://msi.mju.ac.kr)
+
+❌ **절대 `mju auth login --password ...` 직접 호출 금지** — shell escape 실패로 로그인 실패함.
 
 ### 3단계: 확인 응답
 

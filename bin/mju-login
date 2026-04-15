@@ -1,0 +1,63 @@
+#!/bin/bash
+# mju-login: 비밀번호 특수문자 안전 로그인 helper
+#
+# 사용법 (heredoc으로 비밀번호 전달):
+#   mju-login <discord_id> <학번> <<'PW'
+#   실제비밀번호$!'"`\여기에
+#   PW
+#
+# stdin에서 비밀번호 첫 줄을 읽어 mju-cli에 전달.
+# quoted heredoc('PW')은 shell 치환을 막으므로 비밀번호에 어떤 특수문자가 있어도 안전.
+
+set -euo pipefail
+
+DISCORD_ID="${1:-}"
+STUDENT_ID="${2:-}"
+
+if [ -z "$DISCORD_ID" ] || [ -z "$STUDENT_ID" ]; then
+  echo "Usage: mju-login <discord_id> <student_id> <<'PW' ... PW" >&2
+  exit 2
+fi
+
+# Discord ID는 숫자만
+if ! [[ "$DISCORD_ID" =~ ^[0-9]{17,20}$ ]]; then
+  echo "ERR: Invalid Discord ID" >&2
+  exit 2
+fi
+
+# 학번도 숫자만
+if ! [[ "$STUDENT_ID" =~ ^[0-9]+$ ]]; then
+  echo "ERR: Invalid student ID" >&2
+  exit 2
+fi
+
+# stdin 첫 줄을 비밀번호로 읽음 (IFS 클리어 + raw 모드)
+IFS= read -r PASSWORD || {
+  echo "ERR: No password on stdin" >&2
+  exit 2
+}
+
+if [ -z "$PASSWORD" ]; then
+  echo "ERR: Empty password" >&2
+  exit 2
+fi
+
+APP_DIR="/data/users/$DISCORD_ID"
+mkdir -p "$APP_DIR"
+
+# env var 경유로 mju-cli에 전달 (args로 넘기지 않음 → shell/ps leak 방지)
+# mju-cli는 현재 --password args만 받으므로 여기서 escape해서 넘긴다.
+# bash는 env 값을 그대로 child에 전달하므로 이게 가장 안전한 방법.
+export MJU_PASSWORD="$PASSWORD"
+unset PASSWORD
+
+# node 프로세스 실행. env는 자동 상속.
+# mju-cli는 --password 필수라서 env에서 꺼내 args로 넘긴다. 여기서 이미 env에 안전히 있으므로
+# bash 파싱 단계를 거치지 않고 exec 직접 전달이면 OK.
+# 그런데 bash 자체가 "$MJU_PASSWORD"를 expand하면 expand 결과가 안전함 (이미 변수 값임).
+# 즉 "$VAR"는 단일 arg로 전달되고 shell 치환이 이미 끝난 상태.
+exec mju auth login \
+  --app-dir "$APP_DIR" \
+  --id "$STUDENT_ID" \
+  --password "$MJU_PASSWORD" \
+  --format json

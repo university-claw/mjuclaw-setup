@@ -41,18 +41,27 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 }
 ```
 
-유저가 모달을 제출하면 학번과 비밀번호가 대화 메시지로 들어옵니다. 받은 정보로 실행:
+유저가 모달을 제출하면 학번과 비밀번호가 대화 메시지로 들어옵니다.
+
+**비밀번호에 `$`, `'`, `"`, `` ` ``, `\` 등의 특수문자가 있을 수 있어요. 절대 `--password` 인자로 직접 넘기지 말고 반드시 `mju-login` helper를 heredoc으로 사용하세요:**
 
 ```bash
-mju auth login --app-dir /data/users/{DISCORD_USER_ID} --id {학번} --password '{비밀번호}' --format json
+mju-login {DISCORD_USER_ID} {학번} <<'PW_END'
+실제비밀번호_여기에_한줄로
+PW_END
 ```
 
-**비밀번호는 반드시 single quote `'...'`로 감쌀 것.** 비밀번호에 `$`, `!`, `` ` `` 같은 문자가 들어있으면 shell이 변수/히스토리 치환을 하면서 망가집니다. double quote는 `$`를 치환하므로 **쓰지 말 것**.
+- `<<'PW_END'` 처럼 **single quote로 감싼 heredoc marker**를 반드시 사용 (shell 변수 치환 차단)
+- marker 이름은 `PW_END`로 고정 (비밀번호에 이 문자열이 없어야 함 — 드문 edge case는 `PW_END_0xDEADBEEF` 같은 랜덤 접미사 사용)
+- 비밀번호는 heredoc 한 줄로 입력 (끝에 개행 자동 추가됨, helper가 strip)
+- `exec`로 호출하지 말 것. 그냥 `mju-login ...`
+
+성공 시 helper는 profile JSON을 출력합니다. 실패 시 에러 메시지와 non-zero exit code.
 
 성공하면 원래 요청을 이어서 처리하고, 실패하면 아래 안내 포함해서 재시도 유도하세요:
 - 학번과 비밀번호 오타 확인
 - 명지대 공식 포털 https://msi.mju.ac.kr 에서 직접 로그인 테스트 권유 (절대 myi.mju.ac.kr 이라고 말하지 말 것 — 존재하지 않는 도메인)
-- 비밀번호에 특수문자가 있어도 정상 동작함 (시스템이 자동 처리)
+- 비밀번호에 특수문자가 있어도 helper가 정상 처리함
 
 ### 온보딩이 된 경우 (`authenticated: true`)
 

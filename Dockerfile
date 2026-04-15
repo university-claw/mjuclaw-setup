@@ -52,6 +52,10 @@ RUN chmod +x /usr/local/bin/mju-news-alert
 COPY bin/mju-attendance-alert /usr/local/bin/mju-attendance-alert
 RUN chmod +x /usr/local/bin/mju-attendance-alert
 
+# mju-login — 비밀번호 특수문자 안전 로그인 (heredoc stdin)
+COPY bin/mju-login /usr/local/bin/mju-login
+RUN chmod +x /usr/local/bin/mju-login
+
 # ── view-server 빌드 ─────────────────────────────────────────────
 COPY package.json package-lock.json* /opt/view-server/
 WORKDIR /opt/view-server

@@ -8,14 +8,13 @@
 #   mju-news-alert deliver <discord_id>     # cron이 호출 (내부용)
 #
 # sources: comma-separated from general,scholarship,event,career (빈 문자열이면 전부)
-#
-# 동작:
-#   - /data/users/<id>/news-subscription.json에 구독 정보 저장
-#   - openclaw cron add/rm로 유저별 cron job 관리
-#   - deliver: mju-news new --since <마지막 전송 시각> 조회 후 필터링, 요약 반환
 
-set -e
-CMD="$1"; shift || true
+set -euo pipefail
+
+CMD="${1-}"
+if [[ -n "$CMD" ]]; then
+  shift
+fi
 
 usage() {
   cat <<EOF
@@ -29,68 +28,128 @@ sources: general,scholarship,event,career (comma-separated, or "" for all)
 EOF
 }
 
-user_dir() { echo "/data/users/$1"; }
-subs_file() { echo "$(user_dir "$1")/news-subscription.json"; }
-job_name() { echo "news-$1"; }
+user_dir() { printf '/data/users/%s\n' "$1"; }
+subs_file() { printf '%s/news-subscription.json\n' "$(user_dir "$1")"; }
+job_name() { printf 'news-%s\n' "$1"; }
+
+write_subscription_file() {
+  local discord_id="$1"
+  local cron_expr="$2"
+  local sources="$3"
+  local out_file="$4"
+  local dir
+  dir=$(dirname "$out_file")
+  mkdir -p "$dir"
+
+  local tmp_file
+  tmp_file=$(mktemp "$dir/.news-subscription.XXXXXX")
+
+  if ! DISCORD_ID="$discord_id" CRON_EXPR="$cron_expr" SOURCES="$sources" JOB_NAME="$(job_name "$discord_id")" TMP_FILE="$tmp_file" python3 - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+
+prefs = {
+    "enabled": True,
+    "cronExpr": os.environ["CRON_EXPR"],
+    "timezone": "Asia/Seoul",
+    "sources": [s for s in os.environ["SOURCES"].split(",") if s],
+    "cronJobName": os.environ["JOB_NAME"],
+    "subscribedAt": datetime.now(timezone.utc).isoformat(),
+    "lastSentAt": None,
+}
+
+with open(os.environ["TMP_FILE"], "w", encoding="utf-8") as f:
+    json.dump(prefs, f, indent=2, ensure_ascii=False)
+PY
+  then
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  mv "$tmp_file" "$out_file"
+}
+
+update_last_sent_at() {
+  local file_path="$1"
+  local dir
+  dir=$(dirname "$file_path")
+  local tmp_file
+  tmp_file=$(mktemp "$dir/.news-subscription.XXXXXX")
+
+  if ! FILE_PATH="$file_path" TMP_FILE="$tmp_file" python3 - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+
+with open(os.environ["FILE_PATH"], encoding="utf-8") as f:
+    payload = json.load(f)
+
+payload["lastSentAt"] = datetime.now(timezone.utc).isoformat()
+
+with open(os.environ["TMP_FILE"], "w", encoding="utf-8") as f:
+    json.dump(payload, f, indent=2, ensure_ascii=False)
+PY
+  then
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  mv "$tmp_file" "$file_path"
+}
 
 case "$CMD" in
   subscribe)
-    DISCORD_ID="$1"
-    CRON_EXPR="$2"
-    SOURCES="${3:-}"
-    [ -z "$DISCORD_ID" ] && { usage; exit 1; }
-    [ -z "$CRON_EXPR" ] && { usage; exit 1; }
+    DISCORD_ID="${1-}"
+    CRON_EXPR="${2-}"
+    SOURCES="${3-}"
+    [[ -z "$DISCORD_ID" || -z "$CRON_EXPR" ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$DISCORD_ID")
     mkdir -p "$UDIR"
 
-    # 기존 구독이 있으면 먼저 해제
-    openclaw cron rm "$(job_name "$DISCORD_ID")" 2>/dev/null || true
+    if ! openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1; then
+      :
+    fi
 
-    # 구독 파일 기록
-    python3 -c "
-import json, os
-from datetime import datetime, timezone
-prefs = {
-    'enabled': True,
-    'cronExpr': '''$CRON_EXPR''',
-    'timezone': 'Asia/Seoul',
-    'sources': [s for s in '''$SOURCES'''.split(',') if s],
-    'cronJobName': '''$(job_name "$DISCORD_ID")''',
-    'subscribedAt': datetime.now(timezone.utc).isoformat(),
-    'lastSentAt': None,
-}
-with open('$UDIR/news-subscription.json', 'w') as f:
-    json.dump(prefs, f, indent=2, ensure_ascii=False)
-print(json.dumps(prefs, ensure_ascii=False))
-"
-    # OpenClaw cron 등록
-    # cron의 announce delivery가 DM을 못 resolve하는 문제로 message send CLI를 직접 호출하게 지시
-    MSG="다음을 정확히 실행: 1) exec로 \"mju-news-alert deliver $DISCORD_ID\"를 실행. 2) stdout이 '신규 공지 없음'이거나 비어있으면 아무것도 하지 말고 <final></final>로 종료. 3) 그 외엔 exec로 'openclaw message send --channel discord --target \"user:$DISCORD_ID\" --message \"<stdout 내용>\"'를 실행 후 <final></final> 종료."
-    openclaw cron add \
+    printf -v deliver_cmd 'mju-news-alert deliver %q' "$DISCORD_ID"
+    MESSAGE="다음을 정확히 실행: exec로 $deliver_cmd 를 실행하고, 추가 명령 없이 <final></final>로 종료."
+
+    if ! openclaw cron add \
       --name "$(job_name "$DISCORD_ID")" \
       --cron "$CRON_EXPR" \
       --tz "Asia/Seoul" \
       --session isolated \
-      --message "$MSG" \
+      --message "$MESSAGE" \
       --no-deliver \
       --tools "exec" \
-      --timeout-seconds 90 > /dev/null
+      --timeout-seconds 90 >/dev/null; then
+      echo "ERR: failed to register news alert cron for $DISCORD_ID" >&2
+      exit 1
+    fi
+
+    if ! write_subscription_file "$DISCORD_ID" "$CRON_EXPR" "$SOURCES" "$(subs_file "$DISCORD_ID")"; then
+      openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
+      echo "ERR: failed to write subscription state for $DISCORD_ID" >&2
+      exit 1
+    fi
+
     echo "OK: subscribed $DISCORD_ID to $CRON_EXPR"
     ;;
 
   unsubscribe)
-    DISCORD_ID="$1"
-    [ -z "$DISCORD_ID" ] && { usage; exit 1; }
-    openclaw cron rm "$(job_name "$DISCORD_ID")" 2>/dev/null || true
+    DISCORD_ID="${1-}"
+    [[ -z "$DISCORD_ID" ]] && { usage; exit 1; }
+    openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
     rm -f "$(subs_file "$DISCORD_ID")"
     echo "OK: unsubscribed $DISCORD_ID"
     ;;
 
   status)
-    DISCORD_ID="$1"
+    DISCORD_ID="${1-}"
+    [[ -z "$DISCORD_ID" ]] && { usage; exit 1; }
     F=$(subs_file "$DISCORD_ID")
-    if [ -f "$F" ]; then
+    if [[ -f "$F" ]]; then
       cat "$F"
     else
       echo '{"enabled":false}'
@@ -98,74 +157,98 @@ print(json.dumps(prefs, ensure_ascii=False))
     ;;
 
   deliver)
-    DISCORD_ID="$1"
+    DISCORD_ID="${1-}"
+    [[ -z "$DISCORD_ID" ]] && { usage; exit 1; }
     F=$(subs_file "$DISCORD_ID")
-    [ ! -f "$F" ] && { echo "신규 공지 없음"; exit 0; }
+    [[ ! -f "$F" ]] && { echo "신규 공지 없음"; exit 0; }
 
-    # since를 마지막 전송 시각(또는 24시간 전)으로
-    SINCE=$(python3 -c "
+    SINCE=$(FILE_PATH="$F" python3 - <<'PY'
 import json
+import os
 from datetime import datetime, timezone, timedelta
-with open('$F') as f: p = json.load(f)
-last = p.get('lastSentAt')
+
+with open(os.environ["FILE_PATH"], encoding="utf-8") as f:
+    payload = json.load(f)
+
+last = payload.get("lastSentAt")
 if last:
     print(last)
 else:
     print((datetime.now(timezone.utc) - timedelta(hours=24)).isoformat())
-")
+PY
+)
 
-    SOURCES=$(python3 -c "
+    SOURCES=$(FILE_PATH="$F" python3 - <<'PY'
 import json
-with open('$F') as f: p = json.load(f)
-print(','.join(p.get('sources', [])))
-")
+import os
 
-    # 신규 공지 조회
-    RESULT=$(mju-news new --since "$SINCE" --format json 2>/dev/null || echo '{"items":[]}')
+with open(os.environ["FILE_PATH"], encoding="utf-8") as f:
+    payload = json.load(f)
 
-    # 필터링 + 요약 생성
-    python3 <<PY
-import json, sys
-from datetime import datetime, timezone
+print(",".join(payload.get("sources", [])))
+PY
+)
 
-result = json.loads('''$RESULT''')
-items = result.get('items', [])
+    if ! RESULT=$(mju-news new --since "$SINCE" --format json 2>/dev/null); then
+      RESULT='{"items":[]}'
+    fi
 
-sources_filter = [s for s in '$SOURCES'.split(',') if s]
+    CONTENT=$(RESULT_JSON="$RESULT" SOURCES="$SOURCES" python3 - <<'PY'
+import json
+import os
+import sys
+
+result = json.loads(os.environ["RESULT_JSON"])
+items = result.get("items", [])
+
+sources_filter = [s for s in os.environ["SOURCES"].split(",") if s]
 if sources_filter:
-    items = [i for i in items if i.get('source') in sources_filter]
+    items = [item for item in items if item.get("source") in sources_filter]
 
 if not items:
     print("신규 공지 없음")
     sys.exit(0)
 
-LABEL = {
-    'general': '📢 일반공지',
-    'scholarship': '💰 장학/학자금공지',
-    'event': '🎉 행사공지',
-    'career': '💼 진로/취업공지',
+label = {
+    "general": "📢 일반공지",
+    "scholarship": "💰 장학/학자금공지",
+    "event": "🎉 행사공지",
+    "career": "💼 진로/취업공지",
 }
 
 by_source = {}
-for it in items:
-    by_source.setdefault(it.get('source',''), []).append(it)
+for item in items:
+    by_source.setdefault(item.get("source", ""), []).append(item)
 
 lines = [f"🦁 새 학교 공지 {len(items)}건"]
-for src, group in by_source.items():
+for source, group in by_source.items():
     lines.append("")
-    lines.append(f"**{LABEL.get(src, src)}** ({len(group)}건)")
-    for n in group[:5]:
-        title = n.get('title','')
-        url = n.get('url','')
+    lines.append(f"**{label.get(source, source)}** ({len(group)}건)")
+    for notice in group[:5]:
+        title = notice.get("title", "")
+        url = notice.get("url", "")
         lines.append(f"- [{title}]({url})")
-print('\n'.join(lines))
 
-# lastSentAt 갱신
-import json
-with open('$F') as f: p = json.load(f)
-p['lastSentAt'] = datetime.now(timezone.utc).isoformat()
-with open('$F', 'w') as f: json.dump(p, f, indent=2, ensure_ascii=False)
+print("\n".join(lines))
 PY
+)
+
+    if [[ "$CONTENT" == "신규 공지 없음" || -z "$CONTENT" ]]; then
+      echo "신규 공지 없음"
+      exit 0
+    fi
+
+    if ! openclaw message send --channel discord --target "user:$DISCORD_ID" --message "$CONTENT"; then
+      echo "ERR: failed to deliver news alert to $DISCORD_ID" >&2
+      exit 1
+    fi
+
+    if ! update_last_sent_at "$F"; then
+      echo "ERR: delivered news alert but failed to update lastSentAt" >&2
+      exit 1
+    fi
+
+    printf '%s\n' "$CONTENT"
     ;;
 
   *)
