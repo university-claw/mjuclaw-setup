@@ -75,9 +75,29 @@ PW_END
 
 `{DISCORD_USER_ID}`는 현재 대화하는 유저의 Discord ID입니다. 모든 mju-cli 명령에 이 플래그를 붙이세요.
 
-## 데이터 표시
+## 데이터 표시 — 3단계
 
 `mju lms`, `mju msi`, `mju ucheck`, `mju library` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
+
+### 데이터 표시 절차
+
+**Step A. `mju` 명령 실행** — JSON 결과에서 `viewUrl` 추출
+
+**Step B. AI 요약 웹뷰에 주입** (유저가 웹뷰 열었을 때 "AI 요약" 카드를 채우기 위해)
+
+```bash
+# URL에서 id 추출 (예: https://.../view/abc-123)
+ID=<viewUrl의 /view/ 뒤 부분>
+# 유저에게 보낼 Discord 메시지 본문과 비슷한 markdown을 요약으로 주입
+curl -s -X PATCH "http://localhost:3001/api/view/$ID/summary" \
+  -H "Content-Type: application/json" \
+  -d '{"aiResponse":"**미제출 과제 4건** 중 3건은 마감됐고..."}'
+```
+
+aiResponse는 markdown 허용. `<script>`나 `javascript:` 같은 건 자동 sanitize됨.
+
+**Step C. Discord 응답** — 아래 "응답 형식"대로 요약 + 마스킹된 링크
+
 
 응답 예시 (mju가 자동 생성):
 ```json

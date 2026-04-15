@@ -1,5 +1,5 @@
 import express from "express";
-import { getView, storeView, startViewCleanup } from "./view-store";
+import { getView, storeView, startViewCleanup, updateViewSummary } from "./view-store";
 import { renderViewHtml, renderExpiredHtml } from "./view-renderer";
 import type { ViewEntry } from "./types";
 
@@ -73,6 +73,42 @@ app.get("/health", (_req, res) => {
 });
 
 // ── 서버 시작 ───────────────────────────────────────────────────
+
+// PATCH: AI 요약 나중에 주입 (wrapper가 rawData만 먼저 저장, 에이전트가 요약 생성 후 호출)
+app.patch("/api/view/:id/summary", (req, res) => {
+  if (!isAllowedClient(req.ip) && !isAllowedClient(req.socket.remoteAddress)) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+
+  const { id } = req.params;
+  if (!/^[0-9a-f-]{36}$/.test(id)) {
+    res.status(400).json({ error: "invalid id" });
+    return;
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const aiResponse = body?.aiResponse;
+  const summary = body?.summary;
+
+  if (typeof aiResponse !== "string" || aiResponse.length > 30000) {
+    res.status(400).json({ error: "aiResponse must be a string up to 30000 chars" });
+    return;
+  }
+
+  if (summary !== undefined && (typeof summary !== "string" || summary.length > 2000)) {
+    res.status(400).json({ error: "summary must be a string up to 2000 chars" });
+    return;
+  }
+
+  const ok = updateViewSummary(id, aiResponse, typeof summary === "string" ? summary : undefined);
+  if (!ok) {
+    res.status(404).json({ error: "not found or expired" });
+    return;
+  }
+
+  res.json({ ok: true });
+});
 
 const PORT = parseInt(process.env.VIEW_PORT || "3001", 10);
 

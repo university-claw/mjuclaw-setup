@@ -67,6 +67,16 @@ export function storeView(entry: Omit<ViewEntry, "id" | "createdAt" | "expiresAt
   return id;
 }
 
+export function updateViewSummary(id: string, aiResponse: string, summary?: string): boolean {
+  const entry = store.get(id);
+  if (!entry) return false;
+  if (Date.now() > entry.expiresAt) return false;
+  entry.aiResponse = aiResponse;
+  if (summary !== undefined) entry.summary = summary;
+  scheduleWrite();
+  return true;
+}
+
 export function getView(id: string): ViewEntry | null {
   const entry = store.get(id);
   if (!entry) return null;
