@@ -115,6 +115,29 @@ function renderData(dataType: string, data: unknown): string {
   return renderGeneric(data);
 }
 
+// ── 공통 타입 ───────────────────────────────────────────────────
+
+type AssignmentItem = {
+  title?: string;
+  courseTitle?: string;
+  statusLabel?: string;
+  statusText?: string;
+  dueLabel?: string;
+  dueAt?: string;
+  isExpired?: boolean;
+  isSubmitted?: boolean;
+  weekLabel?: string;
+};
+
+type NoticeItem = {
+  title?: string;
+  courseTitle?: string;
+  postedAt?: string;
+  previewText?: string;
+  viewCount?: number;
+  isUnread?: boolean;
+};
+
 // ── 시간표 ──────────────────────────────────────────────────────
 
 function renderTimetable(data: unknown): string {
@@ -200,31 +223,47 @@ function renderActionItems(data: unknown): string {
   const d = data as Record<string, unknown>;
   let html = "";
 
-  const unsub = d.unsubmittedAssignments as Array<{ title: string; courseTitle: string; dueLabel?: string; isExpired?: boolean }> | undefined;
+  const unsub = d.unsubmittedAssignments as AssignmentItem[] | undefined;
   if (unsub?.length) {
     html += `<div class="card"><div class="card-title">미제출 과제 (${unsub.length}건)</div>`;
     for (const a of unsub) {
-      const badgeCls = a.isExpired ? "badge-red" : "badge-yellow";
-      const badgeText = a.isExpired ? "만료" : "진행중";
-      html += `<div class="item"><div class="item-title">${esc(a.title)} <span class="badge ${badgeCls}">${badgeText}</span></div><div class="item-sub">${esc(a.courseTitle)}${a.dueLabel ? ` · ${esc(a.dueLabel)}` : ""}</div></div>`;
+      const expired = a.isExpired === true || a.statusLabel === "마감";
+      const badgeCls = expired ? "badge-red" : "badge-yellow";
+      const badgeText = a.statusLabel || (expired ? "만료" : "진행중");
+      const dueLabel = a.dueLabel || a.dueAt || a.statusText || "";
+      const sub = [a.courseTitle, a.weekLabel, dueLabel].filter(Boolean).join(" · ");
+      html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${esc(badgeText)}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
     }
     html += `</div>`;
   }
 
-  const due = d.dueAssignments as Array<{ title: string; courseTitle: string; dueLabel?: string }> | undefined;
+  const due = d.dueAssignments as AssignmentItem[] | undefined;
   if (due?.length) {
     html += `<div class="card"><div class="card-title">마감 임박 (${due.length}건)</div>`;
     for (const a of due) {
-      html += `<div class="item"><div class="item-title">${esc(a.title)}</div><div class="item-sub">${esc(a.courseTitle)} · ${esc(a.dueLabel || "")}</div></div>`;
+      const dueLabel = a.dueLabel || a.dueAt || a.statusText || "";
+      const sub = [a.courseTitle, a.weekLabel, dueLabel].filter(Boolean).join(" · ");
+      html += `<div class="item"><div class="item-title">${esc(a.title || "")}</div><div class="item-sub">${esc(sub)}</div></div>`;
     }
     html += `</div>`;
   }
 
-  const notices = d.unreadNotices as Array<{ title: string; courseTitle: string }> | undefined;
+  const notices = d.unreadNotices as NoticeItem[] | undefined;
   if (notices?.length) {
     html += `<div class="card"><div class="card-title">안읽은 공지 (${notices.length}건)</div>`;
     for (const n of notices) {
-      html += `<div class="item"><div class="item-title">${esc(n.title)}</div><div class="item-sub">${esc(n.courseTitle)}</div></div>`;
+      const sub = [n.courseTitle, n.postedAt].filter(Boolean).join(" · ");
+      html += `<div class="item"><div class="item-title">${esc(n.title || "")}</div><div class="item-sub">${esc(sub)}</div></div>`;
+    }
+    html += `</div>`;
+  }
+
+  const online = d.incompleteOnlineWeeks as Array<{ courseTitle?: string; weekLabel?: string; lectureTitle?: string }> | undefined;
+  if (online?.length) {
+    html += `<div class="card"><div class="card-title">미수강 온라인 (${online.length}건)</div>`;
+    for (const o of online) {
+      const sub = [o.courseTitle, o.weekLabel].filter(Boolean).join(" · ");
+      html += `<div class="item"><div class="item-title">${esc(o.lectureTitle || o.weekLabel || "")}</div><div class="item-sub">${esc(sub)}</div></div>`;
     }
     html += `</div>`;
   }
@@ -235,14 +274,23 @@ function renderActionItems(data: unknown): string {
 // ── 과제 리스트 ─────────────────────────────────────────────────
 
 function renderAssignmentList(data: unknown): string {
-  const items = Array.isArray(data) ? data : (data as { items?: unknown[] }).items || [];
+  // mju-cli는 +unsubmitted → {assignments: [...]}, +due-assignments → {assignments: [...]}, items도 지원
+  const items: AssignmentItem[] = Array.isArray(data)
+    ? (data as AssignmentItem[])
+    : ((data as { assignments?: AssignmentItem[]; items?: AssignmentItem[] }).assignments
+        || (data as { items?: AssignmentItem[] }).items
+        || []);
   if (!items.length) return "";
 
-  let html = `<div class="card"><div class="card-title">과제 상세</div>`;
-  for (const a of items as Array<{ title: string; courseTitle: string; dueLabel?: string; isExpired?: boolean }>) {
-    const badgeCls = a.isExpired ? "badge-red" : "badge-yellow";
-    const badgeText = a.isExpired ? "만료" : "진행중";
-    html += `<div class="item"><div class="item-title">${esc(a.title)} <span class="badge ${badgeCls}">${badgeText}</span></div><div class="item-sub">${esc(a.courseTitle)}${a.dueLabel ? ` · ${esc(a.dueLabel)}` : ""}</div></div>`;
+  let html = `<div class="card"><div class="card-title">과제 상세 (${items.length}건)</div>`;
+  for (const a of items) {
+    // 마감/만료 여부: statusLabel이 "마감"이거나 isExpired가 true
+    const expired = a.isExpired === true || a.statusLabel === "마감";
+    const badgeCls = expired ? "badge-red" : "badge-yellow";
+    const badgeText = a.statusLabel || (expired ? "만료" : "진행중");
+    const dueLabel = a.dueLabel || a.dueAt || a.statusText || "";
+    const sub = [a.courseTitle, a.weekLabel, dueLabel].filter(Boolean).join(" · ");
+    html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${esc(badgeText)}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
   }
   return html + `</div>`;
 }
@@ -250,12 +298,22 @@ function renderAssignmentList(data: unknown): string {
 // ── 공지 리스트 ─────────────────────────────────────────────────
 
 function renderNoticeList(data: unknown): string {
-  const items = Array.isArray(data) ? data : (data as { items?: unknown[] }).items || [];
+  // +unread-notices → {notices: [...]}, items도 지원
+  const items: NoticeItem[] = Array.isArray(data)
+    ? (data as NoticeItem[])
+    : ((data as { notices?: NoticeItem[]; items?: NoticeItem[] }).notices
+        || (data as { items?: NoticeItem[] }).items
+        || []);
   if (!items.length) return "";
 
-  let html = `<div class="card"><div class="card-title">공지 상세</div>`;
-  for (const n of items as Array<{ title: string; courseTitle?: string; postedAt?: string }>) {
-    html += `<div class="item"><div class="item-title">${esc(n.title)}</div><div class="item-sub">${esc(n.courseTitle || "")}${n.postedAt ? ` · ${esc(n.postedAt)}` : ""}</div></div>`;
+  let html = `<div class="card"><div class="card-title">공지 상세 (${items.length}건)</div>`;
+  for (const n of items) {
+    const sub = [n.courseTitle, n.postedAt].filter(Boolean).join(" · ");
+    html += `<div class="item"><div class="item-title">${esc(n.title || "")}</div><div class="item-sub">${esc(sub)}</div>`;
+    if (n.previewText) {
+      html += `<div class="item-sub" style="margin-top:4px;color:#666;">${esc(n.previewText.slice(0, 200))}</div>`;
+    }
+    html += `</div>`;
   }
   return html + `</div>`;
 }
