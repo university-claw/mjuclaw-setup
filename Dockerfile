@@ -66,6 +66,12 @@ RUN npx tsc -p src/tsconfig.json
 # ── 유저 데이터 디렉토리 (root에서 생성 후 agent에게 소유권) ────
 RUN mkdir -p /data/users && chown agent:agent /data/users
 
+# ── mju-news 데이터 디렉토리 (volume 마운트 경로, agent 쓰기 필요) ────
+# 이 디렉토리가 docker-compose의 news-data volume과 매핑됨.
+# named volume 첫 마운트 시 target 경로의 기존 소유권/퍼미션을 유지하므로
+# 여기서 미리 agent 소유로 만들어두면 volume에서도 agent가 쓸 수 있음.
+RUN mkdir -p /opt/mju-news/data && chown -R agent:agent /opt/mju-news/data
+
 # ── OpenClaw 디렉토리 구조 ──────────────────────────────────────
 USER agent
 WORKDIR /home/agent
