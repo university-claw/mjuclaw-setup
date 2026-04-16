@@ -4,7 +4,10 @@ import type { ViewEntry } from "./types";
 
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
-  const aiSummaryHtml = renderMarkdown(entry.aiResponse);
+  const aiResponseEffective = entry.aiResponse?.trim()
+    ? entry.aiResponse
+    : generateFallbackSummary(entry.dataType, entry.rawData);
+  const aiSummaryHtml = renderMarkdown(aiResponseEffective);
   const time = new Date(entry.createdAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
   return `<!DOCTYPE html>
@@ -227,12 +230,12 @@ function renderActionItems(data: unknown): string {
   if (unsub?.length) {
     html += `<div class="card"><div class="card-title">미제출 과제 (${unsub.length}건)</div>`;
     for (const a of unsub) {
-      const expired = a.isExpired === true || a.statusLabel === "마감";
+      const expired = isAssignmentExpired(a);
       const badgeCls = expired ? "badge-red" : "badge-yellow";
-      const badgeText = a.statusLabel || (expired ? "만료" : "진행중");
-      const dueLabel = a.dueLabel || a.dueAt || a.statusText || "";
-      const sub = [a.courseTitle, a.weekLabel, dueLabel].filter(Boolean).join(" · ");
-      html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${esc(badgeText)}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
+      const badgeText = expired ? "만료" : "진행중";
+      const rawDue = a.dueLabel || a.dueAt || (a.statusText !== "만료됨" ? a.statusText : "") || "";
+      const sub = [a.courseTitle, a.weekLabel, rawDue].filter(Boolean).join(" · ");
+      html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${badgeText}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
     }
     html += `</div>`;
   }
@@ -273,6 +276,17 @@ function renderActionItems(data: unknown): string {
 
 // ── 과제 리스트 ─────────────────────────────────────────────────
 
+// 실제 만료 판정:
+//   1. isExpired === true
+//   2. statusText === "만료됨" (LMS가 명시)
+//   ※ statusLabel === "마감"은 '제출 마감이 있는 과제'라는 분류 레이블일 뿐,
+//      실제 만료 여부가 아님 (진행중인 과제도 statusLabel: "마감"이 붙음)
+function isAssignmentExpired(a: AssignmentItem): boolean {
+  if (a.isExpired === true) return true;
+  if (typeof a.statusText === "string" && a.statusText.trim() === "만료됨") return true;
+  return false;
+}
+
 function renderAssignmentList(data: unknown): string {
   // mju-cli는 +unsubmitted → {assignments: [...]}, +due-assignments → {assignments: [...]}, items도 지원
   const items: AssignmentItem[] = Array.isArray(data)
@@ -284,13 +298,13 @@ function renderAssignmentList(data: unknown): string {
 
   let html = `<div class="card"><div class="card-title">과제 상세 (${items.length}건)</div>`;
   for (const a of items) {
-    // 마감/만료 여부: statusLabel이 "마감"이거나 isExpired가 true
-    const expired = a.isExpired === true || a.statusLabel === "마감";
+    const expired = isAssignmentExpired(a);
     const badgeCls = expired ? "badge-red" : "badge-yellow";
-    const badgeText = a.statusLabel || (expired ? "만료" : "진행중");
-    const dueLabel = a.dueLabel || a.dueAt || a.statusText || "";
-    const sub = [a.courseTitle, a.weekLabel, dueLabel].filter(Boolean).join(" · ");
-    html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${esc(badgeText)}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
+    const badgeText = expired ? "만료" : "진행중";
+    // dueLabel 우선, 그 다음 dueAt, 마지막으로 statusText (단 '만료됨'이면 표시 의미 없음)
+    const rawDue = a.dueLabel || a.dueAt || (a.statusText !== "만료됨" ? a.statusText : "") || "";
+    const sub = [a.courseTitle, a.weekLabel, rawDue].filter(Boolean).join(" · ");
+    html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${badgeText}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
   }
   return html + `</div>`;
 }
@@ -443,6 +457,103 @@ function renderGeneric(data: unknown): string {
 function renderMarkdown(markdown: string): string {
   const rendered = marked.parse(markdown, { async: false }) as string;
   return DOMPurify.sanitize(rendered);
+}
+
+// aiResponse가 비어있을 때 rawData 기반으로 기본 요약 markdown 생성.
+// 에이전트가 PATCH 안 해도 웹뷰 상단이 비어보이지 않게.
+function generateFallbackSummary(dataType: string, rawData: unknown): string {
+  if (!rawData || typeof rawData !== "object") {
+    return "_에이전트 요약이 아직 도착하지 않았어요. 아래 데이터를 참고해주세요._";
+  }
+  const d = rawData as Record<string, unknown>;
+
+  const pickItems = (...keys: string[]): unknown[] => {
+    for (const k of keys) {
+      const v = d[k];
+      if (Array.isArray(v)) return v;
+    }
+    return [];
+  };
+
+  const countLine = (label: string, items: unknown[]): string =>
+    items.length ? `- **${label}**: ${items.length}건` : "";
+
+  switch (dataType) {
+    case "unsubmitted":
+    case "due-assignments": {
+      const items = pickItems("assignments", "items");
+      if (!items.length) return "_미제출/마감 임박 과제가 없습니다._";
+      const expired = (items as AssignmentItem[]).filter(isAssignmentExpired).length;
+      const pending = items.length - expired;
+      return [
+        `총 **${items.length}건**의 과제가 있습니다.`,
+        pending ? `- 🟡 진행중: ${pending}건` : "",
+        expired ? `- 🔴 만료: ${expired}건` : "",
+        "",
+        "아래 목록에서 자세한 내용을 확인하세요.",
+      ].filter(Boolean).join("\n");
+    }
+    case "unread-notices": {
+      const items = pickItems("notices", "items");
+      if (!items.length) return "_안 읽은 공지가 없습니다._";
+      return `안 읽은 공지 **${items.length}건**이 있습니다. 아래에서 자세한 내용을 확인하세요.`;
+    }
+    case "action-items": {
+      const unsub = pickItems("unsubmittedAssignments");
+      const due = pickItems("dueAssignments");
+      const notices = pickItems("unreadNotices");
+      const online = pickItems("incompleteOnlineWeeks");
+      const lines = [
+        countLine("미제출 과제", unsub),
+        countLine("마감 임박 과제", due),
+        countLine("안 읽은 공지", notices),
+        countLine("미수강 온라인", online),
+      ].filter(Boolean);
+      if (!lines.length) return "_지금 할 일이 없습니다. 훌륭해요!_";
+      return ["**지금 해야 할 일 요약**", "", ...lines].join("\n");
+    }
+    case "timetable": {
+      const entries = pickItems("entries");
+      if (!entries.length) return "_등록된 시간표가 없습니다._";
+      return `이번 학기 시간표 **${entries.length}개 수업**이 등록되어 있습니다.`;
+    }
+    case "courses": {
+      const items = pickItems("courses", "items");
+      if (!items.length) return "_수강 과목이 없습니다._";
+      return `총 **${items.length}개 과목**을 수강 중입니다.`;
+    }
+    case "grades": {
+      const items = pickItems("items", "grades");
+      if (!items.length) return "_성적 정보가 없습니다._";
+      return `**${items.length}개 과목**의 성적이 있습니다. 아래에서 자세한 내용을 확인하세요.`;
+    }
+    case "graduation": {
+      const gaps = pickItems("creditGaps");
+      if (!gaps.length) return "_졸업요건 정보가 없습니다._";
+      const shortages = (gaps as Array<{ gap?: number }>).filter((g) => (g.gap ?? 0) > 0).length;
+      return shortages
+        ? `졸업요건 중 **${shortages}개 영역**이 부족합니다.`
+        : `**모든 졸업요건을 충족**했습니다. 🎉`;
+    }
+    case "attendance": {
+      const course = (d.course as { courseTitle?: string } | undefined)?.courseTitle;
+      const s = d.summary as { attendedCount?: number; absentCount?: number } | undefined;
+      if (!s) return "_출석 정보를 가져오지 못했습니다._";
+      return [
+        course ? `**${course}** 출석 현황` : "**출석 현황**",
+        "",
+        `- 출석: ${s.attendedCount ?? 0}회`,
+        `- 결석: ${s.absentCount ?? 0}회`,
+      ].join("\n");
+    }
+    case "news": {
+      const items = pickItems("items");
+      if (!items.length) return "_새 공지가 없습니다._";
+      return `새 학교 공지 **${items.length}건**이 있습니다.`;
+    }
+    default:
+      return "_에이전트 요약이 아직 도착하지 않았어요. 아래 데이터를 참고해주세요._";
+  }
 }
 
 // ── HTML 이스케이프 ─────────────────────────────────────────────
