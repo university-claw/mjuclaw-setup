@@ -25,6 +25,33 @@ VERSION_MARKER="/home/agent/.openclaw/.mjuclaw-schema-version"
 mkdir -p /home/agent/.openclaw
 chmod 700 /home/agent/.openclaw
 
+# ── Workspace 프롬프트·스킬 동기화 (volume shadow 회피) ───────────
+# agent-data named volume이 /home/agent/.openclaw를 덮어써서 이미지의
+# workspace/*.md와 skills/ 업데이트가 그대로는 반영되지 않는다.
+# Dockerfile이 image의 source of truth를 /opt/mjuclaw-workspace-template/ 에
+# 두므로, 시작할 때마다 여기서 volume 쪽으로 밀어넣는다.
+# --delete로 이미지에서 삭제된 항목까지 반영하되, 그 외 runtime 파일
+# (openclaw.json, cron/, canvas/, sessions/, view-store.json 등)은 건드리지 않는다.
+TEMPLATE_DIR="/opt/mjuclaw-workspace-template/workspace"
+WORKSPACE_DIR="/home/agent/.openclaw/workspace"
+if [ -d "$TEMPLATE_DIR" ]; then
+  mkdir -p "$WORKSPACE_DIR/skills"
+  # -rlt: 재귀+심볼릭링크+mtime만 보존. --no-owner/--no-group로 chgrp 시도 회피
+  # (agent 유저는 다른 UID로 올라간 파일의 group을 바꿀 권한이 없다).
+  rsync -rlt --delete --no-owner --no-group \
+    "$TEMPLATE_DIR/skills/" "$WORKSPACE_DIR/skills/" || {
+      echo "WARN: skills rsync failed, falling back to cp" >&2
+      rm -rf "$WORKSPACE_DIR/skills"
+      cp -r "$TEMPLATE_DIR/skills" "$WORKSPACE_DIR/"
+    }
+  # 루트 *.md (BOOTSTRAP/IDENTITY/SOUL 등)는 skills와 별도로 덮어쓰기.
+  # (rsync 최상위에 --delete를 걸면 skills/ 밖의 runtime 파일이 지워질 수 있어 분리)
+  for src in "$TEMPLATE_DIR"/*.md; do
+    [ -f "$src" ] && cp -f "$src" "$WORKSPACE_DIR/"
+  done
+  echo "Synced workspace template → $WORKSPACE_DIR"
+fi
+
 # ── Config 버전 체크 ────────────────────────────────────────────
 regenerate_config=true
 if [ -f "$CONFIG_PATH" ] && [ -f "$VERSION_MARKER" ]; then

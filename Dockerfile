@@ -73,6 +73,22 @@ RUN mkdir -p /data/users && chown agent:agent /data/users
 # agent가 공지 상세 조회 시 원본 첨부/이미지를 on-demand로 읽을 때 사용.
 RUN mkdir -p /data/assets
 
+# ── Workspace 프롬프트/스킬 template (volume shadow 회피) ─────────
+# /home/agent/.openclaw는 named volume(agent-data)이 마운트되는 경로라서
+# 이미지의 workspace/*.md 변경이 빌드 후에도 볼륨에 반영되지 않는다 (shadow).
+# 그래서 이미지의 source of truth를 /opt/mjuclaw-workspace-template/ 에 따로 두고,
+# entrypoint.sh가 컨테이너 시작마다 volume 내 workspace/로 rsync한다.
+RUN mkdir -p /opt/mjuclaw-workspace-template/workspace/skills \
+    && chown -R agent:agent /opt/mjuclaw-workspace-template
+COPY --chown=agent:agent mju-cli/skills/ /opt/mjuclaw-workspace-template/workspace/skills/
+COPY --chown=agent:agent mju-news/skills/ /opt/mjuclaw-workspace-template/workspace/skills/
+COPY --chown=agent:agent skills/ /opt/mjuclaw-workspace-template/workspace/skills/
+COPY --chown=agent:agent workspace/*.md /opt/mjuclaw-workspace-template/workspace/
+
+# rsync: entrypoint가 template → volume 복사할 때 사용
+RUN apt-get update && apt-get install -y --no-install-recommends rsync \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── OpenClaw 디렉토리 구조 ──────────────────────────────────────
 USER agent
 WORKDIR /home/agent
