@@ -138,19 +138,10 @@ done
 # ── 초기 doctor 실행 ────────────────────────────────────────────
 openclaw doctor --fix > /dev/null 2>&1 || true
 
-# ── 공용 mju-news scrape cron 자동 등록 ─────────────────────────
-# 이미 있으면 스킵 (ID는 다를 수 있으니 이름 기준)
-if ! openclaw cron list --json 2>/dev/null | grep -q '"mju-news-scrape"'; then
-  openclaw cron add \
-    --name "mju-news-scrape" \
-    --every "30m" \
-    --session isolated \
-    --message "mju-news scrape --format json 실행해서 최신 공지 수집. 내부 기록용이므로 응답 불필요." \
-    --no-deliver \
-    --tools "exec" \
-    --timeout-seconds 120 > /dev/null 2>&1 || true
-  echo "Registered mju-news-scrape cron (every 30m)"
-fi
+# ── 구 mju-news-scrape cron 제거 ─────────────────────────────────
+# v2.0.0에서 스크래핑 책임은 호스트의 mju-public-data-worker가 가져갔다.
+# 예전 버전 위에서 업그레이드한 설치본이면 남아있을 수 있으므로 정리한다.
+openclaw cron rm "mju-news-scrape" > /dev/null 2>&1 || true
 
 echo ""
 echo "  ┌─────────────────────────────────────────────┐"

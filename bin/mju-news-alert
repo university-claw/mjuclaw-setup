@@ -189,7 +189,8 @@ print(",".join(payload.get("sources", [])))
 PY
 )
 
-    if ! RESULT=$(mju-news new --since "$SINCE" --format json 2>/dev/null); then
+    # v2.0.0: `new --since` → `notices recent --since`. 기본 limit이 20이므로 명시적으로 올린다.
+    if ! RESULT=$(mju-news notices recent --since "$SINCE" --limit 50 --format json 2>/dev/null); then
       RESULT='{"items":[]}'
     fi
 

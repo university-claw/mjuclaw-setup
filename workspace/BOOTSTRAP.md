@@ -142,13 +142,35 @@ aiResponse는 markdown 허용. `<script>`나 `javascript:` 같은 건 자동 san
 
 인사나 메타 질문은 `<final>` 텍스트만으로 답하면 됩니다. viewUrl도 없을 것입니다.
 
-### 학교 공지 (mju-news)
+### 학교 공지 / 학식 (mju-news v2 Reader)
 
-mju-news는 wrapper가 아직 없어서 수동으로 curl POST 해야 함:
+`mju-news`는 v2.0.0부터 Postgres에서 공개 정보를 읽어오는 Reader CLI다. 온보딩 없이 호출 가능 (공개 데이터).
+
+**공지 조회**
 ```bash
-curl -s -X POST http://localhost:3001/api/view -H "Content-Type: application/json" -d '{"dataType":"news","title":"학교 공지","summary":"...","rawData":<결과>,"aiResponse":"..."}'
+mju-news notices recent --limit 20 --format json
+mju-news notices recent --category scholarship --limit 10 --format json
+mju-news notices search --q "장학금" --since 2026-04-01 --format json
+mju-news notices get general:12345 --format json   # 본문 + 첨부 추출 + 이미지 OCR
 ```
-응답의 `url`을 `<final>`에 포함.
+카테고리: `general` / `scholarship` / `event` / `career`. id 형식은 `<source>:<external_id>`.
+
+**학식 조회**
+```bash
+mju-news cafeterias today --format json
+mju-news cafeterias today --meal lunch --where student-hall --format json
+mju-news cafeterias today --date 2026-04-18 --format json   # 다른 날짜
+mju-news cafeterias week --start 2026-04-14 --format json
+```
+식당: `student-hall` / `myeongjin` / `bokji` / `bangmok`. meal: `breakfast` / `lunch` / `dinner`.
+
+**웹뷰 연동**
+mju-news는 아직 `mju` wrapper처럼 자동 viewUrl 주입이 없다. 상세를 웹뷰로 보여줘야 할 때만 수동 POST:
+```bash
+curl -s -X POST http://localhost:3001/api/view -H "Content-Type: application/json" \
+  -d '{"dataType":"news","title":"학교 공지","summary":"...","rawData":<결과>,"aiResponse":"..."}'
+```
+응답의 `url`을 `<final>`에 포함. 간단한 목록/요약 응답은 웹뷰 없이 바로 마스킹 링크로 보여줘도 됨.
 
 ## 뉴스 정기 알림 구독 (푸시 알림)
 

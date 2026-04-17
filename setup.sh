@@ -8,6 +8,11 @@
 #   1. mju-cli, mju-news를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
 #   2. .env 파일이 없으면 .env.example을 복사하고 유저에게 편집 안내
 #   3. docker compose build + up
+#
+# 주의: 토폴로지 A(하이브리드) 전제.
+#   - Postgres는 호스트에 직접 설치되어 있어야 한다 (Homebrew / apt 등).
+#   - mju-public-data-worker는 별도 레포를 호스트에서 직접 돌린다
+#     (이 setup은 clone 하지 않는다). 참고: ../mju-public-data-worker
 
 set -e
 cd "$(dirname "$0")"
@@ -48,6 +53,8 @@ clone_or_pull() {
 }
 
 clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git
+# mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
+# dev 브랜치에 변경이 진행 중이면 아래 한 줄을 `git checkout dev`로 교체.
 clone_or_pull mju-news https://github.com/university-claw/mju-news.git
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
@@ -69,9 +76,9 @@ echo "  ✓ .env 존재"
 
 # 필수값 체크
 missing=()
-for key in DISCORD_BOT_TOKEN GEMINI_API_KEY; do
+for key in DISCORD_BOT_TOKEN GEMINI_API_KEY PGPASSWORD STORAGE_LOCAL_ROOT; do
   val=$(grep "^$key=" .env | cut -d= -f2-)
-  if [ -z "$val" ] || [[ "$val" == your_* ]]; then
+  if [ -z "$val" ] || [[ "$val" == your_* ]] || [[ "$val" == "change-me" ]] || [[ "$val" == /absolute/* ]]; then
     missing+=("$key")
   fi
 done
