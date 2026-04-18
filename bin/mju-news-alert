@@ -189,22 +189,72 @@ print(",".join(payload.get("sources", [])))
 PY
 )
 
-    # v2.0.0: `new --since` → `notices recent --since`. 기본 limit이 20이므로 명시적으로 올린다.
-    if ! RESULT=$(mju-news notices recent --since "$SINCE" --limit 50 --format json 2>/dev/null); then
-      RESULT='{"items":[]}'
+    # v2.0.0: `new --since` → `notices recent --since`.
+    # 카테고리 구독자는 CLI 레벨에서 `--category`를 내려 각 카테고리별로 독립 조회해야
+    # "general 50건에 묻힌 scholarship" 같은 누락이 안 생긴다 (issue #4 High-1).
+    # 조회 실패는 반드시 exit 1로 전파 — 빈 배열 fallback은 장애를 성공으로 위장한다 (issue #4 High-2).
+    STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-alert-stderr.XXXXXX")
+    trap 'rm -f "$STDERR_FILE"' EXIT
+
+    if [[ -z "$SOURCES" ]]; then
+      categories=("")   # 빈 원소 하나 = 카테고리 필터 없이 한 번만 호출
+    else
+      IFS=',' read -ra categories <<< "$SOURCES"
     fi
 
-    CONTENT=$(RESULT_JSON="$RESULT" SOURCES="$SOURCES" python3 - <<'PY'
+    # 카테고리 수에 비례해 limit을 조정. 단일 전체 조회일 땐 50, 카테고리별이면 각 30건.
+    if [[ -z "$SOURCES" ]]; then
+      per_call_limit=50
+    else
+      per_call_limit=30
+    fi
+
+    ALL_ITEMS='[]'
+    for cat in "${categories[@]}"; do
+      if [[ -z "$cat" ]]; then
+        mju_args=(notices recent --since "$SINCE" --limit "$per_call_limit" --format json)
+      else
+        mju_args=(notices recent --category "$cat" --since "$SINCE" --limit "$per_call_limit" --format json)
+      fi
+
+      if ! RESULT=$(mju-news "${mju_args[@]}" 2>"$STDERR_FILE"); then
+        stderr_text=$(cat "$STDERR_FILE" 2>/dev/null || true)
+        echo "ERR: mju-news-alert[$DISCORD_ID] fetch failed (category='${cat:-all}'): ${stderr_text:-<no stderr>}" >&2
+        exit 1
+      fi
+
+      ALL_ITEMS=$(RESULT_JSON="$RESULT" ACCUM_JSON="$ALL_ITEMS" python3 - <<'PY'
+import json
+import os
+
+accum = json.loads(os.environ["ACCUM_JSON"])
+items = json.loads(os.environ["RESULT_JSON"]).get("items", [])
+accum.extend(items)
+print(json.dumps(accum, ensure_ascii=False))
+PY
+)
+    done
+
+    CONTENT=$(ITEMS_JSON="$ALL_ITEMS" python3 - <<'PY'
 import json
 import os
 import sys
 
-result = json.loads(os.environ["RESULT_JSON"])
-items = result.get("items", [])
+items = json.loads(os.environ["ITEMS_JSON"])
 
-sources_filter = [s for s in os.environ["SOURCES"].split(",") if s]
-if sources_filter:
-    items = [item for item in items if item.get("source") in sources_filter]
+# 카테고리별 호출 병합 결과에 혹시 남아있을 수 있는 중복(id 기준) 제거.
+seen = set()
+deduped = []
+for item in items:
+    key = item.get("id") or (item.get("source"), item.get("externalId"))
+    if key in seen:
+        continue
+    seen.add(key)
+    deduped.append(item)
+items = deduped
+
+# 최신순 정렬 (publishedAt desc). 빠진 필드 방어.
+items.sort(key=lambda it: it.get("publishedAt", ""), reverse=True)
 
 if not items:
     print("신규 공지 없음")
