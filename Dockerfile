@@ -41,10 +41,11 @@ WORKDIR /opt/mju-news
 RUN npm ci --include=dev
 COPY mju-news/ /opt/mju-news/
 RUN npx tsc
-# skill의 requires.bins: ["mju-news"]에 매핑 — node wrapper script.
+# skill의 requires.bins: ["mju-news"]에 매핑 — view-server 자동 POST wrapper
+# (mju 래퍼와 동일 패턴: notices/cafeterias 결과를 view-server에 POST 후 viewUrl 주입).
 # v2에서는 --data-dir 플래그가 사라졌고, DB 연결은 PG* 환경변수로 자동 구성된다.
-RUN printf '#!/bin/sh\nexec node /opt/mju-news/dist/main.js "$@"\n' > /usr/local/bin/mju-news \
-    && chmod +x /usr/local/bin/mju-news
+COPY bin/mju-news /usr/local/bin/mju-news
+RUN chmod +x /usr/local/bin/mju-news
 
 # mju-news-alert — 유저별 뉴스 알림 구독/해제/전달 helper
 COPY bin/mju-news-alert /usr/local/bin/mju-news-alert
@@ -64,6 +65,8 @@ WORKDIR /opt/view-server
 RUN npm install --include=dev
 COPY src/ /opt/view-server/src/
 RUN npx tsc -p src/tsconfig.json
+# 정적 자산 (마스코트 로고 등). view-server의 /static/* 라우트로 서빙.
+COPY public/ /opt/view-server/public/
 
 # ── 유저 데이터 디렉토리 (root에서 생성 후 agent에게 소유권) ────
 RUN mkdir -p /data/users && chown agent:agent /data/users

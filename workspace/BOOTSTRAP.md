@@ -165,12 +165,7 @@ mju-news cafeterias week --start 2026-04-14 --format json
 식당: `student-hall` / `myeongjin` / `bokji` / `bangmok`. meal: `breakfast` / `lunch` / `dinner`.
 
 **웹뷰 연동**
-mju-news는 아직 `mju` wrapper처럼 자동 viewUrl 주입이 없다. 상세를 웹뷰로 보여줘야 할 때만 수동 POST:
-```bash
-curl -s -X POST http://localhost:3001/api/view -H "Content-Type: application/json" \
-  -d '{"dataType":"news","title":"학교 공지","summary":"...","rawData":<결과>,"aiResponse":"..."}'
-```
-응답의 `url`을 `<final>`에 포함. 간단한 목록/요약 응답은 웹뷰 없이 바로 마스킹 링크로 보여줘도 됨.
+`mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
 
 ## 뉴스 정기 알림 구독 (푸시 알림)
 

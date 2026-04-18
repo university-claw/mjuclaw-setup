@@ -25,6 +25,8 @@ const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
   "unread-notices": { kicker: "NOTICES", detail: "LMS 공지" },
   attendance: { kicker: "ATTENDANCE", detail: "출석" },
   news: { kicker: "PUBLIC NOTICES", detail: "학교 공지" },
+  "news-detail": { kicker: "NOTICE DETAIL", detail: "공지 상세" },
+  cafeteria: { kicker: "CAFETERIA", detail: "학식" },
 };
 
 function metaFor(dataType: string): { kicker: string; detail: string } {
@@ -125,20 +127,11 @@ ${pageStyles()}
 </html>`;
 }
 
-// ── 로고 마크 (SVG) ─────────────────────────────────────────────
-// 실제 캐릭터 로고 파일이 생기면 `<img src="/static/logo.svg" ...>` 같은 식으로 교체.
-// 지금은 명지 M을 serif 기반으로 각인한 wordmark로 graceful fallback.
+// ── 로고 마크 ───────────────────────────────────────────────────
+// 캐릭터 로고 `public/myongmyong.png`가 view-server `/static/`로 서빙됨.
+// 이미지 로드 실패 시 브라우저 기본 alt 표시, JS 없이 순수 HTML로.
 function logoMark(): string {
-  return `<svg viewBox="0 0 56 56" role="img" aria-label="묭묭이" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="mj-mark-g" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="var(--mj-ink)"/>
-        <stop offset="100%" stop-color="var(--mj-blue)"/>
-      </linearGradient>
-    </defs>
-    <rect x="1" y="1" width="54" height="54" rx="14" ry="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-opacity="0.55"/>
-    <text x="28" y="38" text-anchor="middle" font-family="'Iowan Old Style','Apple Garamond',Garamond,Georgia,serif" font-weight="600" font-size="30" fill="url(#mj-mark-g)" letter-spacing="-0.5">M</text>
-  </svg>`;
+  return `<img src="/static/myongmyong.png" alt="묭묭이" width="56" height="56" decoding="async" loading="eager">`;
 }
 
 // ── CSS ─────────────────────────────────────────────────────────
@@ -614,6 +607,8 @@ function renderData(dataType: string, data: unknown): string {
     "unread-notices": renderNoticeList,
     attendance: renderAttendanceText,
     news: renderNewsList,
+    "news-detail": renderNewsDetail,
+    cafeteria: renderCafeteriaMenus,
   };
   const renderer = renderers[dataType];
   if (renderer) return renderer(data);
@@ -854,6 +849,168 @@ function renderNewsList(data: unknown): string {
     html += `<div class="item"><div class="item-title"><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></div>${meta ? `<div class="item-sub">${meta}</div>` : ""}</div>`;
   }
   return html + `</section>`;
+}
+
+// ── 학교 공지 상세 (mju-news notices get) ──────────────────────
+type NoticeDetailAttachment = {
+  fileName?: string;
+  downloadUrl?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  extraction?: { status?: string; extractorType?: string | null; text?: string | null; charCount?: number | null; error?: string | null } | null;
+};
+type NoticeDetailImage = {
+  imageUrl?: string;
+  altText?: string | null;
+  ocr?: { status?: string; text?: string | null; confidence?: number | null; language?: string | null; error?: string | null } | null;
+};
+
+function renderNewsDetail(data: unknown): string {
+  const d = data as {
+    title?: string;
+    source?: string;
+    sourceName?: string;
+    categoryLabel?: string | null;
+    author?: string | null;
+    url?: string;
+    publishedAt?: string;
+    bodyText?: string | null;
+    attachments?: NoticeDetailAttachment[];
+    images?: NoticeDetailImage[];
+  };
+
+  let html = "";
+
+  const source = d.sourceName || (d.source && NEWS_SOURCE_LABEL[d.source]) || d.source || "";
+  const dateLabel = d.publishedAt
+    ? new Date(d.publishedAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric" })
+    : "";
+  const meta = joinMeta([source, dateLabel, d.author, d.categoryLabel]);
+
+  html += `<section class="card"><div class="card-title">공지 정보</div>`;
+  if (meta) html += `<div class="item-sub">${meta}</div>`;
+  if (d.url) html += `<div class="item-sub" style="margin-top:6px;"><a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--mj-blue);text-decoration:none;border-bottom:1px solid var(--rule);">원문 페이지 열기 ↗</a></div>`;
+  html += `</section>`;
+
+  if (d.bodyText && d.bodyText.trim()) {
+    html += `<section class="card"><div class="card-title">본문</div><div class="summary-body">${esc(d.bodyText).replace(/\n/g, "<br>")}</div></section>`;
+  }
+
+  if (d.attachments && d.attachments.length > 0) {
+    html += `<section class="card"><div class="card-title">첨부 · ${d.attachments.length}건</div>`;
+    for (const a of d.attachments) {
+      const size = a.sizeBytes != null ? formatBytes(a.sizeBytes) : null;
+      const metaLine = joinMeta([a.contentType, size]);
+      html += `<div class="item"><div class="item-title">${a.downloadUrl ? `<a href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">${esc(a.fileName || "파일")}</a>` : esc(a.fileName || "파일")}</div>`;
+      if (metaLine) html += `<div class="item-sub">${metaLine}</div>`;
+      const ex = a.extraction;
+      if (ex?.status === "succeeded" && ex.text) {
+        const preview = ex.text.length > 400 ? ex.text.slice(0, 400) + " …" : ex.text;
+        html += `<div class="item-preview">${esc(preview)}</div>`;
+      } else if (ex?.status && ex.status !== "pending") {
+        const label = { failed: "추출 실패", unsupported: "추출 미지원" }[ex.status] || ex.status;
+        html += `<div class="item-sub" style="color:var(--ink-4);">[${esc(label)}]</div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</section>`;
+  }
+
+  const ocrImages = (d.images || []).filter((im) => im.ocr?.status === "succeeded" && im.ocr.text);
+  if (ocrImages.length > 0) {
+    html += `<section class="card"><div class="card-title">본문 이미지 텍스트 · ${ocrImages.length}건</div>`;
+    for (const im of ocrImages) {
+      const text = im.ocr?.text ?? "";
+      const preview = text.length > 400 ? text.slice(0, 400) + " …" : text;
+      html += `<div class="item"><div class="item-preview">${esc(preview)}</div></div>`;
+    }
+    html += `</section>`;
+  }
+
+  return html || renderGeneric(data);
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// ── 학식 (cafeteria_menu_entries) ──────────────────────────────
+type CafeteriaEntry = {
+  sourceId?: string;
+  sourceName?: string;
+  serviceDate?: string;
+  mealType?: string;
+  isClosed?: boolean;
+  menuText?: string;
+  menuItems?: unknown;
+  confidence?: number | null;
+};
+
+const MEAL_LABEL: Record<string, string> = {
+  breakfast: "아침",
+  lunch: "점심",
+  dinner: "저녁",
+};
+
+function renderCafeteriaMenus(data: unknown): string {
+  const d = data as { items?: CafeteriaEntry[] };
+  if (!d.items?.length) return "";
+
+  // 식당별 → 날짜별 → 끼니 순으로 그룹핑
+  type DayBucket = { date: string; meals: CafeteriaEntry[] };
+  const bySource = new Map<string, { name: string; days: Map<string, DayBucket> }>();
+
+  for (const e of d.items) {
+    const sid = e.sourceId || "unknown";
+    const sname = e.sourceName || sid;
+    const date = e.serviceDate || "";
+    if (!bySource.has(sid)) bySource.set(sid, { name: sname, days: new Map() });
+    const sGroup = bySource.get(sid)!;
+    if (!sGroup.days.has(date)) sGroup.days.set(date, { date, meals: [] });
+    sGroup.days.get(date)!.meals.push(e);
+  }
+
+  // 끼니 순서 (아침 → 점심 → 저녁)
+  const mealOrder = ["breakfast", "lunch", "dinner"];
+
+  let html = "";
+  for (const [, sGroup] of bySource) {
+    html += `<section class="card"><div class="card-title">${esc(sGroup.name)}</div>`;
+    const sortedDays = Array.from(sGroup.days.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const multiDay = sortedDays.length > 1;
+    for (const day of sortedDays) {
+      if (multiDay) {
+        const dl = day.date ? new Date(`${day.date}T00:00:00+09:00`).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "short" }) : day.date;
+        html += `<div class="day-group"><div class="day-label">${esc(dl)}</div>`;
+      }
+      day.meals.sort((a, b) => mealOrder.indexOf(a.mealType || "") - mealOrder.indexOf(b.mealType || ""));
+      for (const m of day.meals) {
+        const mealLabel = MEAL_LABEL[m.mealType || ""] || m.mealType || "";
+        if (m.isClosed) {
+          html += `<div class="item"><div class="item-title">${esc(mealLabel)} <span class="badge badge-gray">휴무</span></div></div>`;
+          continue;
+        }
+        // menuItems가 배열이면 그걸 우선, 없으면 menuText 줄단위
+        let items: string[] = [];
+        if (Array.isArray(m.menuItems)) {
+          items = (m.menuItems as unknown[]).map((x) => String(x)).filter((s) => s.trim());
+        } else if (m.menuText) {
+          items = m.menuText.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+        }
+        html += `<div class="item"><div class="item-title">${esc(mealLabel)}</div>`;
+        if (items.length) {
+          html += `<div class="item-sub">${items.map((x) => esc(x)).join(" · ")}</div>`;
+        }
+        html += `</div>`;
+      }
+      if (multiDay) html += `</div>`;
+    }
+    html += `</section>`;
+  }
+
+  return html;
 }
 
 // ── 출석 ────────────────────────────────────────────────────────

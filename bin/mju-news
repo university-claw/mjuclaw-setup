@@ -1,0 +1,163 @@
+#!/bin/bash
+# mju-news wrapper: 실제 mju-news CLI 실행 후 결과를 view-server에 자동 POST하고
+# 반환 JSON에 viewUrl 필드를 주입한다. 에이전트는 출력의 viewUrl만 쓰면 됨.
+#
+# dataType은 서브커맨드를 보고 자동 매핑:
+#   notices recent/search    → news
+#   notices get <id>         → news-detail
+#   cafeterias today/week    → cafeteria
+#   doctor / skills          → viewUrl 없음 (조회 대상 아님)
+#
+# view-server POST 실패해도 원본 출력은 그대로 반환 (에이전트 동작 방해 금지).
+
+set -euo pipefail
+
+REAL_MJU_NEWS="/opt/mju-news/dist/main.js"
+VIEW_API="${VIEW_API_URL:-http://localhost:3001/api/view}"
+
+detect_datatype() {
+  local args="$*"
+  case "$args" in
+    *"notices recent"*|*"notices search"*) echo "news" ;;
+    *"notices get"*) echo "news-detail" ;;
+    *"cafeterias today"*|*"cafeterias week"*) echo "cafeteria" ;;
+    *) echo "" ;;
+  esac
+}
+
+should_view() {
+  local args="$*"
+  case "$args" in
+    *"notices recent"*|*"notices search"*|*"notices get"*) return 0 ;;
+    *"cafeterias today"*|*"cafeterias week"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+title_for() {
+  local dtype="$1"
+  local args="$2"
+  case "$dtype" in
+    "news")
+      case "$args" in
+        *"--category scholarship"*) echo "장학/학자금공지" ;;
+        *"--category event"*) echo "행사공지" ;;
+        *"--category career"*) echo "진로/취업공지" ;;
+        *"--category general"*) echo "일반공지" ;;
+        *"search"*) echo "공지 검색 결과" ;;
+        *) echo "학교 공지" ;;
+      esac
+      ;;
+    "news-detail") echo "공지 상세" ;;
+    "cafeteria")
+      case "$args" in
+        *"week"*) echo "주간 학식" ;;
+        *) echo "오늘 학식" ;;
+      esac
+      ;;
+    *) echo "공개 정보" ;;
+  esac
+}
+
+STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stderr.XXXXXX")
+trap 'rm -f "$STDERR_FILE"' EXIT
+
+set +e
+STDOUT=$(node "$REAL_MJU_NEWS" "$@" 2>"$STDERR_FILE")
+EXIT=$?
+set -e
+
+STDERR=$(cat "$STDERR_FILE" 2>/dev/null || true)
+
+if [[ -n "$STDERR" ]]; then
+  printf '%s\n' "$STDERR" >&2
+fi
+
+# 실패·view 대상 아님·JSON 아님이면 pass-through
+if [[ $EXIT -ne 0 ]] || ! should_view "$@"; then
+  printf '%s\n' "$STDOUT"
+  exit "$EXIT"
+fi
+
+case "$*" in
+  *"--format json"*|*"--format=json"*) ;;
+  *)
+    printf '%s\n' "$STDOUT"
+    exit "$EXIT"
+    ;;
+esac
+
+DATA_TYPE=$(detect_datatype "$@")
+if [[ -z "$DATA_TYPE" ]]; then
+  printf '%s\n' "$STDOUT"
+  exit "$EXIT"
+fi
+
+TITLE=$(title_for "$DATA_TYPE" "$*")
+
+REQUEST_BODY=$(RAW_STDOUT="$STDOUT" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ["RAW_STDOUT"]
+try:
+    data = json.loads(raw)
+except Exception:
+    data = None
+
+print(json.dumps({
+    "dataType": os.environ["DATA_TYPE"],
+    "title": os.environ["TITLE"],
+    "summary": "",
+    "rawData": data,
+    "aiResponse": "",
+}))
+PY
+)
+
+set +e
+VIEW_RESP=$(curl -s --max-time 3 -X POST "$VIEW_API" \
+  -H "Content-Type: application/json" \
+  -d "$REQUEST_BODY" 2>/dev/null)
+CURL_EXIT=$?
+set -e
+
+if [[ $CURL_EXIT -ne 0 ]]; then
+  printf '%s\n' "$STDOUT"
+  exit "$EXIT"
+fi
+
+VIEW_URL=$(VIEW_RESP="$VIEW_RESP" python3 - <<'PY'
+import json
+import os
+
+try:
+    print(json.loads(os.environ["VIEW_RESP"]).get("url", ""))
+except Exception:
+    pass
+PY
+)
+
+if [[ -n "$VIEW_URL" ]]; then
+  RAW_STDOUT="$STDOUT" VIEW_URL="$VIEW_URL" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ["RAW_STDOUT"]
+view_url = os.environ["VIEW_URL"]
+
+try:
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        data["viewUrl"] = view_url
+        print(json.dumps(data, ensure_ascii=False))
+    else:
+        print(json.dumps({"data": data, "viewUrl": view_url}, ensure_ascii=False))
+except Exception:
+    print(raw)
+PY
+else
+  printf '%s\n' "$STDOUT"
+fi
+
+exit "$EXIT"
