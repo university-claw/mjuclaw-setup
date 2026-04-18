@@ -2,71 +2,99 @@ import DOMPurify from "isomorphic-dompurify";
 import { marked } from "marked";
 import type { ViewEntry } from "./types";
 
+/**
+ * mjuclaw 웹뷰 렌더러.
+ *
+ * 디자인 원칙은 `.impeccable.md` 참고. 요점:
+ *   - 명지대 공식 블루(Pantone 2768 C · 300 C)를 메인 팔레트로
+ *   - warm neutrals, Pretendard 한글 본문 + serif display accent
+ *   - 카드 반복이 아니라 kicker-headline-body 타이포 위계 + hairline divider
+ *   - 모바일 우선, system-following dark/light
+ *   - 마스코트 로고는 히어로 한 곳에만 (없으면 wordmark fallback)
+ */
+
+// ── dataType → 섹션 kicker / 히어로 카테고리 라벨 ─────────────────
+const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
+  timetable: { kicker: "TIMETABLE", detail: "시간표" },
+  grades: { kicker: "GRADES", detail: "성적" },
+  graduation: { kicker: "GRADUATION", detail: "졸업요건" },
+  courses: { kicker: "COURSES", detail: "수강과목" },
+  "action-items": { kicker: "ACTION ITEMS", detail: "지금 할 일" },
+  unsubmitted: { kicker: "ASSIGNMENTS", detail: "미제출 과제" },
+  "due-assignments": { kicker: "DUE SOON", detail: "마감 임박 과제" },
+  "unread-notices": { kicker: "NOTICES", detail: "LMS 공지" },
+  attendance: { kicker: "ATTENDANCE", detail: "출석" },
+  news: { kicker: "PUBLIC NOTICES", detail: "학교 공지" },
+};
+
+function metaFor(dataType: string): { kicker: string; detail: string } {
+  return (
+    DATA_TYPE_META[dataType] ?? {
+      kicker: dataType.toUpperCase().replace(/-/g, " "),
+      detail: "상세 정보",
+    }
+  );
+}
+
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   const aiResponseEffective = entry.aiResponse?.trim()
     ? entry.aiResponse
     : generateFallbackSummary(entry.dataType, entry.rawData);
   const aiSummaryHtml = renderMarkdown(aiResponseEffective);
-  const time = new Date(entry.createdAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+  const created = new Date(entry.createdAt);
+  const time = created.toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const meta = metaFor(entry.dataType);
 
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(entry.title)}</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; padding: 16px; }
-.wrap { max-width: 500px; margin: 0 auto; }
-.header { text-align: center; padding: 16px 0; }
-.header h1 { font-size: 18px; color: #1a1a1a; margin-top: 8px; }
-.card { background: #fff; border-radius: 14px; box-shadow: 0 1px 8px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 12px; }
-.card-title { font-size: 14px; font-weight: 600; color: #3B82F6; margin-bottom: 10px; }
-.ai-text { font-size: 14px; line-height: 1.7; color: #333; word-break: break-word; }
-.ai-text p { margin-bottom: 8px; }
-.ai-text ul, .ai-text ol { padding-left: 18px; margin-bottom: 8px; }
-.ai-text li { margin-bottom: 4px; }
-.ai-text strong { font-weight: 600; }
-.ai-text h1, .ai-text h2, .ai-text h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; margin-top: 12px; }
-.ai-text hr { border: none; border-top: 1px solid #eee; margin: 10px 0; }
-.section { margin-bottom: 16px; }
-.section-title { font-size: 13px; font-weight: 600; color: #666; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
-.item { padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
-.item:last-child { border-bottom: none; }
-.item-title { font-size: 14px; font-weight: 500; color: #1a1a1a; }
-.item-sub { font-size: 12px; color: #888; margin-top: 2px; }
-.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
-.badge-red { background: #FEE2E2; color: #DC2626; }
-.badge-yellow { background: #FEF9C3; color: #A16207; }
-.badge-green { background: #DCFCE7; color: #16A34A; }
-.badge-blue { background: #DBEAFE; color: #2563EB; }
-.badge-gray { background: #F3F4F6; color: #6B7280; }
-.day-group { margin-bottom: 14px; }
-.day-label { font-size: 13px; font-weight: 600; color: #3B82F6; margin-bottom: 6px; }
-.progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.progress-bar { flex: 1; height: 8px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
-.progress-fill { height: 100%; border-radius: 4px; }
-.progress-text { font-size: 12px; color: #666; min-width: 60px; text-align: right; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; font-weight: 500; color: #888; padding: 6px 8px; border-bottom: 2px solid #eee; }
-td { padding: 8px; border-bottom: 1px solid #f0f0f0; color: #333; }
-.footer { text-align: center; font-size: 11px; color: #aaa; padding: 16px 0; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f6f4ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1730" media="(prefers-color-scheme: dark)">
+<title>${esc(entry.title)} · 묭묭이</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+${pageStyles()}
 </head>
 <body>
-<div class="wrap">
-  <div class="header">
-    <h1>${esc(entry.title)}</h1>
-  </div>
-  <div class="card">
-    <div class="card-title">AI 요약</div>
-    <div class="ai-text">${aiSummaryHtml}</div>
-  </div>
+<main class="page">
+  <header class="hero">
+    <div class="hero-mark" aria-hidden="true">${logoMark()}</div>
+    <div class="hero-copy">
+      <div class="kicker">
+        <span class="kicker-latin">${esc(meta.kicker)}</span>
+        <span class="kicker-dot" aria-hidden="true"></span>
+        <span class="kicker-ko">${esc(meta.detail)}</span>
+      </div>
+      <h1 class="display">${esc(entry.title)}</h1>
+      <p class="hero-meta">
+        <time datetime="${esc(created.toISOString())}">${esc(time)}</time>
+        <span class="divider-dot" aria-hidden="true">·</span>
+        <span>30분 후 만료</span>
+      </p>
+    </div>
+  </header>
+
+  <section class="summary" aria-label="AI 요약">
+    <div class="summary-label">AI 요약</div>
+    <div class="summary-body">${aiSummaryHtml}</div>
+  </section>
+
   ${dataHtml}
-  <div class="footer">${esc(time)} 조회 · 30분 후 만료</div>
-</div>
+
+  <footer class="footer">
+    <span class="footer-brand">묭묭이 · 명지대 학사 도우미</span>
+  </footer>
+</main>
 </body>
 </html>`;
 }
@@ -77,24 +105,498 @@ export function renderExpiredHtml(): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>만료됨</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.card { background: #fff; border-radius: 14px; box-shadow: 0 1px 8px rgba(0,0,0,0.06); padding: 32px 24px; text-align: center; max-width: 400px; }
-.icon { font-size: 48px; margin-bottom: 12px; }
-.title { font-size: 18px; font-weight: 600; color: #1a1a1a; margin-bottom: 8px; }
-.desc { font-size: 14px; color: #888; line-height: 1.6; }
-</style>
+<meta name="theme-color" content="#f6f4ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1730" media="(prefers-color-scheme: dark)">
+<title>만료 · 묭묭이</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+${pageStyles()}
 </head>
 <body>
-<div class="card">
-  <div class="icon">⏳</div>
-  <div class="title">데이터가 만료되었습니다</div>
-  <div class="desc">Discord에서 다시 조회해주세요</div>
-</div>
+<main class="page page-center">
+  <div class="expired">
+    <div class="expired-mark" aria-hidden="true">${logoMark()}</div>
+    <div class="kicker"><span class="kicker-latin">EXPIRED</span><span class="kicker-dot" aria-hidden="true"></span><span class="kicker-ko">만료된 링크</span></div>
+    <h1 class="display">이 링크의 유효 시간이 지났어요</h1>
+    <p class="expired-body">이 웹뷰는 조회 시점부터 30분간만 열람할 수 있어요.<br>Discord에서 묭묭이에게 다시 물어보면 새 링크를 보내드려요.</p>
+  </div>
+</main>
 </body>
 </html>`;
+}
+
+// ── 로고 마크 (SVG) ─────────────────────────────────────────────
+// 실제 캐릭터 로고 파일이 생기면 `<img src="/static/logo.svg" ...>` 같은 식으로 교체.
+// 지금은 명지 M을 serif 기반으로 각인한 wordmark로 graceful fallback.
+function logoMark(): string {
+  return `<svg viewBox="0 0 56 56" role="img" aria-label="묭묭이" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="mj-mark-g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--mj-ink)"/>
+        <stop offset="100%" stop-color="var(--mj-blue)"/>
+      </linearGradient>
+    </defs>
+    <rect x="1" y="1" width="54" height="54" rx="14" ry="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-opacity="0.55"/>
+    <text x="28" y="38" text-anchor="middle" font-family="'Iowan Old Style','Apple Garamond',Garamond,Georgia,serif" font-weight="600" font-size="30" fill="url(#mj-mark-g)" letter-spacing="-0.5">M</text>
+  </svg>`;
+}
+
+// ── CSS ─────────────────────────────────────────────────────────
+function pageStyles(): string {
+  return `<style>
+:root {
+  /* 명지대 블루 (Pantone 2768 C / 300 C) */
+  --mj-ink: #1A2E5C;
+  --mj-blue: #005EB8;
+
+  /* Light 기본 */
+  --bg: #F6F4EE;
+  --bg-sub: #FFFDF7;
+  --surface: #FFFFFF;
+  --ink: var(--mj-ink);
+  --ink-2: #3F4C70;
+  --ink-3: #6A738F;
+  --ink-4: #8E95AE;
+  --rule: rgba(26, 46, 92, 0.14);
+  --rule-strong: rgba(26, 46, 92, 0.26);
+  --accent: var(--mj-blue);
+  --accent-soft: rgba(0, 94, 184, 0.10);
+  --danger: #B11D1D;
+  --danger-soft: rgba(177, 29, 29, 0.10);
+  --warn: #8B6914;
+  --warn-soft: rgba(139, 105, 20, 0.14);
+  --success: #236B3A;
+  --success-soft: rgba(35, 107, 58, 0.12);
+  --muted-chip-bg: rgba(26, 46, 92, 0.07);
+  --muted-chip-fg: var(--ink-2);
+
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.18  0 0 0 0 0.36  0 0 0 0.055 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 1px 0 rgba(26, 46, 92, 0.04), 0 12px 32px -24px rgba(26, 46, 92, 0.35);
+
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
+  --font-serif: 'Iowan Old Style', 'Apple Garamond', Garamond, 'Times New Roman', Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0E1730;
+    --bg-sub: #121E3C;
+    --surface: #152349;
+    --ink: #ECE7D5;
+    --ink-2: #C8CFE2;
+    --ink-3: #9AA3BC;
+    --ink-4: #6E7794;
+    --rule: rgba(236, 231, 213, 0.14);
+    --rule-strong: rgba(236, 231, 213, 0.26);
+    --accent: #7FB1E6;
+    --accent-soft: rgba(127, 177, 230, 0.16);
+    --danger: #F39292;
+    --danger-soft: rgba(243, 146, 146, 0.16);
+    --warn: #E8C575;
+    --warn-soft: rgba(232, 197, 117, 0.14);
+    --success: #8BD6A5;
+    --success-soft: rgba(139, 214, 165, 0.14);
+    --muted-chip-bg: rgba(236, 231, 213, 0.08);
+    --muted-chip-fg: var(--ink-2);
+    --shadow-soft: 0 1px 0 rgba(0, 0, 0, 0.2), 0 12px 32px -20px rgba(0, 0, 0, 0.55);
+    --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.96  0 0 0 0 0.78  0 0 0 0.04 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-image: var(--grain);
+  background-size: 160px 160px;
+  background-attachment: fixed;
+  padding: clamp(20px, 5vw, 40px) clamp(16px, 5vw, 28px) clamp(40px, 8vw, 80px);
+}
+
+.page {
+  max-width: 620px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.page-center {
+  min-height: 80vh;
+  min-height: 80dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Kicker (카테고리 + 한글 라벨) ─────────────────────── */
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+.kicker-latin { color: var(--mj-blue); }
+@media (prefers-color-scheme: dark) { .kicker-latin { color: var(--accent); } }
+.kicker-ko { color: var(--ink-3); letter-spacing: 0.02em; font-weight: 500; }
+.kicker-dot {
+  width: 4px; height: 4px; border-radius: 999px;
+  background: var(--rule-strong);
+  display: inline-block;
+}
+
+/* ── Hero ────────────────────────────────────────────────── */
+.hero {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: clamp(16px, 4vw, 24px);
+  align-items: start;
+  padding-bottom: clamp(28px, 6vw, 44px);
+  margin-bottom: clamp(28px, 6vw, 44px);
+  border-bottom: 1px solid var(--rule);
+}
+.hero-mark {
+  color: var(--ink);
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+}
+.hero-mark svg { width: 100%; height: 100%; display: block; }
+.hero-copy { min-width: 0; }
+.display {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  color: var(--ink);
+  font-size: clamp(26px, 6.4vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin-bottom: 14px;
+  word-break: keep-all;
+  text-wrap: balance;
+}
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+.divider-dot { color: var(--rule-strong); }
+
+/* ── AI 요약 (pull quote 스타일) ────────────────────────── */
+.summary {
+  position: relative;
+  padding: clamp(16px, 4vw, 22px) 0 clamp(18px, 4vw, 24px) clamp(18px, 4vw, 22px);
+  border-left: 2px solid var(--mj-blue);
+  margin-bottom: clamp(32px, 7vw, 48px);
+}
+.summary-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mj-blue);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  .summary { border-left-color: var(--accent); }
+  .summary-label { color: var(--accent); }
+}
+.summary-body {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  word-break: keep-all;
+}
+.summary-body p { margin-bottom: 8px; }
+.summary-body p:last-child { margin-bottom: 0; }
+.summary-body strong { color: var(--ink); font-weight: 600; }
+.summary-body em { color: var(--ink-3); font-style: italic; }
+.summary-body ul, .summary-body ol { padding-left: 20px; margin: 8px 0; }
+.summary-body li { margin-bottom: 4px; }
+.summary-body li::marker { color: var(--ink-4); }
+.summary-body h1, .summary-body h2, .summary-body h3 {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 14px 0 6px;
+}
+.summary-body hr { border: none; border-top: 1px solid var(--rule); margin: 12px 0; }
+.summary-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--muted-chip-bg);
+  color: var(--ink);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── 섹션 (카드 아님 — hairline 위계) ───────────────────── */
+.card {
+  padding: clamp(22px, 5vw, 28px) 0;
+  border-top: 1px solid var(--rule);
+}
+.card:first-of-type { border-top: none; padding-top: 0; }
+.card-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.card-title::before {
+  content: '';
+  width: 20px; height: 1px;
+  background: var(--mj-blue);
+  display: inline-block;
+  flex: 0 0 20px;
+  transform: translateY(-3px);
+}
+@media (prefers-color-scheme: dark) {
+  .card-title::before { background: var(--accent); }
+}
+
+/* ── 아이템 리스트 ────────────────────────────────────── */
+.item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.item:last-child { border-bottom: none; }
+.item-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  word-break: keep-all;
+}
+.item-title a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule);
+  transition: border-color 160ms ease-out;
+}
+.item-title a:hover { border-color: var(--mj-blue); }
+.item-sub {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+}
+.item-sub + .item-sub { margin-top: 2px; }
+.item-preview {
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.55;
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
+  word-break: keep-all;
+}
+
+/* ── 배지 (chip with dot) ─────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+}
+.badge::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  display: inline-block;
+  opacity: 0.85;
+}
+.badge-red { color: var(--danger); background: var(--danger-soft); }
+.badge-yellow { color: var(--warn); background: var(--warn-soft); }
+.badge-green { color: var(--success); background: var(--success-soft); }
+.badge-blue { color: var(--mj-blue); background: var(--accent-soft); }
+@media (prefers-color-scheme: dark) {
+  .badge-blue { color: var(--accent); }
+}
+.badge-gray { color: var(--muted-chip-fg); background: var(--muted-chip-bg); }
+.badge-gray::before { opacity: 0.45; }
+
+/* ── 요일 그룹 (시간표) ───────────────────────────────── */
+.day-group { margin-bottom: 18px; }
+.day-group:last-child { margin-bottom: 0; }
+.day-label {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--mj-blue);
+  letter-spacing: -0.005em;
+  margin-bottom: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  .day-label { color: var(--accent); }
+}
+
+/* ── 진행 바 (졸업요건) ──────────────────────────────── */
+.progress-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+}
+.progress-bar {
+  height: 4px;
+  background: var(--rule);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.progress-text {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── 테이블 (성적, 출석 세션) ─────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-4);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+td {
+  padding: 11px 10px;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+td:first-child, th:first-child { padding-left: 0; }
+td:last-child, th:last-child { padding-right: 0; }
+
+/* ── 배지 그룹 (출석 요약) ────────────────────────────── */
+.badge-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── 원본 JSON fallback ─────────────────────────────── */
+.raw-json {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--muted-chip-bg);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Footer ────────────────────────────────────────── */
+.footer {
+  margin-top: clamp(40px, 8vw, 64px);
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+  text-align: center;
+}
+.footer-brand {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--ink-4);
+  letter-spacing: 0.02em;
+  font-style: italic;
+}
+
+/* ── 만료 페이지 ───────────────────────────────────── */
+.expired {
+  text-align: left;
+  max-width: 380px;
+}
+.expired-mark {
+  color: var(--ink);
+  width: 48px; height: 48px;
+  margin-bottom: 24px;
+  opacity: 0.7;
+}
+.expired-mark svg { width: 100%; height: 100%; display: block; }
+.expired .display {
+  font-size: clamp(24px, 5.5vw, 32px);
+  margin-bottom: 12px;
+}
+.expired-body {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--ink-3);
+  word-break: keep-all;
+}
+
+/* ── 접근성 / 모션 감소 ───────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill { transition: none; }
+  .item-title a { transition: none; }
+}
+
+::selection { background: var(--accent-soft); color: var(--ink); }
+</style>`;
 }
 
 // ── dataType별 렌더러 ───────────────────────────────────────────
@@ -155,18 +657,19 @@ function renderTimetable(data: unknown): string {
     byDay.get(day)!.push(e);
   }
 
-  let html = `<div class="card"><div class="card-title">상세 시간표</div>`;
+  let html = `<section class="card"><div class="card-title">주간 시간표</div>`;
   for (const day of days) {
     const entries = byDay.get(day);
     if (!entries) continue;
     entries.sort((a, b) => (a.timeRange || "").localeCompare(b.timeRange || ""));
     html += `<div class="day-group"><div class="day-label">${day}요일</div>`;
     for (const e of entries) {
-      html += `<div class="item"><div class="item-title">${esc(e.courseTitle)}</div><div class="item-sub">${esc(e.timeRange || "")} · ${esc(e.location || "")}${e.professor ? ` · ${esc(e.professor)}` : ""}</div></div>`;
+      const meta = joinMeta([e.timeRange, e.location, e.professor]);
+      html += `<div class="item"><div class="item-title">${esc(e.courseTitle)}</div><div class="item-sub">${meta}</div></div>`;
     }
     html += `</div>`;
   }
-  return html + `</div>`;
+  return html + `</section>`;
 }
 
 // ── 성적 ────────────────────────────────────────────────────────
@@ -175,12 +678,12 @@ function renderGrades(data: unknown): string {
   const d = data as { items?: Array<{ courseTitle: string; credits?: number; grade?: string; statusMessage?: string }> };
   if (!d.items?.length) return "";
 
-  let html = `<div class="card"><div class="card-title">성적 상세</div><table><tr><th>과목</th><th>학점</th><th>성적</th></tr>`;
+  let html = `<section class="card"><div class="card-title">성적 상세</div><table><thead><tr><th>과목</th><th>학점</th><th>성적</th></tr></thead><tbody>`;
   for (const item of d.items) {
     const grade = item.grade || item.statusMessage || "-";
     html += `<tr><td>${esc(item.courseTitle)}</td><td>${item.credits ?? "-"}</td><td>${esc(grade)}</td></tr>`;
   }
-  return html + `</table></div>`;
+  return html + `</tbody></table></section>`;
 }
 
 // ── 졸업요건 ────────────────────────────────────────────────────
@@ -189,22 +692,24 @@ function renderGraduation(data: unknown): string {
   const d = data as { creditGaps?: Array<{ label: string; earned?: number; required?: number; gap?: number }> };
   if (!d.creditGaps?.length) return "";
 
-  let html = `<div class="card"><div class="card-title">졸업요건 상세</div>`;
+  let html = `<section class="card"><div class="card-title">졸업요건 상세</div>`;
   for (const g of d.creditGaps) {
     const earned = g.earned ?? 0;
     const required = g.required ?? 1;
     const pct = Math.min(100, Math.round((earned / required) * 100));
-    const color = (g.gap ?? 0) > 0 ? "#EF4444" : "#22C55E";
-    const badgeCls = (g.gap ?? 0) > 0 ? "badge-red" : "badge-green";
+    const isShort = (g.gap ?? 0) > 0;
+    const badgeCls = isShort ? "badge-red" : "badge-green";
+    const badgeText = isShort ? `부족 ${g.gap}학점` : "충족";
+    const fillColor = isShort ? "var(--danger)" : "var(--success)";
     html += `<div class="item">
-      <div class="item-title">${esc(g.label)} <span class="badge ${badgeCls}">${(g.gap ?? 0) > 0 ? `부족 ${g.gap}` : "충족"}</span></div>
+      <div class="item-title">${esc(g.label)} <span class="badge ${badgeCls}">${esc(badgeText)}</span></div>
       <div class="progress-wrap">
-        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${fillColor}"></div></div>
         <div class="progress-text">${earned} / ${required}</div>
       </div>
     </div>`;
   }
-  return html + `</div>`;
+  return html + `</section>`;
 }
 
 // ── 수강과목 ────────────────────────────────────────────────────
@@ -213,11 +718,12 @@ function renderCourses(data: unknown): string {
   const d = data as { courses?: Array<{ title: string; professor?: string; code?: string }> };
   if (!d.courses?.length) return "";
 
-  let html = `<div class="card"><div class="card-title">수강과목 (${d.courses.length}개)</div>`;
+  let html = `<section class="card"><div class="card-title">수강과목 · ${d.courses.length}개</div>`;
   for (const c of d.courses) {
-    html += `<div class="item"><div class="item-title">${esc(c.title)}</div><div class="item-sub">${esc(c.professor || "")}${c.code ? ` · ${esc(c.code)}` : ""}</div></div>`;
+    const meta = joinMeta([c.professor, c.code]);
+    html += `<div class="item"><div class="item-title">${esc(c.title)}</div>${meta ? `<div class="item-sub">${meta}</div>` : ""}</div>`;
   }
-  return html + `</div>`;
+  return html + `</section>`;
 }
 
 // ── 할 일 목록 ──────────────────────────────────────────────────
@@ -228,47 +734,47 @@ function renderActionItems(data: unknown): string {
 
   const unsub = d.unsubmittedAssignments as AssignmentItem[] | undefined;
   if (unsub?.length) {
-    html += `<div class="card"><div class="card-title">미제출 과제 (${unsub.length}건)</div>`;
+    html += `<section class="card"><div class="card-title">미제출 과제 · ${unsub.length}건</div>`;
     for (const a of unsub) {
       const expired = isAssignmentExpired(a);
       const badgeCls = expired ? "badge-red" : "badge-yellow";
       const badgeText = expired ? "만료" : "진행중";
       const rawDue = a.dueLabel || a.dueAt || (a.statusText !== "만료됨" ? a.statusText : "") || "";
-      const sub = [a.courseTitle, a.weekLabel, rawDue].filter(Boolean).join(" · ");
-      html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${badgeText}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
+      const sub = joinMeta([a.courseTitle, a.weekLabel, rawDue]);
+      html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${badgeText}</span></div>${sub ? `<div class="item-sub">${sub}</div>` : ""}</div>`;
     }
-    html += `</div>`;
+    html += `</section>`;
   }
 
   const due = d.dueAssignments as AssignmentItem[] | undefined;
   if (due?.length) {
-    html += `<div class="card"><div class="card-title">마감 임박 (${due.length}건)</div>`;
+    html += `<section class="card"><div class="card-title">마감 임박 · ${due.length}건</div>`;
     for (const a of due) {
       const dueLabel = a.dueLabel || a.dueAt || a.statusText || "";
-      const sub = [a.courseTitle, a.weekLabel, dueLabel].filter(Boolean).join(" · ");
-      html += `<div class="item"><div class="item-title">${esc(a.title || "")}</div><div class="item-sub">${esc(sub)}</div></div>`;
+      const sub = joinMeta([a.courseTitle, a.weekLabel, dueLabel]);
+      html += `<div class="item"><div class="item-title">${esc(a.title || "")}</div>${sub ? `<div class="item-sub">${sub}</div>` : ""}</div>`;
     }
-    html += `</div>`;
+    html += `</section>`;
   }
 
   const notices = d.unreadNotices as NoticeItem[] | undefined;
   if (notices?.length) {
-    html += `<div class="card"><div class="card-title">안읽은 공지 (${notices.length}건)</div>`;
+    html += `<section class="card"><div class="card-title">안 읽은 공지 · ${notices.length}건</div>`;
     for (const n of notices) {
-      const sub = [n.courseTitle, n.postedAt].filter(Boolean).join(" · ");
-      html += `<div class="item"><div class="item-title">${esc(n.title || "")}</div><div class="item-sub">${esc(sub)}</div></div>`;
+      const sub = joinMeta([n.courseTitle, n.postedAt]);
+      html += `<div class="item"><div class="item-title">${esc(n.title || "")}</div>${sub ? `<div class="item-sub">${sub}</div>` : ""}</div>`;
     }
-    html += `</div>`;
+    html += `</section>`;
   }
 
   const online = d.incompleteOnlineWeeks as Array<{ courseTitle?: string; weekLabel?: string; lectureTitle?: string }> | undefined;
   if (online?.length) {
-    html += `<div class="card"><div class="card-title">미수강 온라인 (${online.length}건)</div>`;
+    html += `<section class="card"><div class="card-title">미수강 온라인 · ${online.length}건</div>`;
     for (const o of online) {
-      const sub = [o.courseTitle, o.weekLabel].filter(Boolean).join(" · ");
-      html += `<div class="item"><div class="item-title">${esc(o.lectureTitle || o.weekLabel || "")}</div><div class="item-sub">${esc(sub)}</div></div>`;
+      const sub = joinMeta([o.courseTitle, o.weekLabel]);
+      html += `<div class="item"><div class="item-title">${esc(o.lectureTitle || o.weekLabel || "")}</div>${sub ? `<div class="item-sub">${sub}</div>` : ""}</div>`;
     }
-    html += `</div>`;
+    html += `</section>`;
   }
 
   return html;
@@ -276,11 +782,6 @@ function renderActionItems(data: unknown): string {
 
 // ── 과제 리스트 ─────────────────────────────────────────────────
 
-// 실제 만료 판정:
-//   1. isExpired === true
-//   2. statusText === "만료됨" (LMS가 명시)
-//   ※ statusLabel === "마감"은 '제출 마감이 있는 과제'라는 분류 레이블일 뿐,
-//      실제 만료 여부가 아님 (진행중인 과제도 statusLabel: "마감"이 붙음)
 function isAssignmentExpired(a: AssignmentItem): boolean {
   if (a.isExpired === true) return true;
   if (typeof a.statusText === "string" && a.statusText.trim() === "만료됨") return true;
@@ -288,7 +789,6 @@ function isAssignmentExpired(a: AssignmentItem): boolean {
 }
 
 function renderAssignmentList(data: unknown): string {
-  // mju-cli는 +unsubmitted → {assignments: [...]}, +due-assignments → {assignments: [...]}, items도 지원
   const items: AssignmentItem[] = Array.isArray(data)
     ? (data as AssignmentItem[])
     : ((data as { assignments?: AssignmentItem[]; items?: AssignmentItem[] }).assignments
@@ -296,23 +796,21 @@ function renderAssignmentList(data: unknown): string {
         || []);
   if (!items.length) return "";
 
-  let html = `<div class="card"><div class="card-title">과제 상세 (${items.length}건)</div>`;
+  let html = `<section class="card"><div class="card-title">과제 상세 · ${items.length}건</div>`;
   for (const a of items) {
     const expired = isAssignmentExpired(a);
     const badgeCls = expired ? "badge-red" : "badge-yellow";
     const badgeText = expired ? "만료" : "진행중";
-    // dueLabel 우선, 그 다음 dueAt, 마지막으로 statusText (단 '만료됨'이면 표시 의미 없음)
     const rawDue = a.dueLabel || a.dueAt || (a.statusText !== "만료됨" ? a.statusText : "") || "";
-    const sub = [a.courseTitle, a.weekLabel, rawDue].filter(Boolean).join(" · ");
-    html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${badgeText}</span></div><div class="item-sub">${esc(sub)}</div></div>`;
+    const sub = joinMeta([a.courseTitle, a.weekLabel, rawDue]);
+    html += `<div class="item"><div class="item-title">${esc(a.title || "")} <span class="badge ${badgeCls}">${badgeText}</span></div>${sub ? `<div class="item-sub">${sub}</div>` : ""}</div>`;
   }
-  return html + `</div>`;
+  return html + `</section>`;
 }
 
-// ── 공지 리스트 ─────────────────────────────────────────────────
+// ── 공지 리스트 (LMS) ──────────────────────────────────────────
 
 function renderNoticeList(data: unknown): string {
-  // +unread-notices → {notices: [...]}, items도 지원
   const items: NoticeItem[] = Array.isArray(data)
     ? (data as NoticeItem[])
     : ((data as { notices?: NoticeItem[]; items?: NoticeItem[] }).notices
@@ -320,16 +818,16 @@ function renderNoticeList(data: unknown): string {
         || []);
   if (!items.length) return "";
 
-  let html = `<div class="card"><div class="card-title">공지 상세 (${items.length}건)</div>`;
+  let html = `<section class="card"><div class="card-title">공지 상세 · ${items.length}건</div>`;
   for (const n of items) {
-    const sub = [n.courseTitle, n.postedAt].filter(Boolean).join(" · ");
-    html += `<div class="item"><div class="item-title">${esc(n.title || "")}</div><div class="item-sub">${esc(sub)}</div>`;
+    const sub = joinMeta([n.courseTitle, n.postedAt]);
+    html += `<div class="item"><div class="item-title">${esc(n.title || "")}</div>${sub ? `<div class="item-sub">${sub}</div>` : ""}`;
     if (n.previewText) {
-      html += `<div class="item-sub" style="margin-top:4px;color:#666;">${esc(n.previewText.slice(0, 200))}</div>`;
+      html += `<div class="item-preview">${esc(n.previewText.slice(0, 220))}</div>`;
     }
     html += `</div>`;
   }
-  return html + `</div>`;
+  return html + `</section>`;
 }
 
 // ── 학교 공지 (mju-news) ────────────────────────────────────────
@@ -342,25 +840,27 @@ const NEWS_SOURCE_LABEL: Record<string, string> = {
 };
 
 function renderNewsList(data: unknown): string {
-  const d = data as { items?: Array<{ title: string; url: string; source: string; postedAt?: string; author?: string }> };
+  const d = data as { items?: Array<{ title: string; url: string; source: string; postedAt?: string; author?: string; publishedAt?: string; sourceName?: string }> };
   if (!d.items?.length) return "";
 
-  let html = `<div class="card"><div class="card-title">학교 공지 (${d.items.length}건)</div>`;
+  let html = `<section class="card"><div class="card-title">학교 공지 · ${d.items.length}건</div>`;
   for (const n of d.items) {
-    const label = NEWS_SOURCE_LABEL[n.source] || n.source;
-    const dateLabel = n.postedAt ? new Date(n.postedAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" }) : "";
-    const meta = [label, dateLabel, n.author].filter(Boolean).join(" · ");
-    html += `<div class="item"><div class="item-title"><a href="${esc(n.url)}" target="_blank" rel="noopener" style="color:#1a1a1a;text-decoration:none;">${esc(n.title)}</a></div><div class="item-sub">${esc(meta)}</div></div>`;
+    const label = n.sourceName || NEWS_SOURCE_LABEL[n.source] || n.source;
+    const dateRaw = n.publishedAt || n.postedAt;
+    const dateLabel = dateRaw
+      ? new Date(dateRaw).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" })
+      : "";
+    const meta = joinMeta([label, dateLabel, n.author]);
+    html += `<div class="item"><div class="item-title"><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></div>${meta ? `<div class="item-sub">${meta}</div>` : ""}</div>`;
   }
-  return html + `</div>`;
+  return html + `</section>`;
 }
 
 // ── 출석 ────────────────────────────────────────────────────────
 
-// ucheck가 반환하는 attendance JSON을 예쁘게 렌더링 (과거 카카오 호환으로 문자열도 지원)
 function renderAttendanceText(data: unknown): string {
   if (typeof data === "string") {
-    return `<div class="card"><div class="card-title">출석 상세</div><div class="ai-text">${esc(data)}</div></div>`;
+    return `<section class="card"><div class="card-title">출석 상세</div><div class="summary-body">${esc(data)}</div></section>`;
   }
   const d = data as {
     course?: { courseTitle?: string; professor?: string; scheduleSummary?: string };
@@ -386,61 +886,57 @@ function renderAttendanceText(data: unknown): string {
   // 과목 헤더
   if (d.course) {
     const c = d.course;
-    html += `<div class="card"><div class="card-title">${esc(c.courseTitle || "출석")}</div>`;
-    if (c.professor) html += `<div class="item-sub">${esc(c.professor)} 교수</div>`;
-    if (c.scheduleSummary) {
-      const sched = c.scheduleSummary.split("\n").map((s) => esc(s)).join("<br>");
-      html += `<div class="item-sub" style="margin-top:6px;">${sched}</div>`;
-    }
-    html += `</div>`;
+    html += `<section class="card"><div class="card-title">${esc(c.courseTitle || "출석")}</div>`;
+    const subParts: string[] = [];
+    if (c.professor) subParts.push(`${esc(c.professor)} 교수`);
+    if (c.scheduleSummary) subParts.push(esc(c.scheduleSummary.replace(/\n/g, " · ")));
+    if (subParts.length) html += `<div class="item-sub">${subParts.join(" · ")}</div>`;
+    html += `</section>`;
   }
 
   // 요약 배지
   if (d.summary) {
     const s = d.summary;
     const total = d.completedSessions ?? 0;
-    html += `<div class="card"><div class="card-title">요약</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <span class="badge badge-blue">진행 ${total}회</span>
-        <span class="badge badge-green">출석 ${s.attendedCount ?? 0}</span>`;
+    html += `<section class="card"><div class="card-title">출석 요약</div><div class="badge-group">`;
+    html += `<span class="badge badge-blue">진행 ${total}회</span>`;
+    html += `<span class="badge badge-green">출석 ${s.attendedCount ?? 0}</span>`;
     if ((s.tardyCount ?? 0) > 0) html += `<span class="badge badge-yellow">지각 ${s.tardyCount}</span>`;
     if ((s.earlyLeaveCount ?? 0) > 0) html += `<span class="badge badge-yellow">조퇴 ${s.earlyLeaveCount}</span>`;
     if ((s.absentCount ?? 0) > 0) html += `<span class="badge badge-red">결석 ${s.absentCount}</span>`;
-    html += `</div></div>`;
+    html += `</div></section>`;
   }
 
   // 세션 테이블
   if (d.sessions && d.sessions.length > 0) {
-    html += `<div class="card"><div class="card-title">세션별 출석</div>`;
-    html += `<table><tr><th>주차</th><th>날짜</th><th>시간</th><th>상태</th><th>입실</th></tr>`;
-    // 지난 세션만, 날짜 내림차순 (최근 먼저)
     const past = d.sessions.filter((s) => s.isPast).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-    for (const s of past) {
-      const status = s.statusLabel || "-";
-      let badgeCls = "badge-gray";
-      if (status === "출석") badgeCls = "badge-green";
-      else if (status === "결석") badgeCls = "badge-red";
-      else if (status === "지각" || status === "조퇴") badgeCls = "badge-yellow";
-      html += `<tr>
-        <td>${esc(s.sessionLabel || "-")}</td>
-        <td>${esc(s.dateLabel || s.date || "-")}</td>
-        <td>${esc(s.timeRange || "-")}</td>
-        <td><span class="badge ${badgeCls}">${esc(status)}</span></td>
-        <td>${esc(s.attendAt || "-")}</td>
-      </tr>`;
+    if (past.length > 0) {
+      html += `<section class="card"><div class="card-title">세션별 출석</div>`;
+      html += `<table><thead><tr><th>주차</th><th>날짜</th><th>상태</th><th>입실</th></tr></thead><tbody>`;
+      for (const s of past) {
+        const status = s.statusLabel || "-";
+        let badgeCls = "badge-gray";
+        if (status === "출석") badgeCls = "badge-green";
+        else if (status === "결석") badgeCls = "badge-red";
+        else if (status === "지각" || status === "조퇴") badgeCls = "badge-yellow";
+        html += `<tr>
+          <td>${esc(s.sessionLabel || "-")}</td>
+          <td>${esc(s.dateLabel || s.date || "-")}</td>
+          <td><span class="badge ${badgeCls}">${esc(status)}</span></td>
+          <td>${esc(s.attendAt || "-")}</td>
+        </tr>`;
+      }
+      html += `</tbody></table></section>`;
     }
-    html += `</table></div>`;
 
-    // 예정된 세션
     const upcoming = d.sessions.filter((s) => !s.isPast).slice(0, 5);
     if (upcoming.length > 0) {
-      html += `<div class="card"><div class="card-title">다가오는 수업</div>`;
+      html += `<section class="card"><div class="card-title">다가오는 수업</div>`;
       for (const s of upcoming) {
-        html += `<div class="item"><div class="item-title">${esc(s.dateLabel || s.date || "")} · ${esc(s.timeRange || "")}</div>`;
-        if (s.classroom) html += `<div class="item-sub">${esc(s.classroom)}</div>`;
-        html += `</div>`;
+        const when = [s.dateLabel || s.date, s.timeRange].filter(Boolean).join(" · ");
+        html += `<div class="item"><div class="item-title">${esc(when)}</div>${s.classroom ? `<div class="item-sub">${esc(s.classroom)}</div>` : ""}</div>`;
       }
-      html += `</div>`;
+      html += `</section>`;
     }
   }
 
@@ -451,7 +947,7 @@ function renderAttendanceText(data: unknown): string {
 
 function renderGeneric(data: unknown): string {
   const json = JSON.stringify(data, null, 2);
-  return `<div class="card"><div class="card-title">원본 데이터</div><pre style="font-size:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;color:#333;">${esc(json)}</pre></div>`;
+  return `<section class="card"><div class="card-title">원본 데이터</div><pre class="raw-json">${esc(json)}</pre></section>`;
 }
 
 function renderMarkdown(markdown: string): string {
@@ -460,7 +956,6 @@ function renderMarkdown(markdown: string): string {
 }
 
 // aiResponse가 비어있을 때 rawData 기반으로 기본 요약 markdown 생성.
-// 에이전트가 PATCH 안 해도 웹뷰 상단이 비어보이지 않게.
 function generateFallbackSummary(dataType: string, rawData: unknown): string {
   if (!rawData || typeof rawData !== "object") {
     return "_에이전트 요약이 아직 도착하지 않았어요. 아래 데이터를 참고해주세요._";
@@ -482,13 +977,13 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
     case "unsubmitted":
     case "due-assignments": {
       const items = pickItems("assignments", "items");
-      if (!items.length) return "_미제출/마감 임박 과제가 없습니다._";
+      if (!items.length) return "_미제출·마감 임박 과제가 없습니다._";
       const expired = (items as AssignmentItem[]).filter(isAssignmentExpired).length;
       const pending = items.length - expired;
       return [
-        `총 **${items.length}건**의 과제가 있습니다.`,
-        pending ? `- 🟡 진행중: ${pending}건` : "",
-        expired ? `- 🔴 만료: ${expired}건` : "",
+        `총 **${items.length}건**의 과제가 있어요.`,
+        pending ? `- 진행중: ${pending}건` : "",
+        expired ? `- 만료: ${expired}건` : "",
         "",
         "아래 목록에서 자세한 내용을 확인하세요.",
       ].filter(Boolean).join("\n");
@@ -496,7 +991,7 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
     case "unread-notices": {
       const items = pickItems("notices", "items");
       if (!items.length) return "_안 읽은 공지가 없습니다._";
-      return `안 읽은 공지 **${items.length}건**이 있습니다. 아래에서 자세한 내용을 확인하세요.`;
+      return `안 읽은 공지 **${items.length}건**이 있어요. 아래에서 자세한 내용을 확인하세요.`;
     }
     case "action-items": {
       const unsub = pickItems("unsubmittedAssignments");
@@ -509,13 +1004,13 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
         countLine("안 읽은 공지", notices),
         countLine("미수강 온라인", online),
       ].filter(Boolean);
-      if (!lines.length) return "_지금 할 일이 없습니다. 훌륭해요!_";
-      return ["**지금 해야 할 일 요약**", "", ...lines].join("\n");
+      if (!lines.length) return "_지금 해야 할 일이 없어요. 훌륭해요._";
+      return ["**지금 해야 할 일**", "", ...lines].join("\n");
     }
     case "timetable": {
       const entries = pickItems("entries");
       if (!entries.length) return "_등록된 시간표가 없습니다._";
-      return `이번 학기 시간표 **${entries.length}개 수업**이 등록되어 있습니다.`;
+      return `이번 학기 시간표 **${entries.length}개 수업**이 등록되어 있어요.`;
     }
     case "courses": {
       const items = pickItems("courses", "items");
@@ -525,7 +1020,7 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
     case "grades": {
       const items = pickItems("items", "grades");
       if (!items.length) return "_성적 정보가 없습니다._";
-      return `**${items.length}개 과목**의 성적이 있습니다. 아래에서 자세한 내용을 확인하세요.`;
+      return `**${items.length}개 과목**의 성적이 있습니다.`;
     }
     case "graduation": {
       const gaps = pickItems("creditGaps");
@@ -533,7 +1028,7 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
       const shortages = (gaps as Array<{ gap?: number }>).filter((g) => (g.gap ?? 0) > 0).length;
       return shortages
         ? `졸업요건 중 **${shortages}개 영역**이 부족합니다.`
-        : `**모든 졸업요건을 충족**했습니다. 🎉`;
+        : `**모든 졸업요건을 충족**했습니다.`;
     }
     case "attendance": {
       const course = (d.course as { courseTitle?: string } | undefined)?.courseTitle;
@@ -549,7 +1044,7 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
     case "news": {
       const items = pickItems("items");
       if (!items.length) return "_새 공지가 없습니다._";
-      return `새 학교 공지 **${items.length}건**이 있습니다.`;
+      return `새 학교 공지 **${items.length}건**이 있어요.`;
     }
     default:
       return "_에이전트 요약이 아직 도착하지 않았어요. 아래 데이터를 참고해주세요._";
@@ -560,4 +1055,12 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// 메타 문자열 결합 (falsy 제외, HTML escape, " · "로 조인).
+function joinMeta(parts: Array<string | number | null | undefined>, sep = " · "): string {
+  return parts
+    .filter((x): x is string | number => x !== null && x !== undefined && x !== "")
+    .map((x) => esc(String(x)))
+    .join(sep);
 }
