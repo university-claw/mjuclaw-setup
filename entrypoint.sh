@@ -170,6 +170,33 @@ openclaw doctor --fix > /dev/null 2>&1 || true
 # 예전 버전 위에서 업그레이드한 설치본이면 남아있을 수 있으므로 정리한다.
 openclaw cron rm "mju-news-scrape" > /dev/null 2>&1 || true
 
+# ── 온보딩된 유저에 대한 출석 알림 자동 backfill (백그라운드) ────
+# 온보딩 완료 = /data/users/<id>/vault/*.enc 존재.
+# 이미 구독 중이면 refresh로 시간표 재스냅, 아니면 subscribe로 신규 등록.
+# 각 유저당 timetable 조회 + cron 등록이 5~7초 들 수 있어 gateway 기동을 막지 않도록
+# 백그라운드로 돌린다. 실패(시간표 미제공, SSO 만료 등)는 stderr로만 남김.
+attendance_backfill() {
+  shopt -s nullglob 2>/dev/null || true
+  for user_dir in /data/users/*/; do
+    discord_id=$(basename "$user_dir")
+    [[ "$discord_id" =~ ^[0-9]{17,20}$ ]] || continue
+    # vault에 크리덴셜 있는지로 "온보딩 완료" 판정
+    vault_any=("$user_dir"vault/*.enc)
+    [ -e "${vault_any[0]}" ] || continue
+
+    status_out=$(mju-attendance-alert status "$discord_id" 2>/dev/null || printf '%s' '{"enabled":false}')
+    if printf '%s' "$status_out" | grep -q '"courses"'; then
+      mju-attendance-alert refresh "$discord_id" >/dev/null 2>&1 \
+        || echo "WARN entrypoint: attendance refresh failed for $discord_id" >&2
+    else
+      mju-attendance-alert subscribe "$discord_id" >/dev/null 2>&1 \
+        || echo "WARN entrypoint: attendance subscribe failed for $discord_id" >&2
+    fi
+  done
+}
+attendance_backfill &
+echo "Started attendance alert backfill in background (PID $!)"
+
 echo ""
 echo "  ┌─────────────────────────────────────────────┐"
 echo "  │  MJUClaw OpenClaw Agent                     │"
