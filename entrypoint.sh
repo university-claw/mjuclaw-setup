@@ -20,6 +20,7 @@ DISCORD_USER_ID="${DISCORD_USER_ID:-415349075274104832}"
 CONFIG_SCHEMA_VERSION="3"
 CONFIG_PATH="/home/agent/.openclaw/openclaw.json"
 VERSION_MARKER="/home/agent/.openclaw/.mjuclaw-schema-version"
+CONFIG_INPUTS_MARKER="/home/agent/.openclaw/.mjuclaw-config-inputs.json"
 
 # ── 디렉토리 + 퍼미션 보장 ───────────────────────────────────────
 mkdir -p /home/agent/.openclaw
@@ -53,12 +54,44 @@ if [ -d "$TEMPLATE_DIR" ]; then
 fi
 
 # ── Config 버전 체크 ────────────────────────────────────────────
+CURRENT_CONFIG_INPUTS=$(python3 <<'PYEOF'
+import hashlib
+import json
+import os
+
+def sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+print(
+    json.dumps(
+        {
+            "model": os.environ.get("OPENCLAW_MODEL", "gemini-2.5-flash"),
+            "discordServerId": os.environ.get(
+                "DISCORD_SERVER_ID",
+                "1492100109997969499",
+            ),
+            "discordBotTokenSha256": sha256(os.environ["DISCORD_BOT_TOKEN"]),
+            "geminiApiKeySha256": sha256(os.environ["GEMINI_API_KEY"]),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+)
+PYEOF
+)
+
 regenerate_config=true
-if [ -f "$CONFIG_PATH" ] && [ -f "$VERSION_MARKER" ]; then
+if [ -f "$CONFIG_PATH" ] && [ -f "$VERSION_MARKER" ] && [ -f "$CONFIG_INPUTS_MARKER" ]; then
   current_version=$(cat "$VERSION_MARKER" 2>/dev/null || echo "0")
   if [ "$current_version" = "$CONFIG_SCHEMA_VERSION" ]; then
-    echo "Existing openclaw.json matches schema v$CONFIG_SCHEMA_VERSION, keeping."
-    regenerate_config=false
+    previous_inputs=$(cat "$CONFIG_INPUTS_MARKER" 2>/dev/null || echo "")
+    if [ "$previous_inputs" = "$CURRENT_CONFIG_INPUTS" ]; then
+      echo "Existing openclaw.json matches schema v$CONFIG_SCHEMA_VERSION and current env, keeping."
+      regenerate_config=false
+    else
+      echo "Config inputs changed, regenerating openclaw.json."
+      cp "$CONFIG_PATH" "$CONFIG_PATH.bak.$(date +%s)" 2>/dev/null || true
+    fi
   else
     echo "Schema changed ($current_version → $CONFIG_SCHEMA_VERSION), regenerating config."
     cp "$CONFIG_PATH" "$CONFIG_PATH.bak.$(date +%s)" 2>/dev/null || true
@@ -154,6 +187,8 @@ PYEOF
 
   echo "$CONFIG_SCHEMA_VERSION" > "$VERSION_MARKER"
   chmod 600 "$VERSION_MARKER"
+  printf '%s' "$CURRENT_CONFIG_INPUTS" > "$CONFIG_INPUTS_MARKER"
+  chmod 600 "$CONFIG_INPUTS_MARKER"
 fi
 
 # ── 불필요한 플러그인 비활성화 (tool-schema 간소화) ──────────────
