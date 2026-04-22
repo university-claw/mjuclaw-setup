@@ -205,6 +205,52 @@ openclaw doctor --fix > /dev/null 2>&1 || true
 # 예전 버전 위에서 업그레이드한 설치본이면 남아있을 수 있으므로 정리한다.
 openclaw cron rm "mju-news-scrape" > /dev/null 2>&1 || true
 
+# ── user_data 스키마 마이그레이션 + 파일 → DB 일회성 이관 ────────
+# mju-cli 가 저장하던 크리덴셜/프로필/세션을 Postgres user_data 스키마로
+# 영속화한다 (github.com/university-claw/mjuclaw-setup/issues/14,
+# github.com/university-claw/mju-cli/issues/1).
+if [ "${MJU_STORAGE:-file}" = "postgres" ]; then
+  USER_MIGRATED_MARKER="/home/agent/.openclaw/.mjuclaw-user-migrated"
+
+  if [ -z "${MJU_VAULT_KEY:-}" ]; then
+    echo "ERR entrypoint: MJU_STORAGE=postgres 인데 MJU_VAULT_KEY 가 비어있음. .env 확인." >&2
+    exit 1
+  fi
+
+  # 1) 스키마 마이그레이션 — 멱등. 실패 시 전체 기동 중단 (silent fallback 금지).
+  if ! node /opt/mju-cli/dist/main.js migrate --format json > /tmp/mju-migrate.out 2>&1; then
+    echo "ERR entrypoint: user_data 스키마 마이그레이션 실패:" >&2
+    cat /tmp/mju-migrate.out >&2
+    exit 1
+  fi
+  echo "user_data schema migration OK"
+
+  # 2) /data/users/* → DB 일회성 이관. 완료 마커가 있으면 스킵.
+  # 이관 후에도 원본 디렉토리는 그대로 유지한다 (백업 용). 충분히 검증된 뒤
+  # 별도 PR 에서 user-data 볼륨 자체를 제거할 예정.
+  if [ ! -f "$USER_MIGRATED_MARKER" ]; then
+    shopt -s nullglob 2>/dev/null || true
+    user_dirs=(/data/users/*/)
+    if [ "${#user_dirs[@]}" -gt 0 ]; then
+      echo "Migrating ${#user_dirs[@]} user directories from /data/users → user_data schema…"
+      if node /opt/mju-cli/dist/main.js auth migrate-users \
+           --source /data/users --format json > /tmp/mju-migrate-users.out 2> /tmp/mju-migrate-users.err; then
+        touch "$USER_MIGRATED_MARKER"
+        chmod 600 "$USER_MIGRATED_MARKER"
+        echo "User data migration OK → marker $USER_MIGRATED_MARKER"
+      else
+        echo "ERR entrypoint: migrate-users 실패:" >&2
+        cat /tmp/mju-migrate-users.err >&2
+        exit 1
+      fi
+    else
+      # /data/users 비어있으면 마커만 남겨 매 기동마다 재확인하지 않도록.
+      touch "$USER_MIGRATED_MARKER"
+      chmod 600 "$USER_MIGRATED_MARKER"
+    fi
+  fi
+fi
+
 # ── 온보딩된 유저에 대한 출석 알림 자동 backfill (백그라운드) ────
 # 온보딩 완료 = /data/users/<id>/vault/*.enc 존재.
 # 이미 구독 중이면 refresh로 시간표 재스냅, 아니면 subscribe로 신규 등록.

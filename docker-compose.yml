@@ -27,6 +27,17 @@ services:
       - PGUSER=${PGUSER:-mjuclaw_app}
       - PGPASSWORD=${PGPASSWORD}
       - PGSCHEMA=${PGSCHEMA:-public_data}
+      # ── user_data 스키마 접속 (mju-cli 전용 ROLE) ───────────────────
+      # worker 의 PG* 와 분리된 ROLE 이어야 한다. 공개/개인 경계 원칙.
+      - MJU_STORAGE=${MJU_STORAGE:-postgres}
+      - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
+      - MJU_PGPORT=${MJU_PGPORT:-${PGPORT:-5432}}
+      - MJU_PGDATABASE=${MJU_PGDATABASE:-${PGDATABASE:-mjuclaw}}
+      - MJU_PGUSER=${MJU_PGUSER:-mjuclaw_user_app}
+      - MJU_PGPASSWORD=${MJU_PGPASSWORD}
+      - MJU_PGSCHEMA=${MJU_PGSCHEMA:-user_data}
+      # envelope encryption 키 (openssl rand -hex 32). 분실 시 복호화 불가.
+      - MJU_VAULT_KEY=${MJU_VAULT_KEY}
     volumes:
       # 에이전트 세션/데이터 영속화 (컨테이너 재생성해도 유지)
       - agent-data:/home/agent/.openclaw
