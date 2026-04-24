@@ -18,7 +18,7 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 
 **길드 채널이면** "DM으로 로그인해주세요"라고 안내하고 다음 단계는 DM에서만 진행하세요.
 
-**온보딩 절차: DM 대화로 학번 → 비밀번호 순으로 수집합니다.** (openclaw Discord는 modal 폼을 지원하지 않으므로 대화형 Q&A 패턴을 씁니다.)
+**온보딩 절차: DM 대화로 학번 → 비밀번호 순으로 수집합니다.** (openclaw Discord는 modal 폼을 지원하지 않으므로 대화형 Q&A 패턴을 씁니다. 단 Poll/컴포넌트는 지원되며, 온보딩 이후 알림 선호 수집엔 Poll을 씁니다 — 아래 "온보딩 성공 시 기본 부가 효과" 참고.)
 
 ### Step 1: 안내 + 학번 요청
 
@@ -61,10 +61,20 @@ PW_END
 
 ### 온보딩 성공 시 기본 부가 효과 (자동)
 
-`mju-login`이 성공하면 **출석 누락 선제 알림이 자동으로 등록**된다 (기본 grace 10분).
-유저에게 "출석 알림 켤까요?"라고 따로 묻지 말 것. 이미 켜져있음을 전제로 응답하면 된다.
-유저가 명시적으로 "알림 그만"이라고 하면 그때 `mju-attendance-alert unsubscribe {DISCORD_USER_ID}`로 해제.
-유저가 "수업 시작 5분 후로 바꿔줘" 같이 grace를 조정하고 싶어하면 `mju-attendance-alert subscribe {DISCORD_USER_ID} 5`로 덮어씌우면 됨.
+`mju-login`이 성공하면 다음 2가지가 **자동으로** 따라붙는다. 에이전트가 추가 명령을 호출할 필요 없음.
+
+1. **출석 누락 선제 알림 자동 등록** (기본 grace 10분). `mju-login` 응답 JSON의 `attendanceAlert` 필드로 결과 확인 (`subscribed` / `refreshed` / `subscribe-failed` 등).
+2. **공지 알림 선호 설문 Poll 2건 DM 자동 발사** — `mju-login`이 `mju-onboarding-survey start`를 호출해 DM에 두 개의 Discord Poll을 보낸다. 유저가 1시간 안에 투표하면 그 선택으로, 안 하면 기본값(`매일 아침 8시 · 전체`)으로 `mju-news-alert` 구독이 자동 등록된다. 수거는 openclaw 크론(`+3m`, `+65m` 두 one-shot)이 `mju-onboarding-survey collect`를 실행하면서 이뤄지므로 에이전트가 손댈 필요 없음.
+
+따라서 온보딩 성공 응답에서 유저에게:
+- "출석 알림 켤까요?" / "공지 알림 받을래요?" 같은 질문을 **따로 하지 말 것**.
+- 이미 환영 카드 + Poll 2건이 DM에 도착했다는 사실을 짧게 언급하는 정도로 마무리.
+
+유저가 사후에 조정을 원할 때만 helper 호출:
+- 출석 grace 조정 → `mju-attendance-alert subscribe {DISCORD_USER_ID} 5`
+- 출석 알림 해제 → `mju-attendance-alert unsubscribe {DISCORD_USER_ID}`
+- 공지 알림 프리셋 변경 → `mju-news-alert preset {DISCORD_USER_ID} <morning-daily|weekday-morning|evening-daily|weekly-monday|skip> "<sources>"`
+- 공지 알림 설문 다시 → `mju-onboarding-survey reset {DISCORD_USER_ID}` 후 `mju-onboarding-survey start {DISCORD_USER_ID}`
 
 ### 온보딩이 된 경우 (`authenticated: true`)
 

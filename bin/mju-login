@@ -52,19 +52,22 @@ export MJU_PASSWORD="$PASSWORD"
 unset PASSWORD
 
 # node 프로세스 실행. env는 자동 상속. mju-cli는 --password 필수라 env에서 꺼내 args로 전달.
-# 과거 버전에서는 exec로 바로 치환해 버렸지만, 온보딩 완료 후 후속 작업(출석 알림 자동 구독)을
-# 붙이기 위해 일반 호출로 바꿨다.
+# 과거 버전에서는 exec로 바로 치환해 버렸지만, 온보딩 완료 후 후속 작업(출석 알림/공지 설문 자동)을
+# 붙이기 위해 일반 호출로 바꿨고, JSON 출력을 캡처해 후처리 결과를 합쳐 내보낸다.
 set +e
-mju auth login \
+LOGIN_JSON=$(mju auth login \
   --app-dir "$APP_DIR" \
   --id "$STUDENT_ID" \
   --password "$MJU_PASSWORD" \
-  --format json
+  --format json)
 LOGIN_EXIT=$?
 set -e
 
 if [ "$LOGIN_EXIT" -ne 0 ]; then
-  # 로그인 실패 — 추가 작업 없이 exit code 그대로 전파
+  # 로그인 실패 — mju-cli의 JSON 그대로 내보내고 exit code 전파
+  if [ -n "$LOGIN_JSON" ]; then
+    printf '%s\n' "$LOGIN_JSON"
+  fi
   exit "$LOGIN_EXIT"
 fi
 
@@ -72,15 +75,55 @@ fi
 # 온보딩이 끝난 모든 유저는 별도 요청 없이 출석 알림이 활성화된다.
 # 기존 구독이 있으면 refresh(시간표 재스냅)로 덮고, 없으면 subscribe로 신규 등록.
 # 여기서의 실패(시간표 조회 불가 등)는 login 자체 성공에 영향 없이 stderr로만 기록.
+ATTEND_STATE="unknown"
 STATUS_OUT=$(mju-attendance-alert status "$DISCORD_ID" 2>/dev/null || printf '%s' '{"enabled":false}')
 if printf '%s' "$STATUS_OUT" | grep -q '"courses"'; then
-  if ! mju-attendance-alert refresh "$DISCORD_ID" >/dev/null 2>&1; then
+  if mju-attendance-alert refresh "$DISCORD_ID" >/dev/null 2>&1; then
+    ATTEND_STATE="refreshed"
+  else
+    ATTEND_STATE="refresh-failed"
     echo "WARN mju-login: attendance refresh failed for $DISCORD_ID (non-blocking)" >&2
   fi
 else
-  if ! mju-attendance-alert subscribe "$DISCORD_ID" >/dev/null 2>&1; then
+  if mju-attendance-alert subscribe "$DISCORD_ID" >/dev/null 2>&1; then
+    ATTEND_STATE="subscribed"
+  else
+    ATTEND_STATE="subscribe-failed"
     echo "WARN mju-login: attendance subscribe failed for $DISCORD_ID (timetable unavailable?) (non-blocking)" >&2
   fi
 fi
+
+# ── 알림 선호 설문 자동 트리거 (최초 1회) ─────────────────────
+# 이미 물어본 유저(`onboarding-news-prompt.json`)에겐 멱등. 진행중(`onboarding-survey.json`)이면도 멱등.
+# 실패해도 login 자체 성공에 영향 없음.
+SURVEY_JSON='{"state":"unattempted"}'
+set +e
+if command -v mju-onboarding-survey >/dev/null 2>&1; then
+  RAW=$(mju-onboarding-survey start "$DISCORD_ID" 2>/dev/null)
+  if [ $? -eq 0 ] && [ -n "$RAW" ]; then
+    SURVEY_JSON="$RAW"
+  fi
+fi
+set -e
+
+# 로그인 JSON + 후처리 상태를 하나의 JSON으로 합쳐 출력.
+LOGIN_JSON="$LOGIN_JSON" ATTEND_STATE="$ATTEND_STATE" SURVEY_JSON="$SURVEY_JSON" python3 - <<'PY'
+import json, os, sys
+try:
+    base = json.loads(os.environ.get("LOGIN_JSON") or "{}")
+except Exception:
+    # mju-cli가 비-JSON을 내뿜었으면 원문을 그대로 보존
+    sys.stdout.write(os.environ.get("LOGIN_JSON") or "")
+    sys.exit(0)
+
+try:
+    survey = json.loads(os.environ.get("SURVEY_JSON") or '{"state":"unattempted"}')
+except Exception:
+    survey = {"state": "unattempted"}
+
+base["attendanceAlert"] = os.environ.get("ATTEND_STATE") or "unknown"
+base["onboardingSurvey"] = survey
+print(json.dumps(base, ensure_ascii=False))
+PY
 
 exit 0

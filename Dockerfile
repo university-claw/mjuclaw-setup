@@ -59,6 +59,10 @@ RUN chmod +x /usr/local/bin/mju-attendance-alert
 COPY bin/mju-login /usr/local/bin/mju-login
 RUN chmod +x /usr/local/bin/mju-login
 
+# mju-onboarding-survey — 로그인 직후 Discord Poll로 알림 선호 수집 (LLM 비관여)
+COPY bin/mju-onboarding-survey /usr/local/bin/mju-onboarding-survey
+RUN chmod +x /usr/local/bin/mju-onboarding-survey
+
 # ── view-server 빌드 ─────────────────────────────────────────────
 COPY package.json package-lock.json* /opt/view-server/
 WORKDIR /opt/view-server

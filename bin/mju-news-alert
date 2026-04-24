@@ -3,11 +3,13 @@
 #
 # Usage:
 #   mju-news-alert subscribe <discord_id> "<cron_expr>" "<sources>"
+#   mju-news-alert preset <discord_id> <preset_id> [<sources>]
 #   mju-news-alert unsubscribe <discord_id>
 #   mju-news-alert status <discord_id>
 #   mju-news-alert deliver <discord_id>     # cron이 호출 (내부용)
 #
 # sources: comma-separated from general,scholarship,event,career (빈 문자열이면 전부)
+# preset_id: morning-daily | weekday-morning | evening-daily | weekly-monday | skip
 
 set -euo pipefail
 
@@ -20,12 +22,26 @@ usage() {
   cat <<EOF
 Usage:
   mju-news-alert subscribe <discord_id> "<cron_expr>" "<sources>"
+  mju-news-alert preset <discord_id> <preset_id> [<sources>]
   mju-news-alert unsubscribe <discord_id>
   mju-news-alert status <discord_id>
   mju-news-alert deliver <discord_id>
 
 sources: general,scholarship,event,career (comma-separated, or "" for all)
+preset_id: morning-daily | weekday-morning | evening-daily | weekly-monday | skip
 EOF
+}
+
+# 프리셋 → cron 식 고정 매핑. survey 수거기와 자연어 폴백 모두 이 함수를 거친다.
+preset_cron() {
+  case "$1" in
+    morning-daily)    echo '0 8 * * *' ;;
+    weekday-morning)  echo '0 8 * * 1-5' ;;
+    evening-daily)    echo '0 21 * * *' ;;
+    weekly-monday)    echo '0 9 * * 1' ;;
+    skip)             echo '' ;;
+    *)                return 1 ;;
+  esac
 }
 
 user_dir() { printf '/data/users/%s\n' "$1"; }
@@ -135,6 +151,28 @@ case "$CMD" in
     fi
 
     echo "OK: subscribed $DISCORD_ID to $CRON_EXPR"
+    ;;
+
+  preset)
+    DISCORD_ID="${1-}"
+    PRESET_ID="${2-}"
+    SOURCES="${3-}"
+    [[ -z "$DISCORD_ID" || -z "$PRESET_ID" ]] && { usage; exit 1; }
+
+    if ! CRON_EXPR=$(preset_cron "$PRESET_ID"); then
+      echo "ERR: unknown preset '$PRESET_ID'" >&2
+      exit 1
+    fi
+
+    if [[ "$PRESET_ID" == "skip" ]]; then
+      # skip 프리셋: 기존 구독만 제거하고 subscription 파일은 남기지 않는다.
+      openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
+      rm -f "$(subs_file "$DISCORD_ID")"
+      echo "OK: preset skip applied for $DISCORD_ID (no subscription)"
+      exit 0
+    fi
+
+    exec "$0" subscribe "$DISCORD_ID" "$CRON_EXPR" "$SOURCES"
     ;;
 
   unsubscribe)
