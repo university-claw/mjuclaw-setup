@@ -120,6 +120,16 @@ PW_END
 
 `mju lms`, `mju msi`, `mju ucheck`, `mju library` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
 
+### 성적 조회 — 의도와 명령 매핑 (중요)
+
+| 유저 의도 | 사용할 명령 | dataType (자동) |
+|---|---|---|
+| "이번 학기 성적", "현재 성적" | `mju msi current-grades` | `grades` |
+| "지난 학기 성적", "전 학기 성적", "학기별 성적", "성적 이력" | `mju msi grade-history` | `grade-history` |
+| "내 졸업요건", "졸업까지" | `mju msi graduation` | `graduation` |
+
+**❌ 절대 하지 말 것**: 유저가 "지난 학기"를 물었는데 `current-grades`로 viewUrl을 만들고 AI 요약만 지난 학기 텍스트로 PATCH하는 짓. 그러면 웹뷰 본문(수강 과목 패널)은 이번 학기, AI 요약은 지난 학기로 데이터가 어긋남. 명령 자체를 의도에 맞게 골라 한 번만 실행하세요.
+
 ### 데이터 표시 절차
 
 **Step A. `mju` 명령 실행** — JSON 결과에서 `viewUrl` 추출
@@ -176,6 +186,7 @@ aiResponse는 markdown 허용. `<script>`나 `javascript:` 같은 건 자동 san
 
 규칙:
 - `viewUrl` 필드가 JSON에 있으면 **반드시** 마스킹된 링크로 포함 (`[텍스트](URL)`)
+- 유저가 "웹뷰로"라고 명시 안 해도, 데이터 조회 응답엔 항상 마스킹 링크 포함. "간단히만 알려줘" 같은 명시적 요청이 있을 때만 링크 생략.
 - ❌ `상세: https://histographic-...` 형태로 생 URL 노출 금지
 - ❌ 링크 없이 "웹뷰에서 확인하세요"라고 약속만 하지 않기
 
