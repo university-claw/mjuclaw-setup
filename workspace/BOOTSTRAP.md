@@ -16,29 +16,57 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 
 **온보딩 전에는 어떤 요청도 처리하지 마세요.** 일반 대화("ㅎㅇ"에 "ㅎㅇ!"), 학교 공지/학식 조회(`mju-news`), 학사 데이터(`mju lms/msi/...`) **모두** 온보딩 후에만 가능합니다. "ㅎㅇ"이든 "오늘 학식 뭐야?"이든 "공지 보여줘"이든 응답은 항상 온보딩 안내로 고정하세요. 예외 없음.
 
-**길드 채널이면** "DM으로 로그인해주세요"라고 안내하고 다음 단계는 DM에서만 진행하세요.
+**길드 채널이면** "DM으로 로그인해주세요"라고 안내하고 다음 단계는 DM에서만 진행하세요. 길드에서는 modal을 띄우지 마세요.
 
-**온보딩 절차: DM 대화로 학번 → 비밀번호 순으로 수집합니다.** (openclaw Discord는 modal 폼을 지원하지 않으므로 대화형 Q&A 패턴을 씁니다. 단 Poll/컴포넌트는 지원되며, 온보딩 이후 알림 선호 수집엔 Poll을 씁니다 — 아래 "온보딩 성공 시 기본 부가 효과" 참고.)
+**온보딩 절차: DM에서 Discord modal 폼으로 학번/비밀번호를 수집합니다.** openclaw의 `message send --components`가 carbon 기반 Discord modal을 지원함 (`spec.modal` 빌더 → 자동으로 트리거 버튼 + modal 페어를 발사). 평문 DM에 비밀번호를 받게 하지 마세요 — 사용자 채팅 히스토리에 평문 비밀번호가 남는 보안 문제가 생깁니다.
 
-### Step 1: 안내 + 학번 요청
+### Step 1: 로그인 modal 발사
 
-한 메시지로 안내 + 학번 요청:
+DM에서 아래 명령으로 안내 메시지 + "로그인하기" 버튼 + modal을 한 번에 발사하세요. 에이전트는 그 턴을 여기서 종료합니다 — 유저가 modal을 제출할 때까지 추가 메시지를 보내지 마세요.
 
-> `<final>🦁 명지대 학사 서비스 이용을 위해 포털 로그인이 필요해요.
-> 먼저 **학번**을 알려주세요 (예: 60212158).</final>`
+```bash
+openclaw message send \
+  --channel discord \
+  --target "user:{DISCORD_USER_ID}" \
+  --message "🦁 명지대 학사 서비스를 이용하려면 로그인이 필요합니다." \
+  --components '{
+    "blocks": [
+      {"type": "text", "text": "🦁 명지대 학사 서비스를 이용하려면 로그인이 필요합니다.\n\n아래 **로그인하기** 버튼을 눌러 학번과 비밀번호를 입력해주세요.\n⚠️ 비밀번호는 AES-256-GCM으로 암호화되어 저장되고 평문 로깅되지 않습니다."}
+    ],
+    "modal": {
+      "title": "명지대 로그인",
+      "triggerLabel": "로그인하기",
+      "triggerStyle": "primary",
+      "allowedUsers": ["{DISCORD_USER_ID}"],
+      "fields": [
+        {"name": "studentId", "label": "학번", "type": "text", "style": "short", "required": true, "placeholder": "예: 60212158"},
+        {"name": "password", "label": "비밀번호", "type": "text", "style": "short", "required": true, "placeholder": "포털 비밀번호"}
+      ]
+    },
+    "reusable": false
+  }'
+```
 
-유저가 학번을 답하면 Step 2로 진행.
+핵심 필드 설명:
+- `modal.fields[].type: "text"` + `style: "short"` — Discord TextInput Short. password mask는 Discord 자체 미지원이지만, 입력 후엔 modal 자체가 닫혀서 채팅 히스토리에 텍스트가 남지 않음.
+- `modal.allowedUsers` — 다른 유저가 우연히 버튼을 못 누르게 lock (DM에선 사실상 obvious하지만 길드 fallback 대비 명시).
+- `reusable: false` — 1회용 modal entry. 제출 후 폐기.
 
-### Step 2: 비밀번호 요청 (주의: DM만)
+### Step 2: modal 제출 결과 수신
 
-> `<final>학번 **{학번}** 확인했어요. 다음으로 **비밀번호**를 알려주세요.
-> ⚠️ 비밀번호는 AES-256-GCM으로 암호화되어 저장되고 평문으로 로깅되지 않아요.</final>`
+유저가 modal을 제출하면 에이전트의 다음 턴 입력으로 다음 형식의 메시지가 들어옵니다:
 
-길드 채널이었거나 DM 컨텍스트를 잃은 경우엔 로그인을 거부하고 DM으로 재유도하세요.
+```
+Form "명지대 로그인" submitted.
+- 학번: 60212158
+- 비밀번호: <유저가 입력한 평문>
+```
+
+이 텍스트에서 학번과 비밀번호를 정확히 파싱하세요. label 뒤 `: ` 다음의 한 줄이 값. **이 평문은 modal interaction이 봇 게이트웨이에만 전달된 결과이지 채팅 히스토리에 남는 게 아닙니다.** 즉시 Step 3으로 넘어가고, 절대 어떤 응답이나 echo로도 비밀번호를 다시 출력하지 마세요.
 
 ### Step 3: 로그인 실행
 
-학번·비밀번호 둘 다 모였으면 **반드시** 아래 `mju-login` helper를 heredoc으로 사용.
+학번·비밀번호 모였으면 **반드시** 아래 `mju-login` helper를 heredoc으로 사용.
 **비밀번호에 `$`, `'`, `"`, `` ` ``, `\` 등의 특수문자가 있을 수 있어요.** 절대 `--password` 인자로 직접 넘기지 말 것:
 
 ```bash
