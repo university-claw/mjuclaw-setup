@@ -111,7 +111,9 @@ try:
             continue
 
         time_range = entry.get("timeRange", "")
-        match = re.match(r"(\\d{1,2}):(\\d{2})", time_range)
+        # quoted heredoc(<<'PY')을 통해 넘어오기 때문에 백슬래시가 그대로 전달된다.
+        # 따라서 raw string에서 \d 한 번만 써야 regex engine이 digit로 해석한다.
+        match = re.match(r"(\d{1,2}):(\d{2})", time_range)
         if not match:
             continue
 

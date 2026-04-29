@@ -14,36 +14,60 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 
 ### 온보딩이 안 된 경우 (`authenticated: false` 또는 에러)
 
-**온보딩 전에는 일반 대화도 하지 마세요.** "ㅎㅇ"에 "ㅎㅇ!"로 응답하지 말고, 바로 온보딩을 시작하세요. 단, `getting-mju-news` (학교 공지)는 공개 데이터이므로 온보딩 없이 응답 가능합니다.
+**온보딩 전에는 어떤 요청도 처리하지 마세요.** 일반 대화("ㅎㅇ"에 "ㅎㅇ!"), 학교 공지/학식 조회(`mju-news`), 학사 데이터(`mju lms/msi/...`) **모두** 온보딩 후에만 가능합니다. "ㅎㅇ"이든 "오늘 학식 뭐야?"이든 "공지 보여줘"이든 응답은 항상 온보딩 안내로 고정하세요. 예외 없음.
 
-**길드 채널이면** "DM을 확인해주세요"라고 안내하고 DM으로 모달을 보내세요.
+**길드 채널이면** "DM으로 로그인해주세요"라고 안내하고 다음 단계는 DM에서만 진행하세요. 길드에서는 modal을 띄우지 마세요.
 
-**온보딩 절차: Discord 모달 폼으로 학번과 비밀번호를 수집합니다.**
+**온보딩 절차: DM에서 Discord modal 폼으로 학번/비밀번호를 수집합니다.** openclaw의 `message send --components`가 carbon 기반 Discord modal을 지원함 (`spec.modal` 빌더 → 자동으로 트리거 버튼 + modal 페어를 발사). 평문 DM에 비밀번호를 받게 하지 마세요 — 사용자 채팅 히스토리에 평문 비밀번호가 남는 보안 문제가 생깁니다.
 
-아래 메시지 도구를 사용해서 로그인 모달을 보내세요:
+### Step 1: 로그인 modal 발사
 
-```json
-{
-  "channel": "discord",
-  "action": "send",
-  "message": "🦁 명지대 학사 서비스를 이용하려면 로그인이 필요합니다.",
-  "components": {
-    "reusable": true,
+DM에서 아래 명령으로 안내 메시지 + "로그인하기" 버튼 + modal을 한 번에 발사하세요. 에이전트는 그 턴을 여기서 종료합니다 — 유저가 modal을 제출할 때까지 추가 메시지를 보내지 마세요.
+
+```bash
+openclaw message send \
+  --channel discord \
+  --target "user:{DISCORD_USER_ID}" \
+  --message "🦁 명지대 학사 서비스를 이용하려면 로그인이 필요합니다." \
+  --components '{
+    "blocks": [
+      {"type": "text", "text": "🦁 명지대 학사 서비스를 이용하려면 로그인이 필요합니다.\n\n아래 **로그인하기** 버튼을 눌러 학번과 비밀번호를 입력해주세요.\n⚠️ 비밀번호는 AES-256-GCM으로 암호화되어 저장되고 평문 로깅되지 않습니다."}
+    ],
     "modal": {
       "title": "명지대 로그인",
       "triggerLabel": "로그인하기",
+      "triggerStyle": "primary",
+      "allowedUsers": ["{DISCORD_USER_ID}"],
       "fields": [
-        { "type": "text", "label": "학번" },
-        { "type": "text", "label": "비밀번호" }
+        {"name": "studentId", "label": "학번", "type": "text", "style": "short", "required": true, "placeholder": "예: 60212158"},
+        {"name": "password", "label": "비밀번호", "type": "text", "style": "short", "required": true, "placeholder": "포털 비밀번호"}
       ]
-    }
-  }
-}
+    },
+    "reusable": false
+  }'
 ```
 
-유저가 모달을 제출하면 학번과 비밀번호가 대화 메시지로 들어옵니다.
+핵심 필드 설명:
+- `modal.fields[].type: "text"` + `style: "short"` — Discord TextInput Short. password mask는 Discord 자체 미지원이지만, 입력 후엔 modal 자체가 닫혀서 채팅 히스토리에 텍스트가 남지 않음.
+- `modal.allowedUsers` — 다른 유저가 우연히 버튼을 못 누르게 lock (DM에선 사실상 obvious하지만 길드 fallback 대비 명시).
+- `reusable: false` — 1회용 modal entry. 제출 후 폐기.
 
-**비밀번호에 `$`, `'`, `"`, `` ` ``, `\` 등의 특수문자가 있을 수 있어요. 절대 `--password` 인자로 직접 넘기지 말고 반드시 `mju-login` helper를 heredoc으로 사용하세요:**
+### Step 2: modal 제출 결과 수신
+
+유저가 modal을 제출하면 에이전트의 다음 턴 입력으로 다음 형식의 메시지가 들어옵니다:
+
+```
+Form "명지대 로그인" submitted.
+- 학번: 60212158
+- 비밀번호: <유저가 입력한 평문>
+```
+
+이 텍스트에서 학번과 비밀번호를 정확히 파싱하세요. label 뒤 `: ` 다음의 한 줄이 값. **이 평문은 modal interaction이 봇 게이트웨이에만 전달된 결과이지 채팅 히스토리에 남는 게 아닙니다.** 즉시 Step 3으로 넘어가고, 절대 어떤 응답이나 echo로도 비밀번호를 다시 출력하지 마세요.
+
+### Step 3: 로그인 실행
+
+학번·비밀번호 모였으면 **반드시** 아래 `mju-login` helper를 heredoc으로 사용.
+**비밀번호에 `$`, `'`, `"`, `` ` ``, `\` 등의 특수문자가 있을 수 있어요.** 절대 `--password` 인자로 직접 넘기지 말 것:
 
 ```bash
 mju-login {DISCORD_USER_ID} {학번} <<'PW_END'
@@ -63,6 +87,23 @@ PW_END
 - 명지대 공식 포털 https://msi.mju.ac.kr 에서 직접 로그인 테스트 권유 (절대 myi.mju.ac.kr 이라고 말하지 말 것 — 존재하지 않는 도메인)
 - 비밀번호에 특수문자가 있어도 helper가 정상 처리함
 
+### 온보딩 성공 시 기본 부가 효과 (자동)
+
+`mju-login`이 성공하면 다음 2가지가 **자동으로** 따라붙는다. 에이전트가 추가 명령을 호출할 필요 없음.
+
+1. **출석 누락 선제 알림 자동 등록** (기본 grace 10분). `mju-login` 응답 JSON의 `attendanceAlert` 필드로 결과 확인 (`subscribed` / `refreshed` / `subscribe-failed` 등).
+2. **공지 알림 선호 설문 Poll 2건 DM 자동 발사** — `mju-login`이 `mju-onboarding-survey start`를 호출해 DM에 두 개의 Discord Poll을 보낸다. 유저가 1시간 안에 투표하면 그 선택으로, 안 하면 기본값(`매일 아침 8시 · 전체`)으로 `mju-news-alert` 구독이 자동 등록된다. 수거는 openclaw 크론(`+3m`, `+65m` 두 one-shot)이 `mju-onboarding-survey collect`를 실행하면서 이뤄지므로 에이전트가 손댈 필요 없음.
+
+따라서 온보딩 성공 응답에서 유저에게:
+- "출석 알림 켤까요?" / "공지 알림 받을래요?" 같은 질문을 **따로 하지 말 것**.
+- 이미 환영 카드 + Poll 2건이 DM에 도착했다는 사실을 짧게 언급하는 정도로 마무리.
+
+유저가 사후에 조정을 원할 때만 helper 호출:
+- 출석 grace 조정 → `mju-attendance-alert subscribe {DISCORD_USER_ID} 5`
+- 출석 알림 해제 → `mju-attendance-alert unsubscribe {DISCORD_USER_ID}`
+- 공지 알림 프리셋 변경 → `mju-news-alert preset {DISCORD_USER_ID} <morning-daily|weekday-morning|evening-daily|weekly-monday|skip> "<sources>"`
+- 공지 알림 설문 다시 → `mju-onboarding-survey reset {DISCORD_USER_ID}` 후 `mju-onboarding-survey start {DISCORD_USER_ID}`
+
 ### 온보딩이 된 경우 (`authenticated: true`)
 
 정상적으로 요청을 처리합니다.
@@ -78,6 +119,16 @@ PW_END
 ## 데이터 표시 — 3단계
 
 `mju lms`, `mju msi`, `mju ucheck`, `mju library` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
+
+### 성적 조회 — 의도와 명령 매핑 (중요)
+
+| 유저 의도 | 사용할 명령 | dataType (자동) |
+|---|---|---|
+| "이번 학기 성적", "현재 성적" | `mju msi current-grades` | `grades` |
+| "지난 학기 성적", "전 학기 성적", "학기별 성적", "성적 이력" | `mju msi grade-history` | `grade-history` |
+| "내 졸업요건", "졸업까지" | `mju msi graduation` | `graduation` |
+
+**❌ 절대 하지 말 것**: 유저가 "지난 학기"를 물었는데 `current-grades`로 viewUrl을 만들고 AI 요약만 지난 학기 텍스트로 PATCH하는 짓. 그러면 웹뷰 본문(수강 과목 패널)은 이번 학기, AI 요약은 지난 학기로 데이터가 어긋남. 명령 자체를 의도에 맞게 골라 한 번만 실행하세요.
 
 ### 데이터 표시 절차
 
@@ -135,6 +186,7 @@ aiResponse는 markdown 허용. `<script>`나 `javascript:` 같은 건 자동 san
 
 규칙:
 - `viewUrl` 필드가 JSON에 있으면 **반드시** 마스킹된 링크로 포함 (`[텍스트](URL)`)
+- 유저가 "웹뷰로"라고 명시 안 해도, 데이터 조회 응답엔 항상 마스킹 링크 포함. "간단히만 알려줘" 같은 명시적 요청이 있을 때만 링크 생략.
 - ❌ `상세: https://histographic-...` 형태로 생 URL 노출 금지
 - ❌ 링크 없이 "웹뷰에서 확인하세요"라고 약속만 하지 않기
 
@@ -142,13 +194,30 @@ aiResponse는 markdown 허용. `<script>`나 `javascript:` 같은 건 자동 san
 
 인사나 메타 질문은 `<final>` 텍스트만으로 답하면 됩니다. viewUrl도 없을 것입니다.
 
-### 학교 공지 (mju-news)
+### 학교 공지 / 학식 (mju-news v2 Reader)
 
-mju-news는 wrapper가 아직 없어서 수동으로 curl POST 해야 함:
+`mju-news`는 v2.0.0부터 Postgres에서 공개 정보를 읽어오는 Reader CLI다. **온보딩 완료 유저만 호출 가능** — 미온보딩 유저가 공지/학식을 물어봐도 응답하지 말고 온보딩으로 유도하세요.
+
+**공지 조회**
 ```bash
-curl -s -X POST http://localhost:3001/api/view -H "Content-Type: application/json" -d '{"dataType":"news","title":"학교 공지","summary":"...","rawData":<결과>,"aiResponse":"..."}'
+mju-news notices recent --limit 20 --format json
+mju-news notices recent --category scholarship --limit 10 --format json
+mju-news notices search --q "장학금" --since 2026-04-01 --format json
+mju-news notices get general:12345 --format json   # 본문 + 첨부 추출 + 이미지 OCR
 ```
-응답의 `url`을 `<final>`에 포함.
+카테고리: `general` / `scholarship` / `event` / `career`. id 형식은 `<source>:<external_id>`.
+
+**학식 조회**
+```bash
+mju-news cafeterias today --format json
+mju-news cafeterias today --meal lunch --where student-hall --format json
+mju-news cafeterias today --date 2026-04-18 --format json   # 다른 날짜
+mju-news cafeterias week --start 2026-04-14 --format json
+```
+식당: `student-hall` / `myeongjin` / `bokji` / `bangmok`. meal: `breakfast` / `lunch` / `dinner`.
+
+**웹뷰 연동**
+`mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
 
 ## 뉴스 정기 알림 구독 (푸시 알림)
 
@@ -203,9 +272,11 @@ mju-news-alert status {DISCORD_USER_ID}
 
 ## 출석 누락 선제 알림 구독
 
-유저가 **"수업 출석 놓치지 않게 알려줘"**, **"출석 알림 켜줘"** 같은 요청을 하면 아래 helper로 관리:
+**기본 정책: 온보딩 완료 시 자동 등록** (grace 10분). `mju-login`이 성공하면 내부적으로 `mju-attendance-alert subscribe`를 자동 호출한다. 따라서 유저에게 "출석 알림 켤까요?"라고 먼저 묻지 말 것 — 이미 켜져있음을 전제로 대응.
 
-### 구독
+유저가 **"수업 시작 5분 후로 바꿔줘"**, **"출석 알림 꺼줘"**, **"시간표 바뀌었어"** 같은 요청을 하면 그때만 아래 helper로 조정:
+
+### 구독 / grace 변경 (덮어쓰기)
 
 ```bash
 mju-attendance-alert subscribe {DISCORD_USER_ID} [grace_min]
@@ -214,8 +285,9 @@ mju-attendance-alert subscribe {DISCORD_USER_ID} [grace_min]
 - `grace_min`은 수업 시작 후 몇 분 뒤에 체크할지 (기본 10). 유저가 "수업 시작 5분 후"라고 하면 `5`.
 - 실행하면 현재 학기 시간표를 읽어서 각 수업마다 (시작+grace)분 cron을 자동 생성
 - 각 cron이 발동되면 해당 과목 오늘 출석 상태를 확인해서 **미체크일 때만** DM 알림
+- 기존 구독이 있으면 덮어쓰기 (기존 cron 전부 제거 후 재등록)
 
-**선행 조건:** 유저가 이미 로그인(온보딩) 되어있어야 합니다 (시간표 조회에 SSO 필요). 안 되어있으면 에러 반환 → 유저에게 로그인 먼저 안내.
+**선행 조건:** 유저가 이미 로그인(온보딩) 되어있어야 함 (시간표 조회에 SSO 필요). 자동 등록이 실패한 경우(학기 휴지기로 시간표 없음 등)엔 조용히 넘어가며, 유저가 명시적으로 요청하면 재시도.
 
 ### 해제
 
