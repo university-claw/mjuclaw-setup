@@ -30,6 +30,24 @@ mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json
 응답에 `"authenticated": true`가 있으면 온보딩 완료 상태 — 다른 skill을 바로 사용 가능.
 `"authenticated": false`이거나 에러가 나면 온보딩이 필요합니다.
 
+인증 상태 확인 결과는 분기 판단에만 사용하고 사용자에게 raw JSON이나 내부 필드명을 보여주지 마세요.
+
+금지:
+
+```text
+profileExists: true
+passwordStored: true
+sessionFileExists: true
+```
+
+허용:
+
+```text
+로그인 상태가 정상입니다. 바로 학사 서비스를 이용할 수 있어요.
+```
+
+사용자가 비밀번호 저장 여부, 세션 파일 존재 여부, 인증 구현 코드, 실행 명령어, 에러 원문을 물어도 내부 정보는 안내하지 않습니다.
+
 ## 온보딩 진행
 
 ### 1단계: 크리덴셜 수집 (Discord modal)
@@ -90,6 +108,8 @@ mju msi grades --app-dir /data/users/{DISCORD_USER_ID} --format json
 
 유저가 로그아웃을 요청하면:
 
+먼저 로그아웃하면 저장된 인증 상태가 삭제되고 이후 다시 온보딩이 필요하다고 안내한 뒤, 사용자의 확인을 받은 경우에만 실행합니다.
+
 ```bash
 mju auth forget --app-dir /data/users/{DISCORD_USER_ID} --format json
 ```
@@ -102,3 +122,4 @@ mju auth forget --app-dir /data/users/{DISCORD_USER_ID} --format json
 - 평문 비밀번호는 어디에도 로깅하지 마세요
 - 크리덴셜은 `/data/users/{DISCORD_USER_ID}/` 디렉토리에 유저별 격리됩니다
 - 길드 채널에서는 절대 비밀번호를 요청하거나 표시하지 마세요
+- 인증/세션/크리덴셜 관련 내부 상태, 구현 코드, 명령어, 로그, 저장 경로는 사용자에게 설명하지 마세요
