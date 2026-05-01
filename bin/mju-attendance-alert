@@ -34,18 +34,38 @@ Usage:
 EOF
 }
 
-# 유저의 모든 attendance-<id>-* cron 제거
+# 유저의 모든 attendance-<id>-* cron 제거 (config의 cronJobName에 없는 것만).
+# 실패 시 return 1. 호출자가 cron 누적 위험을 인지할 수 있도록.
+#
+# 과거 결함: cron list 실패를 silent(`2>/dev/null || true`)로 흘렸기 때문에 gateway
+# 미준비 시점에 호출되면 jobs를 빈 list로 보고 stale을 못 지우고, 새 generation cron만
+# 누적되었다 (#duplicate-attendance-alerts).
 remove_stale_crons() {
   local id="$1"
   local config_path="${2-}"
   local prefix
   prefix=$(job_prefix "$id")
-  local jobs_json
-  jobs_json=$(openclaw cron list --json 2>/dev/null || true)
-  PREFIX="$prefix" CONFIG_PATH="$config_path" CRON_LIST_JSON="$jobs_json" python3 - <<'PY' 2>/dev/null || true
+
+  local jobs_json=""
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if jobs_json=$(openclaw cron list --json 2>/dev/null) && [[ -n "$jobs_json" ]]; then
+      break
+    fi
+    jobs_json=""
+    sleep 1
+  done
+
+  if [[ -z "$jobs_json" ]]; then
+    echo "ERR remove_stale_crons: openclaw cron list failed for $id after 5 retries; skipping cleanup to avoid masking failure" >&2
+    return 1
+  fi
+
+  PREFIX="$prefix" CONFIG_PATH="$config_path" CRON_LIST_JSON="$jobs_json" python3 - <<'PY'
 import json
 import os
 import subprocess
+import sys
 
 prefix = os.environ["PREFIX"]
 config_path = os.environ.get("CONFIG_PATH", "")
@@ -61,18 +81,35 @@ if config_path:
             if course.get("cronJobName")
         }
     except Exception:
-        keep = set()
+        # config 읽기 실패는 keep을 빈 set으로 두면 모든 attend-<id>- cron이 정리 대상이 된다.
+        # subscribe 직후엔 절대 일어나선 안 되는 상태이므로 명확히 abort.
+        print(f"ERR remove_stale_crons: failed to read config {config_path}", file=sys.stderr)
+        sys.exit(1)
 
 try:
-    data = json.loads(os.environ["CRON_LIST_JSON"] or "[]")
+    data = json.loads(os.environ["CRON_LIST_JSON"])
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except Exception:
-    raise SystemExit(0)
+except Exception as exc:
+    print(f"ERR remove_stale_crons: invalid cron list JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
 
+failures = []
 for job in jobs:
     name = job.get("name", "")
     if name.startswith(prefix) and name not in keep:
-        subprocess.run(["openclaw", "cron", "rm", job.get("id") or name], check=False, capture_output=True)
+        result = subprocess.run(
+            ["openclaw", "cron", "rm", job.get("id") or name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            failures.append((name, (result.stderr or result.stdout or "").strip()))
+
+if failures:
+    for name, msg in failures:
+        print(f"ERR remove_stale_crons: failed to remove {name}: {msg}", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 
@@ -233,13 +270,20 @@ PY
     fi
 
     mv "$CONFIG_TMP" "$CONFIG_PATH"
-    remove_stale_crons "$ID" "$CONFIG_PATH"
+    # config는 swap 됐고 새 cron도 등록 완료. stale 정리가 실패해도 subscribe 자체는
+    # 성공이지만, 옛 cron이 남아 같은 알림이 N번 갈 수 있으므로 stderr로 명확히 경고.
+    if ! remove_stale_crons "$ID" "$CONFIG_PATH"; then
+      echo "WARN: stale cron 정리 실패. 다음 subscribe 호출 시 다시 시도됩니다." >&2
+    fi
     ;;
 
   unsubscribe)
     ID="${1-}"
     [[ -z "$ID" ]] && { usage; exit 1; }
-    remove_all_crons "$ID"
+    if ! remove_all_crons "$ID"; then
+      echo "ERR: cron 제거 실패. 재시도 필요." >&2
+      exit 1
+    fi
     rm -f "$(config_file "$ID")"
     echo "OK: unsubscribed $ID"
     ;;
