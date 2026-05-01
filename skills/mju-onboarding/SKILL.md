@@ -14,6 +14,8 @@ metadata:
 
 명지대학교 학사 서비스를 사용하려면 포털 계정 인증이 필요합니다. 이 skill은 유저의 학번과 비밀번호를 받아 `mju auth login`으로 인증하고, 크리덴셜을 유저별 디렉토리에 저장합니다.
 
+> **정상 흐름 안내**: `onboarding-gate` plugin이 dispatch 단계에서 미온보딩 사용자 메시지를 1차로 가로채 LLM 호출 없이 직접 modal을 발사합니다. 따라서 이 skill에 미온보딩 흐름이 도달하면 plugin 실패/비활성 상황의 fallback입니다. 아래 절차는 그 fallback 안전망으로 유지합니다.
+
 ## 핵심 규칙
 
 1. **온보딩 전에는 어떤 skill도 실행하지 마세요.** `mju-lms`, `mju-msi`, `mju-ucheck`, `mju-library` 등 인증 데이터는 물론, **공개 데이터를 다루는 `getting-mju-news`(학교 공지/학식)도 온보딩 완료 후에만 사용 가능**합니다. 미온보딩 유저의 모든 요청은 온보딩 안내로 응답하세요. 일반 대화도 마찬가지.
