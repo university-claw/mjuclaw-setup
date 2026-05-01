@@ -327,6 +327,31 @@ PY
     [[ -z "$ID" || ( -z "$COURSE" && -z "$LECTURE_NO" ) ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$ID")
+
+    # 멱등 marker — 같은 사용자/날짜/수업 조합으로는 하루 한 번만 발송. cron이 어떤
+    # 이유(중복 등록, 재시도)로 두 번 이상 발사되어도 두 번째부터는 여기서 일찍 종료.
+    # cron이 Asia/Seoul로 발사되므로 marker 키도 KST 기준 날짜로 통일.
+    #
+    # 같은 슬롯에 cron이 6개 등록된 경우 OpenClaw가 같은 분에 6개를 동시 발사할 수
+    # 있다. 단순한 `[[ -e ]] + : >` 패턴은 6개가 모두 존재 검사를 통과한 뒤 모두
+    # 파일을 쓰는 TOCTOU race가 있어 실제로는 막지 못한다. `set -o noclobber` + `>`로
+    # 파일 생성 자체를 atomic lock으로 사용해 한 프로세스만 통과시킨다.
+    TODAY=$(TZ=Asia/Seoul date +%F)
+    if [[ -n "$LECTURE_NO" ]]; then
+      MARKER_KEY="$LECTURE_NO"
+    else
+      # course title은 다국어/특수문자 가능 — 파일명에 안전한 형태로 sanitize.
+      MARKER_KEY=$(printf '%s' "$COURSE" | tr -c '[:alnum:]가-힣' '_' | cut -c1-60)
+      [[ -z "$MARKER_KEY" ]] && MARKER_KEY="course"
+    fi
+    MARKER_DIR="$UDIR/.alert-sent"
+    MARKER_FILE="$MARKER_DIR/attendance-$TODAY-$MARKER_KEY.flag"
+    mkdir -p "$MARKER_DIR"
+    if ! (set -o noclobber; : > "$MARKER_FILE") 2>/dev/null; then
+      # 이미 다른 프로세스가 marker를 잡은 상태 — 중복 발송 방지를 위해 즉시 종료.
+      exit 0
+    fi
+
     if [[ -n "$LECTURE_NO" ]]; then
       if ! RES=$(mju ucheck attendance --lecture-no "$LECTURE_NO" --app-dir "$UDIR" --format json 2>&1); then
         exit 0
@@ -379,13 +404,21 @@ print("\n".join(lines))
 PY
 )
 
-    [[ -z "$CONTENT" ]] && exit 0
+    if [[ -z "$CONTENT" ]]; then
+      # 발송할 본문이 없는 경우(오늘 세션 없음 / 이미 출석 체크됨)에는 marker가 의미 없음.
+      # 다만 marker는 이미 atomic create로 잡혔으니, 다음 호출이 재시도하도록 풀어둔다.
+      rm -f "$MARKER_FILE"
+      exit 0
+    fi
 
     if ! openclaw message send --channel discord --target "user:$ID" --message "$CONTENT"; then
+      # send 실패는 marker 롤백 — 다음 cron 발사가 재시도할 수 있어야 한다.
+      rm -f "$MARKER_FILE"
       echo "ERR: failed to deliver attendance alert to $ID" >&2
       exit 1
     fi
 
+    # 발송 성공 — marker는 이미 atomic create로 만들어진 상태이므로 그대로 유지.
     printf '%s\n' "$CONTENT"
     ;;
 
