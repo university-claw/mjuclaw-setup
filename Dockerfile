@@ -63,6 +63,13 @@ RUN chmod +x /usr/local/bin/mju-login
 COPY bin/mju-onboarding-survey /usr/local/bin/mju-onboarding-survey
 RUN chmod +x /usr/local/bin/mju-onboarding-survey
 
+# ── mjuclaw OpenClaw plugins ────────────────────────────────────
+# onboarding-gate: Discord 미온보딩 사용자의 메시지를 LLM 호출 전에 가로채 로그인 modal을
+# 발사하는 plugin. entrypoint.sh가 시작 시 `openclaw plugins install --link`로 등록한다.
+# `--link` 옵션이 source path를 그대로 참조하므로 이 디렉토리가 안정적이어야 한다.
+RUN mkdir -p /opt/mjuclaw-plugins
+COPY --chown=agent:agent plugins/ /opt/mjuclaw-plugins/
+
 # ── view-server 빌드 ─────────────────────────────────────────────
 COPY package.json package-lock.json* /opt/view-server/
 WORKDIR /opt/view-server

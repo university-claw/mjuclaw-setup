@@ -197,6 +197,34 @@ for plugin in browser phone-control talk-voice device-pair; do
   openclaw plugins disable "$plugin" > /dev/null 2>&1 || true
 done
 
+# ── mjuclaw 자체 plugins 설치 + 활성화 ───────────────────────────
+# onboarding-gate: Discord 미온보딩 사용자의 메시지를 LLM 호출 전에 deterministic으로
+# 가로채 로그인 modal을 발사. 등록된 사용자는 그대로 통과 → 기존 LLM agent가 처리.
+# `--link`로 image 안의 plugin 디렉토리를 그대로 source로 사용 (재시작 시 코드 갱신 자동 반영).
+#
+# `--dangerously-force-unsafe-install` 사용 이유:
+# OpenClaw가 third-party plugin install 시 정적 분석으로 child_process 사용을 차단한다.
+# onboarding-gate는 modal 발사를 위해 `openclaw message send --components`를 child
+# process로 호출하므로 이 차단에 걸린다. 이 plugin은 우리 레포 내부 코드이고 image와
+# 같은 source of truth로 관리되므로 force는 안전하다. **외부에서 받은 plugin을 같은
+# 방식으로 install하지 말 것** — 코드 검토 없는 third-party plugin에 force를 쓰면
+# OpenClaw의 보안 layer가 무력화된다.
+if [ -d /opt/mjuclaw-plugins/onboarding-gate ]; then
+  install_log=$(mktemp /tmp/onboarding-gate-install.XXXXXX)
+  if openclaw plugins install /opt/mjuclaw-plugins/onboarding-gate \
+       --link --dangerously-force-unsafe-install >"$install_log" 2>&1; then
+    if openclaw plugins enable onboarding-gate >/dev/null 2>&1; then
+      echo "Onboarding gate plugin installed and enabled."
+    else
+      echo "WARN entrypoint: onboarding-gate plugin enable 실패." >&2
+    fi
+  else
+    echo "WARN entrypoint: onboarding-gate plugin install 실패. LLM 흐름은 정상 동작하나 미온보딩 사용자 게이팅이 비활성화됩니다." >&2
+    sed 's/^/  install: /' "$install_log" >&2
+  fi
+  rm -f "$install_log"
+fi
+
 # ── 초기 doctor 실행 ────────────────────────────────────────────
 openclaw doctor --fix > /dev/null 2>&1 || true
 
