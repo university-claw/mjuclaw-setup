@@ -1,0 +1,20 @@
+{
+  "id": "onboarding-gate",
+  "name": "MJU Onboarding Gate",
+  "description": "Discord 미온보딩 사용자의 메시지를 LLM 호출 전에 가로채서 deterministic하게 로그인 modal을 발사한다. 온보딩 완료 사용자는 그대로 통과해 기존 LLM agent 흐름이 동작한다.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": {
+      "label": "Onboarding Gate",
+      "help": "Discord 미온보딩 사용자의 메시지를 LLM 호출 전에 가로채 로그인 modal을 발사합니다. 비활성화 시 모든 메시지가 LLM agent로 통과됩니다."
+    }
+  }
+}

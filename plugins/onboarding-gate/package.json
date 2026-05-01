@@ -1,0 +1,14 @@
+{
+  "name": "mjuclaw-onboarding-gate",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin for mjuclaw — gate Discord traffic at before_dispatch and surface a deterministic login modal for unauthenticated users.",
+  "type": "module",
+  "main": "index.js",
+  "private": true,
+  "openclaw": {
+    "extensions": ["./index.js"]
+  },
+  "peerDependencies": {
+    "openclaw": "^2026.4.11"
+  }
+}
