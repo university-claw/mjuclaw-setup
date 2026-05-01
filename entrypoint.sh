@@ -256,7 +256,26 @@ fi
 # 이미 구독 중이면 refresh로 시간표 재스냅, 아니면 subscribe로 신규 등록.
 # 각 유저당 timetable 조회 + cron 등록이 5~7초 들 수 있어 gateway 기동을 막지 않도록
 # 백그라운드로 돌린다. 실패(시간표 미제공, SSO 만료 등)는 stderr로만 남김.
+#
+# IMPORTANT: 반드시 gateway가 ws 포트(18789)에서 응답을 시작한 뒤에 helper를 호출한다.
+# helper의 `openclaw cron list` 호출이 gateway 준비 전이면 1006으로 끊겨 silent
+# failure로 흘러가고, 그 결과 stale cron 정리가 누락되어 같은 알림 cron이 매 backfill
+# 마다 누적되는 버그가 있었다 (#duplicate-attendance-alerts).
 attendance_backfill() {
+  # gateway healthz가 200을 줄 때까지 polling. 각 iteration이 curl --max-time 1 +
+  # sleep 1 = ~2s 들고 최대 30회 시도하므로 상한은 ~60s. 그 안에 못 받으면 경고만 남
+  # 기고 그래도 진행 (학기 동안 한 번도 동작 안 하는 것보단 helper의 retry 안전망에
+  # 맡기는 게 낫다).
+  local waited=0
+  until curl -sf -o /dev/null --max-time 1 http://127.0.0.1:18789/healthz; do
+    if (( waited >= 30 )); then
+      echo "WARN entrypoint: gateway not ready after ~60s, attendance backfill proceeding anyway" >&2
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
   shopt -s nullglob 2>/dev/null || true
   for user_dir in /data/users/*/; do
     discord_id=$(basename "$user_dir")
