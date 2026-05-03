@@ -17,11 +17,10 @@ metadata:
 ## 기본 원칙
 
 1. **모든 mju 명령에 `--app-dir /data/users/{DISCORD_USER_ID}` 를 붙이세요.** 유저별 크리덴셜과 세션이 이 경로에 저장됩니다. `{DISCORD_USER_ID}`는 현재 대화하는 Discord 유저의 ID입니다.
-2. 먼저 인증 상태를 확인합니다: `mju auth status --app-dir /data/users/{DISCORD_USER_ID} --format json`
-3. 인증이 안 되어있으면 `mju-onboarding` skill로 안내합니다. 직접 로그인을 시도하지 마세요.
-4. 기본 출력은 `--format json`을 유지합니다.
-5. 실제 변경이 있는 명령은 preview를 먼저 보고 `--confirm`으로 실행합니다.
-6. 삭제, 초기화, 로그아웃, 전체 구독 해제처럼 되돌리기 어렵거나 사용자 상태를 크게 바꾸는 요청은 실행 전에 한 번 확인합니다.
+2. **인증은 mjuclaw-router가 사전에 처리합니다.** 메시지가 도달했다면 이미 인증된 사용자입니다. `mju auth status` / `mju auth login` / `mju auth forget` / `openclaw message send --components` 호출은 모두 금지(중복 modal 발사 / interaction failed의 원인). 도구 호출 결과로 세션 만료가 보이면 짧게 안내만 하고 끝내세요 — 다음 메시지에서 router가 onboarding을 다시 처리합니다.
+3. 기본 출력은 `--format json`을 유지합니다.
+4. 실제 변경이 있는 명령은 preview를 먼저 보고 `--confirm`으로 실행합니다.
+5. 삭제, 초기화, 로그아웃, 전체 구독 해제처럼 되돌리기 어렵거나 사용자 상태를 크게 바꾸는 요청은 실행 전에 한 번 확인합니다.
 
 ## 안전 응답 정책
 
