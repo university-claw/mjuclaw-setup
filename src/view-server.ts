@@ -25,7 +25,6 @@ const ALLOWED_DATA_TYPES = new Set<ViewEntry["dataType"]>([
   "courses",
   "action-items",
   "unsubmitted",
-  "due-assignments",
   "unread-notices",
   "attendance",
   "news",

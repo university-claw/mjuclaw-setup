@@ -115,7 +115,7 @@ flowchart TB
 | `lms courses list` | 수강 과목 목록 |
 | `lms notices/materials/assignments list/get` | LMS 강의 공지/자료/과제 |
 | `lms +action-items` | 미제출 과제 + 마감임박 + 안읽은 공지 + 미수강 온라인 한 번에 |
-| `lms +unsubmitted` / `+due-assignments` / `+unread-notices` / `+incomplete-online` | 각 항목별 필터링 |
+| `lms +unsubmitted` / `+unread-notices` / `+incomplete-online` | 각 항목별 필터링 |
 | `msi timetable` | 시간표 |
 | `msi current-grades` / `grade-history` | 성적 |
 | `msi graduation` | 졸업요건 |

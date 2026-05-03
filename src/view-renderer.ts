@@ -23,7 +23,6 @@ const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
   courses: { kicker: "COURSES", detail: "수강과목" },
   "action-items": { kicker: "TODAY'S BRIEFING", detail: "지금 할 일" },
   unsubmitted: { kicker: "ASSIGNMENTS", detail: "미제출 과제" },
-  "due-assignments": { kicker: "DUE SOON", detail: "마감 임박" },
   "unread-notices": { kicker: "NOTICES", detail: "LMS 공지" },
   attendance: { kicker: "ATTENDANCE", detail: "출석" },
   news: { kicker: "PUBLIC NOTICES", detail: "학교 공지" },
@@ -1072,7 +1071,6 @@ function renderData(dataType: string, data: unknown): string {
     courses: renderCourses,
     "action-items": renderActionItems,
     unsubmitted: renderUnsubmittedAssignments,
-    "due-assignments": renderAssignmentList,
     "unread-notices": renderNoticeList,
     attendance: renderAttendanceText,
     news: renderNewsList,
@@ -1926,17 +1924,6 @@ function assignmentDueText(item: AssignmentItem): string {
   return item.dueLabel || item.dueAt || (isAssignmentExpired(item) ? "만료" : item.statusText || "");
 }
 
-function renderAssignmentList(data: unknown): string {
-  const items = assignmentItems(data);
-  if (!items.length) return "";
-
-  let html = `<section class="section"><div class="section-title"><h2>과제<span class="count">${items.length}</span></h2></div>`;
-  for (const a of items) {
-    html += renderAssignmentRow(a);
-  }
-  return html + `</section>`;
-}
-
 // ── 공지 리스트 (LMS) ──────────────────────────────────
 
 function renderNoticeList(data: unknown): string {
@@ -2209,10 +2196,9 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
   const countLine = (label: string, items: unknown[]): string => items.length ? `- **${label}**: ${items.length}건` : "";
 
   switch (dataType) {
-    case "unsubmitted":
-    case "due-assignments": {
+    case "unsubmitted": {
       const items = pickItems("assignments", "items");
-      if (!items.length) return "_미제출·마감 임박 과제가 없습니다._";
+      if (!items.length) return "_미제출 과제가 없습니다._";
       const expired = (items as AssignmentItem[]).filter(isAssignmentExpired).length;
       const pending = items.length - expired;
       return [`총 **${items.length}건**의 과제가 있어요.`,

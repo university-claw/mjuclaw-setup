@@ -5,7 +5,6 @@
 # dataType은 서브커맨드를 보고 자동 매핑:
 #   lms +action-items  → action-items
 #   lms +unsubmitted   → unsubmitted
-#   lms +due-assignments → due-assignments
 #   lms +unread-notices → unread-notices
 #   msi timetable      → timetable
 #   msi grades         → grades
@@ -56,7 +55,6 @@ detect_datatype() {
   case "$args" in
     *"lms +action-items"*) echo "action-items" ;;
     *"lms +unsubmitted"*) echo "unsubmitted" ;;
-    *"lms +due-assignments"*) echo "due-assignments" ;;
     *"lms +unread-notices"*) echo "unread-notices" ;;
     *"lms +digest"*) echo "action-items" ;;
     *"msi timetable"*) echo "timetable" ;;
@@ -86,7 +84,6 @@ title_for_datatype() {
   case "$1" in
     "action-items") echo "남은 일" ;;
     "unsubmitted") echo "미제출 과제" ;;
-    "due-assignments") echo "마감 임박 과제" ;;
     "unread-notices") echo "안 읽은 공지" ;;
     "timetable") echo "시간표" ;;
     "grades") echo "성적" ;;
