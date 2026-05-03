@@ -42,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance" && entry.dataType !== "news") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -359,6 +359,21 @@ body {
   border-left: 2px solid var(--rule);
   grid-column: 1 / -1;
   word-break: keep-all;
+}
+
+/* News search results */
+.news-list-section {
+  padding-top: 22px;
+}
+.news-row .row-title {
+  align-items: flex-start;
+}
+.news-row .row-title a {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
 }
 
 /* Unsubmitted assignments */
@@ -2021,14 +2036,14 @@ function renderNewsList(data: unknown): string {
   const d = data as { items?: Array<{ title: string; url: string; source: string; postedAt?: string; author?: string; publishedAt?: string; sourceName?: string }> };
   if (!d.items?.length) return "";
 
-  let html = `<section class="section"><div class="section-title"><h2>학교 공지<span class="count">${d.items.length}</span></h2></div>`;
+  let html = `<section class="section news-list-section"><div class="section-title"><h2>공지<span class="count">${d.items.length}</span></h2></div>`;
   for (const n of d.items) {
     const label = n.sourceName || NEWS_SOURCE_LABEL[n.source] || n.source;
     const dateRaw = n.publishedAt || n.postedAt;
     const dateLabel = dateRaw
       ? new Date(dateRaw).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" })
       : "";
-    html += `<div class="row"><div class="row-icon accent">${codeChip(label || "")}</div><div class="row-main"><div class="row-title"><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></div><div class="row-sub">${joinMeta([label, n.author])}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">${esc(dateLabel)}</div></div>`;
+    html += `<div class="row news-row"><div class="row-icon accent">${codeChip(label || "")}</div><div class="row-main"><div class="row-title"><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></div><div class="row-sub">${joinMeta([label, n.author])}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">${esc(dateLabel)}</div></div>`;
   }
   return html + `</section>`;
 }
