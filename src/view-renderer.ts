@@ -42,10 +42,18 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
-  const aiResponseEffective = entry.aiResponse?.trim()
-    ? entry.aiResponse
-    : generateFallbackSummary(entry.dataType, entry.rawData);
-  const aiSummaryHtml = renderMarkdown(aiResponseEffective);
+  let briefingHtml = "";
+  if (entry.dataType !== "timetable") {
+    const aiResponseEffective = entry.aiResponse?.trim()
+      ? entry.aiResponse
+      : generateFallbackSummary(entry.dataType, entry.rawData);
+    const aiSummaryHtml = renderMarkdown(aiResponseEffective);
+    briefingHtml = `<section class="briefing">
+    <div class="briefing-label">AI 요약</div>
+    <div class="briefing-body">${aiSummaryHtml}</div>
+  </section>`;
+  }
+  const contentHtml = `${briefingHtml}${dataHtml}`;
   const created = new Date(entry.createdAt);
   const time = created.toLocaleString("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -94,12 +102,7 @@ ${pageStyles()}
     </div>
   </section>
 
-  <section class="briefing">
-    <div class="briefing-label">AI 요약</div>
-    <div class="briefing-body">${aiSummaryHtml}</div>
-  </section>
-
-  ${dataHtml}
+  ${contentHtml}
 
   <footer class="footer">
     <span>묭묭이 · 명지대 학사 도우미</span>
@@ -210,9 +213,10 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   padding: 0 20px 60px;
+  overflow-x: hidden;
 }
 
-.page { max-width: 560px; margin: 0 auto; }
+.page { width: 100%; max-width: 560px; margin: 0 auto; overflow: hidden; }
 .page-center { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
 
 /* Topbar */
@@ -231,10 +235,13 @@ body {
   font-size: 15px; font-weight: 700; color: var(--ink);
   letter-spacing: -0.01em;
 }
+.topbar-meta { min-width: 0; overflow: hidden; }
 .kicker {
+  display: block;
   font-size: 11px; font-weight: 600;
   color: var(--ink-3);
   letter-spacing: 0.12em; text-transform: uppercase;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* Hero */
@@ -385,37 +392,213 @@ body {
 .badge-blue { color: var(--accent); background: var(--accent-soft); }
 .badge-gray { color: var(--ink-2); background: var(--chip-bg); }
 
-/* Day pills (timetable) */
-.day-pills {
-  display: flex; gap: 6px; margin: 12px 0 18px;
+/* Timetable */
+.timetable-section { padding-top: 22px; }
+.timetable-focus {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+  padding: 16px;
 }
-.day-pill {
-  flex: 1; padding: 10px 0; border-radius: var(--radius-md);
-  background: var(--chip-bg); color: var(--ink-2);
-  text-align: center;
+.focus-kicker {
+  display: inline-flex; align-items: center;
+  min-height: 22px; padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
 }
-.day-pill.today { background: var(--ink); color: var(--bg); }
-.day-pill-label {
-  font-size: 10px; font-weight: 600;
-  letter-spacing: 0.05em; opacity: 0.75;
+.focus-title {
+  margin-top: 12px;
+  font-size: 22px; line-height: 1.22; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; word-break: keep-all;
 }
-.day-pill-date {
-  font-size: 15px; font-weight: 700;
-  margin-top: 3px; letter-spacing: -0.02em;
+.focus-primary {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 6px; margin-top: 10px;
+  color: var(--ink); font-size: 14px; font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.focus-arrow { color: var(--ink-3); font-weight: 500; }
+.focus-place {
+  margin-left: 4px; padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 12px; font-weight: 700;
+}
+.focus-sub {
+  margin-top: 8px; color: var(--ink-3);
+  font-size: 12.5px; font-weight: 500; word-break: keep-all;
+}
+.weekday-tabs {
+  position: sticky; top: 0; z-index: 3;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px; margin: 16px -2px 22px; padding: 8px 2px;
+  background: var(--bg);
+  backdrop-filter: blur(10px);
+}
+.weekday-tab {
+  min-width: 0; min-height: 46px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg); color: var(--ink-2);
+  text-decoration: none;
+}
+.weekday-tab span {
+  font-size: 12px; font-weight: 700; letter-spacing: -0.005em;
+}
+.weekday-tab strong {
+  color: var(--ink-3); font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.weekday-tab.active {
+  background: var(--ink); border-color: var(--ink); color: var(--bg);
+}
+.weekday-tab.active strong { color: var(--bg); opacity: 0.72; }
+.weekday-tab.today:not(.active) {
+  border-color: var(--accent-soft-2);
+  color: var(--accent);
+}
+.weekday-tab.empty { opacity: 0.62; }
+.timetable-title { margin-top: 2px; }
+.timeline-day {
+  scroll-margin-top: 74px;
+  padding: 18px 0 2px;
+  border-top: 1px solid var(--rule);
+}
+.timeline-day:first-of-type { border-top: none; }
+.timeline-day-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+  color: var(--ink-3); font-size: 12px; font-weight: 600;
+}
+.timeline-day-head > div {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+}
+.timeline-day-label {
+  color: var(--ink); font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
+}
+.today-chip {
+  padding: 2px 7px; border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 700;
+}
+.timeline-list {
+  position: relative;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.timeline-list::before {
+  content: "";
+  position: absolute; left: 53px; top: 10px; bottom: 10px;
+  width: 1px; background: var(--rule-strong);
+}
+.timeline-course {
+  position: relative;
+  display: grid; grid-template-columns: 46px minmax(0, 1fr);
+  gap: 14px; align-items: stretch;
+}
+.timeline-time {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: flex-end;
+  padding-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-time::after {
+  content: "";
+  position: absolute; top: 16px; right: -20px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--rule-strong);
+}
+.timeline-time strong {
+  color: var(--ink); font-size: 12.5px; font-weight: 700;
+}
+.timeline-time span {
+  margin-top: 2px; color: var(--ink-3); font-size: 11px; font-weight: 600;
+}
+.timeline-card {
+  min-width: 0; padding: 13px 14px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.timeline-card-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 10px;
+}
+.timeline-course-title {
+  min-width: 0;
+  color: var(--ink); font-size: 15px; line-height: 1.35; font-weight: 700;
+  letter-spacing: -0.01em; word-break: keep-all;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.timeline-place {
+  margin-top: 7px;
+  color: var(--accent); font-size: 14px; line-height: 1.25; font-weight: 700;
+}
+.timeline-meta {
+  margin-top: 4px;
+  color: var(--ink-3); font-size: 12px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.status-pill {
+  flex: 0 0 auto;
+  padding: 2px 7px; border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 700;
+}
+.status-pill.next { background: var(--accent-soft); color: var(--accent); }
+.status-pill.live { background: var(--green-soft); color: var(--green); }
+.timeline-course.is-next .timeline-card {
+  border-color: var(--accent-soft-2);
+  background: linear-gradient(180deg, var(--accent-soft), var(--bg));
+}
+.timeline-course.is-live .timeline-card {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.timeline-course.is-next .timeline-time::after,
+.timeline-course.is-live .timeline-time::after {
+  border-color: var(--accent); background: var(--accent);
+}
+.timeline-course.is-past { opacity: 0.52; }
+.timeline-gap {
+  position: relative;
+  display: grid; grid-template-columns: 46px minmax(0, 1fr);
+  gap: 14px; align-items: center;
+  min-height: 26px;
+}
+.timeline-gap span {
+  justify-self: end;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rule-strong); margin-right: -18px; z-index: 1;
+}
+.timeline-gap strong {
+  color: var(--ink-3); font-size: 12px; font-weight: 600;
+}
+.timeline-empty {
+  padding: 18px 14px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-3); font-size: 13px; font-weight: 500;
+  background: var(--bg-alt);
+}
 
-/* Day group */
-.day-group { margin-bottom: 18px; }
-.day-group:last-child { margin-bottom: 0; }
-.day-group-head {
-  display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px;
+@media (max-width: 480px) {
+  body { padding-left: 16px; padding-right: 16px; }
+  .topbar-meta { display: none; }
+  .weekday-tabs { gap: 4px; margin-left: 0; margin-right: 0; }
+  .weekday-tab { min-height: 44px; border-radius: var(--radius-sm); }
+  .timeline-list::before { left: 48px; }
+  .timeline-course,
+  .timeline-gap {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .timeline-time::after { right: -17px; }
+  .timeline-gap span { margin-right: -16px; }
+  .timeline-card { padding: 12px; }
+  .status-pill { font-size: 10.5px; padding: 2px 6px; }
 }
-.day-group-label {
-  font-size: 14px; font-weight: 700; color: var(--ink);
-  letter-spacing: -0.005em;
-}
-.day-group-today { font-size: 11.5px; color: var(--accent); font-weight: 600; }
 
 /* Metrics row (GPA / earned / etc) */
 .metric-hero {
@@ -626,47 +809,202 @@ function codeChip(title: string): string {
 
 // ── 시간표 ────────────────────────────────────────────
 
+type TimetableEntry = {
+  dayOfWeek: number;
+  dayLabel?: string;
+  courseTitle: string;
+  location?: string;
+  timeRange?: string;
+  professor?: string;
+};
+
+type NormalizedTimetableEntry = TimetableEntry & {
+  sourceIndex: number;
+  dayIndex: number;
+  dayLabel: string;
+  start: string;
+  end: string;
+  startMinutes: number;
+  endMinutes: number;
+};
+
 function renderTimetable(data: unknown): string {
-  const d = data as { entries?: Array<{ dayOfWeek: number; dayLabel?: string; courseTitle: string; location?: string; timeRange?: string; professor?: string }> };
+  const d = data as { entries?: TimetableEntry[] };
   if (!d.entries?.length) return "";
 
   const days = ["월", "화", "수", "목", "금"];
-  const todayIdx = new Date().getDay() - 1; // 월=0
-  const byDay = new Map<string, NonNullable<typeof d.entries>>();
-  for (const e of d.entries) {
-    const day = e.dayLabel || days[e.dayOfWeek - 1] || "?";
-    if (!byDay.has(day)) byDay.set(day, []);
-    byDay.get(day)!.push(e);
+  const now = new Date();
+  const todayIdx = now.getDay() - 1; // 월=0
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const normalized = d.entries
+    .map((entry, sourceIndex) => normalizeTimetableEntry(entry, sourceIndex, days))
+    .filter((entry) => entry.dayIndex >= 0 && entry.dayIndex < days.length)
+    .sort(compareTimetableEntries);
+
+  const byDay: NormalizedTimetableEntry[][] = days.map(() => []);
+  for (const entry of normalized) {
+    byDay[entry.dayIndex].push(entry);
   }
 
-  // Date pills (Mon-Fri this week)
-  const today = new Date();
-  const mon = new Date(today);
-  mon.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-  let html = `<section class="section"><div class="section-title"><h2>이번 주</h2></div>`;
-  html += `<div class="section-sub">수업 ${d.entries.length}개</div>`;
-  html += `<div class="day-pills">`;
-  for (let i = 0; i < 5; i++) {
-    const dt = new Date(mon); dt.setDate(mon.getDate() + i);
-    const isToday = i === todayIdx;
-    html += `<div class="day-pill${isToday ? " today" : ""}"><div class="day-pill-label">${days[i]}</div><div class="day-pill-date">${dt.getDate()}</div></div>`;
-  }
+  const focusEntry = findFocusTimetableEntry(normalized, todayIdx, nowMinutes) || normalized[0];
+  const focusDayIdx = todayIdx >= 0 && todayIdx < days.length && byDay[todayIdx].length > 0
+    ? todayIdx
+    : focusEntry.dayIndex;
+  const focusStatus = describeTimetableFocus(focusEntry, todayIdx, nowMinutes);
+  const weekClassCount = normalized.length;
+
+  let html = `<section class="section timetable-section">`;
+  html += `<div class="timetable-focus">`;
+  html += `<div class="focus-kicker">${esc(focusStatus.kicker)}</div>`;
+  html += `<div class="focus-title">${esc(focusEntry.courseTitle)}</div>`;
+  html += `<div class="focus-primary"><span>${esc(focusEntry.start)}</span><span class="focus-arrow">→</span><span>${esc(focusEntry.end)}</span><span class="focus-place">${esc(focusEntry.location || "강의실 미정")}</span></div>`;
+  html += `<div class="focus-sub">${esc(focusStatus.detail)}${focusEntry.professor ? ` · ${esc(focusEntry.professor)}` : ""}</div>`;
   html += `</div>`;
-
+  html += `<nav class="weekday-tabs" aria-label="요일별 시간표">`;
   for (let i = 0; i < days.length; i++) {
-    const day = days[i];
-    const entries = byDay.get(day);
-    if (!entries) continue;
-    entries.sort((a, b) => (a.timeRange || "").localeCompare(b.timeRange || ""));
-    const isToday = i === todayIdx;
-    html += `<div class="day-group"><div class="day-group-head"><div class="day-group-label">${day}요일</div><div class="day-group-today">${isToday ? "TODAY · " : ""}${entries.length}개</div></div>`;
-    for (const e of entries) {
-      const [start, end] = (e.timeRange || " – ").split(" – ");
-      html += `<div class="row"><div class="row-icon">${codeChip(e.courseTitle)}</div><div class="row-main"><div class="row-title">${esc(e.courseTitle)}</div><div class="row-sub">${joinMeta([e.location, e.professor])}</div></div><div class="row-value"><div>${esc(start)}</div><div style="font-size:11px;color:var(--ink-3);margin-top:2px">${esc(end)}</div></div></div>`;
-    }
-    html += `</div>`;
+    const count = byDay[i].length;
+    const cls = [
+      "weekday-tab",
+      i === focusDayIdx ? "active" : "",
+      i === todayIdx ? "today" : "",
+      count === 0 ? "empty" : "",
+    ].filter(Boolean).join(" ");
+    html += `<a class="${cls}" href="#day-${i + 1}"><span>${days[i]}</span><strong>${count}</strong></a>`;
   }
+  html += `</nav>`;
+
+  html += `<div class="section-title timetable-title"><h2>요일별 시간표<span class="count">${weekClassCount}</span></h2></div>`;
+  html += `<div class="section-sub">시간, 강의실, 공강을 하루 흐름으로 볼 수 있어요.</div>`;
+
+  for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+    const entries = byDay[dayIndex];
+    const isToday = dayIndex === todayIdx;
+    const isFocusDay = dayIndex === focusDayIdx;
+    html += `<section class="timeline-day${isFocusDay ? " focus-day" : ""}" id="day-${dayIndex + 1}">`;
+    html += `<div class="timeline-day-head"><div><span class="timeline-day-label">${days[dayIndex]}요일</span>${isToday ? `<span class="today-chip">오늘</span>` : ""}</div><span>${entries.length ? `${entries.length}개 수업` : "수업 없음"}</span></div>`;
+
+    if (!entries.length) {
+      html += `<div class="timeline-empty">이 날은 수업이 없어요.</div>`;
+      html += `</section>`;
+      continue;
+    }
+
+    html += `<div class="timeline-list">`;
+    entries.forEach((entry, index) => {
+      const previous = entries[index - 1];
+      if (previous) {
+        const gap = entry.startMinutes - previous.endMinutes;
+        if (gap >= 30) {
+          html += `<div class="timeline-gap"><span></span><strong>공강 ${formatDuration(gap)}</strong></div>`;
+        }
+      }
+
+      const statusClass = timetableEntryStatusClass(entry, focusEntry, todayIdx, nowMinutes);
+      html += `<article class="timeline-course ${statusClass}">`;
+      html += `<div class="timeline-time"><strong>${esc(entry.start)}</strong><span>${esc(entry.end)}</span></div>`;
+      html += `<div class="timeline-card">`;
+      html += `<div class="timeline-card-top"><div class="timeline-course-title">${esc(entry.courseTitle)}</div>${statusClass === "is-live" ? `<span class="status-pill live">진행 중</span>` : statusClass === "is-next" ? `<span class="status-pill next">다음</span>` : ""}</div>`;
+      html += `<div class="timeline-place">${esc(entry.location || "강의실 미정")}</div>`;
+      html += `<div class="timeline-meta">${joinMeta([entry.professor, entry.timeRange])}</div>`;
+      html += `</div></article>`;
+    });
+    html += `</div></section>`;
+  }
+
   return html + `</section>`;
+}
+
+function normalizeTimetableEntry(entry: TimetableEntry, sourceIndex: number, days: string[]): NormalizedTimetableEntry {
+  const dayIndex = Number.isFinite(entry.dayOfWeek) ? entry.dayOfWeek - 1 : days.indexOf(entry.dayLabel || "");
+  const parsed = parseTimeRange(entry.timeRange);
+  return {
+    ...entry,
+    sourceIndex,
+    dayIndex,
+    dayLabel: entry.dayLabel || days[dayIndex] || "?",
+    start: parsed.start,
+    end: parsed.end,
+    startMinutes: parsed.startMinutes,
+    endMinutes: parsed.endMinutes,
+  };
+}
+
+function parseTimeRange(timeRange?: string): { start: string; end: string; startMinutes: number; endMinutes: number } {
+  const raw = timeRange || "";
+  const parts = raw.split(/\s*[–-]\s*/);
+  const start = parts[0]?.trim() || "";
+  const end = parts[1]?.trim() || "";
+  return {
+    start,
+    end,
+    startMinutes: parseClockMinutes(start),
+    endMinutes: parseClockMinutes(end),
+  };
+}
+
+function parseClockMinutes(clock: string): number {
+  const match = clock.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  return hours * 60 + minutes;
+}
+
+function compareTimetableEntries(a: NormalizedTimetableEntry, b: NormalizedTimetableEntry): number {
+  if (a.dayIndex !== b.dayIndex) return a.dayIndex - b.dayIndex;
+  if (a.startMinutes !== b.startMinutes) return a.startMinutes - b.startMinutes;
+  return a.sourceIndex - b.sourceIndex;
+}
+
+function findFocusTimetableEntry(entries: NormalizedTimetableEntry[], todayIdx: number, nowMinutes: number): NormalizedTimetableEntry | undefined {
+  if (!entries.length) return undefined;
+
+  if (todayIdx >= 0 && todayIdx < 5) {
+    const remainingToday = entries.find((entry) => entry.dayIndex === todayIdx && entry.endMinutes >= nowMinutes);
+    if (remainingToday) return remainingToday;
+
+    const laterThisWeek = entries.find((entry) => entry.dayIndex > todayIdx);
+    if (laterThisWeek) return laterThisWeek;
+  }
+
+  return entries[0];
+}
+
+function describeTimetableFocus(entry: NormalizedTimetableEntry, todayIdx: number, nowMinutes: number): { kicker: string; detail: string } {
+  if (entry.dayIndex === todayIdx && nowMinutes >= entry.startMinutes && nowMinutes < entry.endMinutes) {
+    return { kicker: "진행 중", detail: `${entry.dayLabel}요일 ${formatDuration(entry.endMinutes - nowMinutes)} 뒤 종료` };
+  }
+
+  if (entry.dayIndex === todayIdx && entry.startMinutes > nowMinutes) {
+    return { kicker: "다음 수업", detail: `${formatDuration(entry.startMinutes - nowMinutes)} 뒤 시작` };
+  }
+
+  return { kicker: "다음 수업", detail: `${entry.dayLabel}요일 예정` };
+}
+
+function timetableEntryStatusClass(entry: NormalizedTimetableEntry, focusEntry: NormalizedTimetableEntry, todayIdx: number, nowMinutes: number): string {
+  if (entry.dayIndex === todayIdx && nowMinutes >= entry.startMinutes && nowMinutes < entry.endMinutes) {
+    return "is-live";
+  }
+
+  if (entry.sourceIndex === focusEntry.sourceIndex) {
+    return "is-next";
+  }
+
+  if (entry.dayIndex < todayIdx || (entry.dayIndex === todayIdx && entry.endMinutes < nowMinutes)) {
+    return "is-past";
+  }
+
+  return "";
+}
+
+function formatDuration(minutes: number): string {
+  const safeMinutes = Math.max(0, minutes);
+  const hours = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
+  if (hours > 0 && mins > 0) return `${hours}시간 ${mins}분`;
+  if (hours > 0) return `${hours}시간`;
+  return `${mins}분`;
 }
 
 // ── 성적 ──────────────────────────────────────────────
