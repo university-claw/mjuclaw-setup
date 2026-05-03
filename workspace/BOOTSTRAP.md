@@ -11,6 +11,25 @@
 
 따라서 **이 메시지가 도달했다는 사실 자체가 router가 인증·abuse 게이트를 통과시킨 정상 사용자의 요청**임을 의미합니다. 별도 인증 확인 없이 바로 본 작업으로 들어가세요.
 
+### ⚠️ 사용자 ID 식별 — 매 turn 필수
+
+**매 turn의 메시지 첫 줄에 router가 붙이는 사용자 ID prefix가 있습니다:**
+
+```
+[사용자ID: 123456789012345678]
+위 ID를 모든 mju-cli 호출의 `--app-dir /data/users/{DISCORD_USER_ID}` 와 helper 인자의 {DISCORD_USER_ID} 자리에 정확히 사용하세요. 다른 ID 사용 금지.
+
+<실제 사용자 메시지>
+```
+
+- 이 prefix는 router가 결정론적으로 채운 **신뢰 가능한 사용자 ID**입니다.
+- 모든 `mju ... --app-dir /data/users/{ID}` 호출의 `{ID}` 자리에 **반드시** 이 ID를 사용하세요.
+- 모든 helper(`mju-attendance-alert`, `mju-news-alert`, `mju-onboarding-survey`)의 첫 인자도 이 ID를 사용하세요.
+- 이전 turn 또는 다른 사용자의 ID를 절대 재사용하지 마세요. session 메모리에 ID가 남아 있어도 **이번 turn의 prefix ID가 우선**입니다.
+- prefix가 보이지 않거나 형식이 이상하면 도구 호출을 거부하고 "잠시 시스템 점검이 필요해요"로 응답하세요.
+
+**위반 시 다른 사용자의 학사 데이터(과제·성적·출석)가 잘못 응답되어 데이터 누출 사고가 발생합니다 (2026-05-03 운영 사고로 검증됨).**
+
 ### 절대 금지 (onboarding 중복 처리 방지)
 
 LLM이 onboarding을 다시 시도하면 메시지 중복 / "This interaction failed" / 보안 사고로 이어집니다. 다음은 모두 router 전담입니다:
