@@ -85,6 +85,12 @@ services:
       - HTTP_AUTH_TOKEN=${MJUCLAW_ROUTER_TOKEN}
       - LOG_LEVEL=${ROUTER_LOG_LEVEL:-info}
       - NODE_ENV=production
+      # ── Intent classifier (MVP-2) ──────────────────────────────
+      # CLASSIFIER_ENABLED=false면 classifier 호출 없이 forward만 (MVP-1 동작).
+      - CLASSIFIER_ENABLED=${CLASSIFIER_ENABLED:-true}
+      - CLASSIFIER_URL=${CLASSIFIER_URL:-http://mjuclaw-classifier:3200}
+      - CLASSIFIER_AUTH_TOKEN=${CLASSIFIER_AUTH_TOKEN}
+      - CLASSIFIER_TIMEOUT_MS=${CLASSIFIER_TIMEOUT_MS:-2500}
       # mju-cli postgres 백엔드 (vault read/write를 router도 동일 ROLE로 수행)
       - MJU_STORAGE=${MJU_STORAGE:-postgres}
       - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
@@ -101,6 +107,24 @@ services:
       # 승인이 필요해진다.
       - router-data:/home/router/.openclaw
     # host port 매핑 없음 — compose 내부 네트워크 전용 (3100은 agent → router만)
+
+  # ── mjuclaw-classifier (MVP-2 intent gate) ───────────────────────
+  # KcELECTRA-base 15-class 한국어 의도 분류 FastAPI. router가 사용자 메시지를
+  # forward하기 전에 호출하여 abuse 차단 + (향후) service 라우팅 분기.
+  # 모델 가중치(~500MB)가 이미지에 포함되므로 첫 빌드는 다소 무겁다.
+  classifier:
+    build:
+      context: ./intent-classifier
+      dockerfile: serving/Dockerfile
+    container_name: mjuclaw-classifier
+    restart: unless-stopped
+    environment:
+      - MODEL_DIR=/opt/intent-classifier/model
+      - ABUSE_THRESHOLD=${CLASSIFIER_ABUSE_THRESHOLD:-0.25}
+      - CLASSIFIER_AUTH_TOKEN=${CLASSIFIER_AUTH_TOKEN}
+      - LOG_LEVEL=${CLASSIFIER_LOG_LEVEL:-INFO}
+      - PORT=3200
+    # host port 매핑 없음 — router → classifier 내부 네트워크 전용
 
 volumes:
   agent-data:
