@@ -42,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -904,6 +904,70 @@ body {
 .metric-cell .v {
   font-size: 16px; font-weight: 700; color: var(--ink);
   margin-top: 3px; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Attendance */
+.attendance-summary {
+  padding-top: 24px;
+}
+.attendance-briefing {
+  padding: 2px 0 4px;
+}
+.attendance-course {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.attendance-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 14px;
+  padding: 15px 0 12px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.attendance-count {
+  min-width: 0;
+}
+.attendance-count span {
+  display: block;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 700;
+}
+.attendance-count strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.attendance-count.danger strong {
+  color: var(--red);
+}
+.attendance-count.warn strong {
+  color: var(--warn);
+}
+.attendance-count .unit {
+  display: inline;
+  margin-left: 2px;
+  color: currentColor;
+  font-size: 15px;
+  font-weight: 800;
+}
+.attendance-support {
+  margin-top: 10px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2124,10 +2188,23 @@ function renderAttendanceText(data: unknown): string {
 
   let html = "";
 
-  // Hero rate
-  if (d.summary && d.completedSessions) {
-    const rate = Math.round(((d.summary.attendedCount ?? 0) / d.completedSessions) * 100);
-    html += `<section class="section"><div class="metric-hero"><div class="metric-label">출석률</div><div class="metric-value">${rate}<span class="unit">%</span></div><div class="metric-trend"><span class="up">출석 ${d.summary.attendedCount ?? 0}</span> · 지각 ${d.summary.tardyCount ?? 0} · 결석 ${d.summary.absentCount ?? 0}</div></div></section>`;
+  // Absence-first briefing
+  if (d.summary) {
+    const attended = d.summary.attendedCount ?? 0;
+    const tardy = d.summary.tardyCount ?? 0;
+    const earlyLeave = d.summary.earlyLeaveCount ?? 0;
+    const absent = d.summary.absentCount ?? 0;
+    const completed = d.completedSessions ?? d.sessions?.filter((s) => s.isPast).length ?? 0;
+    const courseTitle = d.course?.courseTitle ? `${esc(d.course.courseTitle)} 출결` : "출결 요약";
+    const support = [`출석 ${attended}회`, completed ? `진행된 수업 ${completed}회` : "", earlyLeave ? `조퇴 ${earlyLeave}회` : ""].filter(Boolean).join(" · ");
+    html += `<section class="section attendance-summary"><div class="attendance-briefing">`;
+    html += `<div class="attendance-course">${courseTitle}</div>`;
+    html += `<div class="attendance-counts">`;
+    html += `<div class="attendance-count danger"><span>결석</span><strong>${absent}<span class="unit">회</span></strong></div>`;
+    html += `<div class="attendance-count warn"><span>지각</span><strong>${tardy}<span class="unit">회</span></strong></div>`;
+    html += `</div>`;
+    if (support) html += `<div class="attendance-support">${support}</div>`;
+    html += `</div></section>`;
   }
 
   // Dot grid
