@@ -2,8 +2,13 @@
 set -euo pipefail
 
 # ── 환경변수 검증 ────────────────────────────────────────────────
-if [ -z "${DISCORD_BOT_TOKEN:-}" ]; then
-  echo "ERR: DISCORD_BOT_TOKEN is required" >&2
+# DISCORD_BOT_TOKEN은 mjuclaw-router 단독 소유. agent는 빈 값으로 받아야 한다.
+# (값이 들어오면 openclaw의 channels.discord 가 enabled=False여도 sidecar 또는
+# adapter가 어떤 경로로든 connect를 시도해 router와 토큰 충돌 + 사용자 컨텍스트
+# 격리 깨짐 → 데이터 누출. 2026-05-03 운영 사고로 검증됨.)
+if [ -n "${DISCORD_BOT_TOKEN:-}" ]; then
+  echo "ERR: DISCORD_BOT_TOKEN must NOT be set in agent container (router 전담)." >&2
+  echo "    docker-compose의 agent service에서 이 env 라인을 제거하세요." >&2
   exit 1
 fi
 
@@ -35,7 +40,9 @@ DISCORD_USER_ID="${DISCORD_USER_ID:-415349075274104832}"
 
 # Config 스키마 버전. 변경되면 기존 config를 백업하고 재생성한다.
 # v4: channels.discord.enabled=False — Discord WS 단독 소유는 mjuclaw-router로 이전.
-CONFIG_SCHEMA_VERSION="4"
+# v5: channels.discord 항목 자체 제거 (enabled=False만으로는 sidecar가 어떤 경로로
+#     connect 시도해 데이터 누출 가능. agent는 토큰 자체를 받지 않는다).
+CONFIG_SCHEMA_VERSION="5"
 CONFIG_PATH="/home/agent/.openclaw/openclaw.json"
 VERSION_MARKER="/home/agent/.openclaw/.mjuclaw-schema-version"
 CONFIG_INPUTS_MARKER="/home/agent/.openclaw/.mjuclaw-config-inputs.json"
@@ -88,7 +95,7 @@ print(
                 "DISCORD_SERVER_ID",
                 "1492100109997969499",
             ),
-            "discordBotTokenSha256": sha256(os.environ["DISCORD_BOT_TOKEN"]),
+            "discordBotTokenSha256": "absent-by-design",
             "geminiApiKeySha256": sha256(os.environ["GEMINI_API_KEY"]),
             "gatewayTokenSha256": sha256(os.environ["OPENCLAW_GATEWAY_TOKEN"]),
         },
@@ -161,15 +168,15 @@ config = {
     'session': {
         'dmScope': 'per-channel-peer',
     },
+    # channels: discord 항목 자체를 제거.
+    # 과거에는 channels.discord = {enabled: False, token: <real>} 로 두었지만,
+    # openclaw가 enabled=False여도 health-monitor / sidecar 경로에서 connect를
+    # 시도해 router와 토큰 충돌이 일어나고 일부 사용자 메시지가 agent로 직접
+    # 들어가서 LLM이 잘못된 사용자 컨텍스트로 응답 → 데이터 누출이 일어났다
+    # (2026-05-03 운영 사고). agent는 Discord에 절대 connect 하면 안 된다.
+    # cron alert helper들은 router의 HTTP /discord/send 만 사용한다.
     'channels': {
         'defaults': {},
-        # Discord WS는 mjuclaw-router가 단독으로 listen한다. agent 측 discord
-        # 채널은 비활성화하여 토큰 충돌(같은 봇 토큰 동시 connect 불가)을 회피한다.
-        # 토큰은 schema 호환을 위해 그대로 두지만 enabled=False라 connect 시도 안 함.
-        'discord': {
-            'enabled': False,
-            'token': os.environ['DISCORD_BOT_TOKEN'],
-        }
     },
     'gateway': {
         'mode': 'local',

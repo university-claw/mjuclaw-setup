@@ -14,11 +14,11 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       # ── Discord ───────────────────────────────────────────────────
-      # 봇 토큰은 mjuclaw-router가 단독으로 들고 있어야 한다 (Discord Gateway는
-      # 같은 토큰의 동시 WS 연결을 허용하지 않음). entrypoint.sh 설정상 agent의
-      # OpenClaw config는 channels.discord.enabled=False 라서 실제 connect 시도는
-      # 안 하지만, 기존 schema marker(SHA256)와 호환을 위해 같은 값을 전달한다.
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      # 봇 토큰은 mjuclaw-router가 단독으로 들고 있어야 한다. agent에는 토큰을
+      # 절대 노출하지 않는다 — enabled=False여도 sidecar/health-monitor 경로에서
+      # connect를 시도해 사용자 컨텍스트가 격리되지 않은 채 메시지가 agent로
+      # 직접 들어가 LLM이 잘못된 사용자 데이터로 응답하는 사고가 발생한다
+      # (2026-05-03 운영 데이터 누출 사고). entrypoint.sh가 set이면 abort한다.
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-2.5-flash}
       - DISCORD_SERVER_ID=${DISCORD_SERVER_ID:-1492100109997969499}
