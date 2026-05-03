@@ -22,6 +22,21 @@ user_dir() { printf '/data/users/%s\n' "$1"; }
 config_file() { printf '%s/attendance-alert.json\n' "$(user_dir "$1")"; }
 job_prefix() { printf 'attend-%s-\n' "$1"; }
 
+# subscribe/refresh/unsubscribe를 user 단위로 직렬화. 같은 사용자에 대해 두 호출이
+# 동시에 진입하면 둘 다 cron list 시점에 stale을 못 보고 양쪽 모두 새 generation을
+# add → 같은 schedule cron이 N개 누적. 30초 대기 후 못 잡으면 abort.
+acquire_user_lock() {
+  local lock_dir lock_file
+  lock_dir=$(user_dir "$1")
+  mkdir -p "$lock_dir"
+  lock_file="$lock_dir/.attendance-alert.lock"
+  exec 202>"$lock_file"
+  if ! flock -w 30 202; then
+    echo "ERR: attendance-alert lock 획득 실패 ($lock_file)" >&2
+    exit 1
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage:
@@ -125,6 +140,8 @@ case "$CMD" in
 
     UDIR=$(user_dir "$ID")
     mkdir -p "$UDIR"
+
+    acquire_user_lock "$ID"
 
     if ! PLAN=$(mju ucheck alert-plan --lead-minutes "$LEAD" --app-dir "$UDIR" --format json 2>&1); then
       echo "ERR: 출석 알림 계획 조회 실패. 먼저 로그인이 필요합니다." >&2
@@ -281,6 +298,7 @@ PY
   unsubscribe)
     ID="${1-}"
     [[ -z "$ID" ]] && { usage; exit 1; }
+    acquire_user_lock "$ID"
     if ! remove_all_crons "$ID"; then
       echo "ERR: cron 제거 실패. 재시도 필요." >&2
       exit 1

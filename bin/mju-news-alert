@@ -48,6 +48,65 @@ user_dir() { printf '/data/users/%s\n' "$1"; }
 subs_file() { printf '%s/news-subscription.json\n' "$(user_dir "$1")"; }
 job_name() { printf 'news-%s\n' "$1"; }
 
+# subscribe/preset/unsubscribe를 user 단위로 직렬화. 같은 사용자에 대해 두 호출이
+# 동시에 진입하면 둘 다 cron list에서 0개를 보고 둘 다 add → 같은 name cron 2개 등록.
+# 운영 중 실측됨 (news-415349075274104832 schedule "0 8 * * *" 가 2개 동시 존재).
+# 30초 대기 후 못 잡으면 abort — 누적 등록보다 명시적 실패가 낫다.
+acquire_user_lock() {
+  local lock_dir lock_file
+  lock_dir=$(user_dir "$1")
+  mkdir -p "$lock_dir"
+  lock_file="$lock_dir/.news-alert.lock"
+  exec 201>"$lock_file"
+  if ! flock -w 30 201; then
+    echo "ERR: news-alert lock 획득 실패 ($lock_file)" >&2
+    exit 1
+  fi
+}
+
+# cron add 후 같은 name cron이 1개 초과면 가장 최근 1개만 keep하고 모두 rm.
+# lock으로 막지 못한 매우 좁은 race나 과거 누적된 stale을 수렴 정리.
+verify_unique_cron() {
+  local job="$1"
+  local jobs_json=""
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if jobs_json=$(openclaw cron list --json 2>/dev/null) && [[ -n "$jobs_json" ]]; then
+      break
+    fi
+    jobs_json=""
+    sleep 1
+  done
+  if [[ -z "$jobs_json" ]]; then
+    echo "WARN verify_unique_cron: cron list 실패 — dedupe 검증 건너뜀" >&2
+    return 0
+  fi
+
+  JOB_NAME="$job" JOBS_JSON="$jobs_json" python3 - <<'PY'
+import json, os, subprocess, sys
+job = os.environ["JOB_NAME"]
+try:
+    data = json.loads(os.environ["JOBS_JSON"])
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except Exception as exc:
+    print(f"WARN verify_unique_cron: invalid JSON: {exc}", file=sys.stderr)
+    sys.exit(0)
+matches = [j for j in jobs if j.get("name") == job]
+if len(matches) <= 1:
+    sys.exit(0)
+matches.sort(key=lambda j: j.get("createdAt") or j.get("created_at") or "")
+keep = matches[-1]
+for j in matches:
+    if j is keep:
+        continue
+    subprocess.run(
+        ["openclaw", "cron", "rm", j.get("id") or j.get("name")],
+        check=False, capture_output=True, text=True,
+    )
+    print(f"verify_unique_cron: removed duplicate {job} id={j.get('id')}", file=sys.stderr)
+PY
+}
+
 write_subscription_file() {
   local discord_id="$1"
   local cron_expr="$2"
@@ -124,6 +183,8 @@ case "$CMD" in
     UDIR=$(user_dir "$DISCORD_ID")
     mkdir -p "$UDIR"
 
+    acquire_user_lock "$DISCORD_ID"
+
     # 같은 name으로 cron이 누적되는 문제(#duplicate-attendance-alerts)를 막기 위해
     # add 전에 같은 name의 cron을 확실히 제거한다. cron list로 존재 여부를 보고 있을
     # 때만 rm을 시도(없으면 정상). list/rm이 실패하면 add를 막아 누적을 방지한다.
@@ -189,6 +250,8 @@ PY
       exit 1
     fi
 
+    verify_unique_cron "$JOB"
+
     echo "OK: subscribed $DISCORD_ID to $CRON_EXPR"
     ;;
 
@@ -205,6 +268,7 @@ PY
 
     if [[ "$PRESET_ID" == "skip" ]]; then
       # skip 프리셋: 기존 구독만 제거하고 subscription 파일은 남기지 않는다.
+      acquire_user_lock "$DISCORD_ID"
       openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
       rm -f "$(subs_file "$DISCORD_ID")"
       echo "OK: preset skip applied for $DISCORD_ID (no subscription)"
@@ -217,7 +281,35 @@ PY
   unsubscribe)
     DISCORD_ID="${1-}"
     [[ -z "$DISCORD_ID" ]] && { usage; exit 1; }
-    openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
+    acquire_user_lock "$DISCORD_ID"
+    # 같은 name으로 누적된 cron이 있을 수 있으므로 list 기반 전수 제거.
+    JOB="$(job_name "$DISCORD_ID")"
+    JOBS_JSON=""
+    for attempt in 1 2 3 4 5; do
+      if JOBS_JSON=$(openclaw cron list --json 2>/dev/null) && [[ -n "$JOBS_JSON" ]]; then
+        break
+      fi
+      JOBS_JSON=""
+      sleep 1
+    done
+    if [[ -n "$JOBS_JSON" ]]; then
+      JOB_NAME="$JOB" JOBS_JSON="$JOBS_JSON" python3 - <<'PY' || true
+import json, os, subprocess, sys
+job = os.environ["JOB_NAME"]
+try:
+    data = json.loads(os.environ["JOBS_JSON"])
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except Exception:
+    sys.exit(0)
+for j in [x for x in jobs if x.get("name") == job]:
+    subprocess.run(
+        ["openclaw", "cron", "rm", j.get("id") or j.get("name")],
+        check=False, capture_output=True, text=True,
+    )
+PY
+    else
+      openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
+    fi
     rm -f "$(subs_file "$DISCORD_ID")"
     echo "OK: unsubscribed $DISCORD_ID"
     ;;
