@@ -43,7 +43,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -360,6 +360,58 @@ body {
   border-left: 2px solid var(--rule);
   grid-column: 1 / -1;
   word-break: keep-all;
+}
+
+/* Unsubmitted assignments */
+.unsubmitted-summary {
+  margin-top: 18px;
+}
+.unsubmitted-band {
+  padding: 15px;
+  border: 1px solid var(--red-soft);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--red-soft), var(--bg-alt));
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+}
+.unsubmitted-band-top,
+.unsubmitted-band-bottom {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 14px;
+}
+.unsubmitted-band-kicker {
+  color: var(--red); font-size: 11px; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.unsubmitted-band-main {
+  margin-top: 4px; color: var(--ink);
+  font-size: 22px; line-height: 1.18; font-weight: 800;
+  letter-spacing: -0.025em; word-break: keep-all;
+}
+.unsubmitted-band-urgent {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--bg); color: var(--red);
+  font-size: 12px; font-weight: 800;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.unsubmitted-band-bottom {
+  margin-top: 11px; padding-top: 10px;
+  border-top: 1px solid rgba(207, 32, 47, 0.14);
+  align-items: center;
+}
+.unsubmitted-band-note {
+  color: var(--ink-2); font-size: 12.5px; font-weight: 700;
+  word-break: keep-all;
+}
+.unsubmitted-band-due {
+  color: var(--red); font-size: 12.5px; font-weight: 800;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.unsubmitted-lane { padding-top: 22px; }
+.unsubmitted-lane .section-title { margin-bottom: 2px; }
+.assignment-row.is-urgent .row-icon {
+  background: var(--red-soft); color: var(--red);
 }
 
 /* Urgent hero card */
@@ -1019,7 +1071,7 @@ function renderData(dataType: string, data: unknown): string {
     graduation: renderGraduation,
     courses: renderCourses,
     "action-items": renderActionItems,
-    unsubmitted: renderAssignmentList,
+    unsubmitted: renderUnsubmittedAssignments,
     "due-assignments": renderAssignmentList,
     "unread-notices": renderNoticeList,
     attendance: renderAttendanceText,
@@ -1077,6 +1129,12 @@ type ActionQueueItem = {
   postedAt?: string;
   priority?: string;
   order: number;
+};
+
+type AssignmentDeadlineGroup = {
+  key: "expired" | "today" | "tomorrow" | "week" | "later" | "unknown";
+  title: string;
+  items: AssignmentItem[];
 };
 
 function codeChip(title: string): string {
@@ -1733,20 +1791,148 @@ function isAssignmentExpired(a: AssignmentItem): boolean {
   return false;
 }
 
-function renderAssignmentList(data: unknown): string {
-  const items: AssignmentItem[] = Array.isArray(data)
+function assignmentItems(data: unknown): AssignmentItem[] {
+  return Array.isArray(data)
     ? (data as AssignmentItem[])
     : ((data as { assignments?: AssignmentItem[]; items?: AssignmentItem[] }).assignments
       || (data as { items?: AssignmentItem[] }).items
       || []);
+}
+
+function renderUnsubmittedAssignments(data: unknown): string {
+  const items = assignmentItems(data);
+  if (!items.length) return "";
+
+  const sortedItems = items
+    .map((item, order) => ({ item, order }))
+    .sort((a, b) => assignmentBucketRank(a.item) - assignmentBucketRank(b.item)
+      || assignmentPriorityRank(a.item) - assignmentPriorityRank(b.item)
+      || assignmentDueRank(a.item, a.order) - assignmentDueRank(b.item, b.order)
+      || a.order - b.order)
+    .map((entry) => entry.item);
+  const groups = groupAssignmentsByDeadline(sortedItems);
+  const nextAssignment = sortedItems[0];
+  const todayCount = groups.find((group) => group.key === "today")?.items.length ?? 0;
+  const expiredCount = groups.find((group) => group.key === "expired")?.items.length ?? 0;
+  const urgentStatValue = expiredCount > 0 ? `기한 지남 ${expiredCount}개` : `오늘 마감 ${todayCount}개`;
+  const nextDue = nextAssignment ? assignmentDueText(nextAssignment) || "기한 확인" : "기한 확인";
+
+  let html = `<section class="unsubmitted-summary unsubmitted-band"><div class="unsubmitted-band-top"><div><div class="unsubmitted-band-kicker">미제출 브리핑</div><div class="unsubmitted-band-main">미제출 ${items.length}개</div></div><div class="unsubmitted-band-urgent">${urgentStatValue}</div></div><div class="unsubmitted-band-bottom"><div class="unsubmitted-band-note">가까운 마감일부터 정리했어요</div><div class="unsubmitted-band-due">가장 임박 ${esc(nextDue)}</div></div></section>`;
+
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    html += `<section class="section unsubmitted-lane"><div class="section-title"><h2>${group.title}<span class="count">${group.items.length}</span></h2></div>`;
+    for (const item of group.items) {
+      html += renderAssignmentRow(item);
+    }
+    html += `</section>`;
+  }
+
+  return html;
+}
+
+function groupAssignmentsByDeadline(items: AssignmentItem[]): AssignmentDeadlineGroup[] {
+  const groups: AssignmentDeadlineGroup[] = [
+    { key: "expired", title: "기한 지남", items: [] },
+    { key: "today", title: "오늘", items: [] },
+    { key: "tomorrow", title: "내일", items: [] },
+    { key: "week", title: "이번 주", items: [] },
+    { key: "later", title: "이후", items: [] },
+    { key: "unknown", title: "기한 확인", items: [] },
+  ];
+  const byKey = new Map(groups.map((group) => [group.key, group]));
+
+  for (const item of items) {
+    byKey.get(assignmentBucket(item))!.items.push(item);
+  }
+
+  return groups;
+}
+
+function renderAssignmentRow(a: AssignmentItem): string {
+  const expired = isAssignmentExpired(a);
+  const valCls = expired ? "red" : a.priority === "high" || assignmentBucket(a) === "today" ? "red" : "";
+  const iconCls = expired || a.priority === "high" ? " red" : "";
+  const val = assignmentDueText(a);
+  const urgentClass = valCls === "red" ? " is-urgent" : "";
+  return `<article class="row assignment-row${urgentClass}"><div class="row-icon${iconCls}">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${joinMeta([a.courseTitle, a.weekLabel])}</div></div><div class="row-value ${valCls}">${esc(val)}</div></article>`;
+}
+
+function assignmentBucketRank(item: AssignmentItem): number {
+  return { expired: 0, today: 1, tomorrow: 2, week: 3, later: 4, unknown: 5 }[assignmentBucket(item)];
+}
+
+function assignmentBucket(item: AssignmentItem): AssignmentDeadlineGroup["key"] {
+  if (isAssignmentExpired(item) || textIncludesAny([item.statusText, item.dueLabel], ["기한 지남", "만료", "overdue", "expired"])) return "expired";
+  if (textIncludesAny([item.dueLabel, item.statusText], ["오늘", "today"])) return "today";
+  if (textIncludesAny([item.dueLabel, item.statusText], ["내일", "tomorrow"])) return "tomorrow";
+
+  const offset = assignmentDueDayOffset(item);
+  if (offset === 0) return "today";
+  if (offset === 1) return "tomorrow";
+  if (offset !== null && offset > 1 && offset <= 6) return "week";
+  if (offset !== null && offset > 6) return "later";
+  if (item.dueLabel || item.dueAt) return "week";
+  return "unknown";
+}
+
+function assignmentDueDayOffset(item: AssignmentItem): number | null {
+  if (!item.dueAt) return null;
+  const due = new Date(item.dueAt);
+  if (Number.isNaN(due.getTime())) return null;
+  return dayNumberInKorea(due) - dayNumberInKorea(new Date());
+}
+
+function dayNumberInKorea(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? "1");
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+function assignmentPriorityRank(item: AssignmentItem): number {
+  return item.priority === "high" ? 0 : 1;
+}
+
+function assignmentDueRank(item: AssignmentItem, order: number): number {
+  if (item.dueAt) {
+    const parsed = new Date(item.dueAt);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+
+  const label = (item.dueLabel || item.statusText || "").toLowerCase();
+  if (label.includes("오늘") || label.includes("today")) return order;
+  if (label.includes("내일") || label.includes("tomorrow")) return 86400000 + order;
+
+  const koreanDate = label.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (koreanDate) return Number(koreanDate[1]) * 100000000 + Number(koreanDate[2]) * 1000000 + order;
+
+  const englishMayDate = label.match(/may\s+(\d{1,2})/);
+  if (englishMayDate) return 5 * 100000000 + Number(englishMayDate[1]) * 1000000 + order;
+
+  const dDay = label.match(/d-(\d{1,2})/);
+  if (dDay) return Number(dDay[1]) * 86400000 + order;
+
+  return Number.MAX_SAFE_INTEGER - 1000 + order;
+}
+
+function assignmentDueText(item: AssignmentItem): string {
+  return item.dueLabel || item.dueAt || (isAssignmentExpired(item) ? "만료" : item.statusText || "");
+}
+
+function renderAssignmentList(data: unknown): string {
+  const items = assignmentItems(data);
   if (!items.length) return "";
 
   let html = `<section class="section"><div class="section-title"><h2>과제<span class="count">${items.length}</span></h2></div>`;
   for (const a of items) {
-    const expired = isAssignmentExpired(a);
-    const valCls = expired ? "red" : a.priority === "high" ? "red" : "";
-    const val = a.dueLabel || a.dueAt || (expired ? "만료" : a.statusText || "");
-    html += `<div class="row"><div class="row-icon">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${joinMeta([a.courseTitle, a.weekLabel])}</div></div><div class="row-value ${valCls}">${esc(val)}</div></div>`;
+    html += renderAssignmentRow(a);
   }
   return html + `</section>`;
 }
