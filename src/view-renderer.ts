@@ -43,7 +43,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -391,6 +391,159 @@ body {
 .badge-warn { color: var(--warn); background: var(--warn-soft); }
 .badge-blue { color: var(--accent); background: var(--accent-soft); }
 .badge-gray { color: var(--ink-2); background: var(--chip-bg); }
+
+/* Grades */
+.grades-section { padding-top: 22px; }
+.grades-snapshot {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+  padding: 16px;
+}
+.grades-snapshot-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px;
+}
+.grades-label {
+  color: var(--accent); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.grades-gpa {
+  margin-top: 7px;
+  color: var(--ink); font-size: 34px; line-height: 1; font-weight: 700;
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+}
+.grades-gpa .unit {
+  color: var(--ink-3); font-size: 16px; font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.grades-scale {
+  margin-top: 7px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600;
+}
+.grades-level {
+  flex: 0 0 auto;
+  min-width: 58px; padding: 7px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 12px; font-weight: 700; text-align: center;
+}
+.grades-gpa-graph {
+  margin-top: 18px;
+}
+.grades-gpa-rail {
+  position: relative;
+  padding-top: 28px;
+}
+.grades-gpa-segments {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  height: 12px;
+}
+.grades-gpa-segment {
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg);
+}
+.grades-gpa-segment.low { background: var(--chip-bg); }
+.grades-gpa-segment.stable { background: var(--rule-strong); }
+.grades-gpa-segment.strong { background: var(--accent-soft-2); }
+.grades-gpa-segment.top { background: var(--accent); }
+.grades-gpa-marker {
+  position: absolute; left: var(--gpa-marker); top: 0;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 5px;
+  transform: translateX(-50%);
+}
+.grades-gpa-marker strong {
+  min-width: 42px; padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 12px; line-height: 1; font-weight: 800;
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.grades-gpa-marker span {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-alt);
+}
+.grades-gpa-band-labels {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px; margin-top: 8px;
+  color: var(--ink-3);
+  font-size: 10.5px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.grades-gpa-band-labels span {
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+.grades-stats {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px; margin-top: 14px;
+}
+.grades-stat {
+  min-width: 0; padding: 10px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.grades-stat strong {
+  display: block; color: var(--ink);
+  font-size: 15px; line-height: 1.1; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.grades-stat span {
+  display: block; margin-top: 5px;
+  color: var(--ink-3); font-size: 11px; font-weight: 600;
+  white-space: nowrap;
+}
+.grade-course-list {
+  display: flex; flex-direction: column; gap: 9px;
+  margin-top: 12px;
+}
+.grade-course-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px; align-items: center;
+  padding: 13px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.grade-course-card.top {
+  border-color: var(--accent-soft-2);
+  background: linear-gradient(180deg, var(--accent-soft), var(--bg));
+}
+.grade-course-main { min-width: 0; }
+.grade-course-title {
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 1.35; letter-spacing: -0.01em; word-break: keep-all;
+}
+.grade-course-meta {
+  margin-top: 5px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.grade-course-result {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 5px; min-width: 48px;
+}
+.grade-pill {
+  min-width: 42px; padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  text-align: center;
+  font-size: 13px; line-height: 1; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.grade-pill.high { color: var(--accent); background: var(--accent-soft); }
+.grade-pill.mid { color: var(--ink); background: var(--chip-bg); }
+.grade-pill.watch { color: var(--warn); background: var(--warn-soft); }
+.grade-pill.other { color: var(--ink-2); background: var(--chip-bg); }
+.grade-score {
+  color: var(--ink-3); font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 
 /* Timetable */
 .timetable-section { padding-top: 22px; }
@@ -1016,49 +1169,85 @@ function renderGrades(data: unknown): string {
   };
   if (!d.items?.length) return "";
 
-  let html = "";
+  const items = d.items;
+  const courseCount = items.length;
+  const totalCredits = typeof d.totalCredits === "number"
+    ? d.totalCredits
+    : items.reduce((sum, item) => sum + (item.credits ?? 0), 0);
+  const maxGpa = typeof d.maxGpa === "number" ? d.maxGpa : 4.5;
+  const gpaText = typeof d.gpa === "number" ? d.gpa.toFixed(2) : "-";
+  const markerPercent = typeof d.gpa === "number" ? gpaBandRailPosition(d.gpa, maxGpa) : 0;
+  const scores = items
+    .map((item) => item.score)
+    .filter((score): score is number => typeof score === "number");
+  const averageScore = scores.length
+    ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
+    : null;
+  const levelText = typeof d.gpa === "number" ? gpaBandName(d.gpa) : "GPA";
+  const scaleText = typeof d.gpa === "number" ? gpaBandDescription(d.gpa) : "GPA 구간 기준";
 
-  // Hero metric
-  if (typeof d.gpa === "number") {
-    html += `<section class="section"><div class="metric-hero"><div class="metric-label">이번 학기 GPA</div><div class="metric-value">${d.gpa.toFixed(2)}${d.maxGpa ? `<span class="unit"> / ${d.maxGpa.toFixed(2)}</span>` : ""}</div>`;
-    if (d.totalCredits) html += `<div class="metric-trend">${d.totalCredits}학점</div>`;
-    html += `</div></section>`;
-  }
-
-  // Courses list
-  html += `<section class="section"><div class="section-title"><h2>수강 과목<span class="count">${d.items.length}</span></h2></div>`;
-  for (const it of d.items) {
-    const grade = it.grade || it.statusMessage || "-";
-    const top = grade === "A+";
-    const iconCls = top ? "accent" : "";
-    html += `<div class="row"><div class="row-icon ${iconCls}">${codeChip(it.courseTitle)}</div><div class="row-main"><div class="row-title">${esc(it.courseTitle)}</div><div class="row-sub">${joinMeta([it.credits != null ? `${it.credits}학점` : null, it.score != null ? `${it.score}점` : null])}</div></div><div class="row-value">${esc(grade)}</div></div>`;
-  }
+  let html = `<section class="section grades-section">`;
+  html += `<div class="grades-snapshot">`;
+  html += `<div class="grades-snapshot-top"><div><div class="grades-label">이번 학기 GPA</div><div class="grades-gpa">${gpaText}${typeof d.gpa === "number" ? `<span class="unit"> / ${maxGpa.toFixed(2)}</span>` : ""}</div><div class="grades-scale">${esc(scaleText)}</div></div><div class="grades-level">${esc(levelText)}</div></div>`;
+  html += `<div class="grades-gpa-graph"><div class="grades-gpa-rail" style="--gpa-marker:${markerPercent.toFixed(1)}%"><div class="grades-gpa-marker"><strong>${esc(gpaText)}</strong><span></span></div><div class="grades-gpa-segments" aria-label="GPA band rail"><span class="grades-gpa-segment low"></span><span class="grades-gpa-segment stable"></span><span class="grades-gpa-segment strong"></span><span class="grades-gpa-segment top"></span></div><div class="grades-gpa-band-labels"><span>3.0 미만</span><span>3.0+</span><span>3.5+</span><span>4.0+</span></div></div></div>`;
+  html += `<div class="grades-stats">`;
+  html += `<div class="grades-stat"><strong>${totalCredits || "-"}</strong><span>이수 학점</span></div>`;
+  html += `<div class="grades-stat"><strong>${courseCount}</strong><span>과목</span></div>`;
+  html += `<div class="grades-stat"><strong>${averageScore ?? "-"}</strong><span>평균 점수</span></div>`;
+  html += `</div></div>`;
   html += `</section>`;
 
-  // Distribution
-  const dist: Record<string, number> = {};
-  for (const it of d.items) {
-    const g = it.grade || "";
-    dist[g] = (dist[g] || 0) + 1;
+  html += `<section class="section"><div class="section-title"><h2>과목별 성적<span class="count">${courseCount}</span></h2></div><div class="section-sub">오른쪽 성적 배지를 기준으로 빠르게 훑어볼 수 있어요.</div><div class="grade-course-list">`;
+  for (const item of items) {
+    const grade = item.grade || item.statusMessage || "-";
+    const tone = gradeTone(grade);
+    const topClass = tone === "high" ? " top" : "";
+    html += `<article class="grade-course-card${topClass}"><div class="grade-course-main"><div class="grade-course-title">${esc(item.courseTitle || "과목명 미정")}</div><div class="grade-course-meta">${joinMeta([item.credits != null ? `${item.credits}학점` : null])}</div></div><div class="grade-course-result"><div class="grade-pill ${tone}">${esc(grade)}</div><div class="grade-score">${item.score != null ? `${esc(String(item.score))}점` : "상태"}</div></div></article>`;
   }
-  const gradeKeys = Object.keys(dist).sort();
-  if (gradeKeys.length > 0) {
-    const total = d.items.length;
-    html += `<section class="section"><div class="section-title"><h2>성적 분포</h2></div><div class="section-sub">이번 학기 기준</div>`;
-    html += `<div class="dist-bar">`;
-    const palette = ["var(--accent)", "var(--accent-soft-2)", "var(--rule-strong)", "var(--chip-bg)"];
-    gradeKeys.forEach((g, i) => {
-      const w = (dist[g] / total) * 100;
-      html += `<div style="flex:${dist[g]};background:${palette[Math.min(i, palette.length - 1)]}"></div>`;
-    });
-    html += `</div><div class="dist-legend">`;
-    for (const g of gradeKeys) {
-      html += `<span><strong style="color:var(--ink);font-weight:600">${esc(g)} ${dist[g]}</strong></span>`;
-    }
-    html += `</div></section>`;
-  }
+  html += `</div></section>`;
 
   return html;
+}
+
+function gradeTone(grade: string): "high" | "mid" | "watch" | "other" {
+  const normalized = grade.trim().toUpperCase();
+  if (normalized.startsWith("A")) return "high";
+  if (normalized.startsWith("B")) return "mid";
+  if (normalized.startsWith("C") || normalized.startsWith("D") || normalized.startsWith("F")) return "watch";
+  return "other";
+}
+
+function gpaBandRailPosition(gpa: number, maxGpa: number): number {
+  const cappedMax = Math.max(maxGpa, 4.5);
+  const bands = [
+    { from: 0, to: 3.0 },
+    { from: 3.0, to: 3.5 },
+    { from: 3.5, to: 4.0 },
+    { from: 4.0, to: cappedMax },
+  ];
+  const safeGpa = Math.max(0, Math.min(cappedMax, gpa));
+  for (let i = 0; i < bands.length; i++) {
+    const band = bands[i];
+    if (safeGpa <= band.to || i === bands.length - 1) {
+      const ratio = (safeGpa - band.from) / Math.max(0.01, band.to - band.from);
+      return Math.max(4, Math.min(96, i * 25 + ratio * 25));
+    }
+  }
+  return 96;
+}
+
+function gpaBandName(gpa: number): string {
+  if (gpa >= 4.0) return "A권역";
+  if (gpa >= 3.5) return "우수";
+  if (gpa >= 3.0) return "안정";
+  return "확인";
+}
+
+function gpaBandDescription(gpa: number): string {
+  if (gpa >= 4.0) return "4.0 이상 A권역에 있어요";
+  if (gpa >= 3.5) return "3.5 이상 우수 구간이에요";
+  if (gpa >= 3.0) return "3.0 이상 안정 구간이에요";
+  return "3.0 미만 확인 구간이에요";
 }
 
 // ── 학기별 성적 (grade-history) ──────────────────────
