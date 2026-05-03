@@ -60,6 +60,22 @@ clone_or_pull mju-news https://github.com/university-claw/mju-news.git
 # OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
 clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git
 
+# intent-classifier : KcELECTRA-base 15-class 한국어 의도 분류 모델 + serving.
+# 현재 git 레포가 아니라 워크스페이스 로컬 디렉토리이므로 sibling(`../intent-classifier`)
+# 에서 복사한다. 향후 별도 레포로 분리되면 위 clone_or_pull 패턴으로 대체.
+if [ ! -d intent-classifier/model ]; then
+  if [ -d ../intent-classifier/model ]; then
+    echo "  → intent-classifier 복사 (sibling → setup/)..."
+    cp -r ../intent-classifier ./intent-classifier
+  else
+    echo "  ⚠ intent-classifier 디렉토리를 찾지 못함." >&2
+    echo "    워크스페이스 루트(../intent-classifier)에 model/serving이 있어야 합니다." >&2
+    echo "    classifier 서비스 없이 진행하려면 .env의 CLASSIFIER_ENABLED=false." >&2
+  fi
+else
+  echo "  ✓ intent-classifier 이미 있음"
+fi
+
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""
 echo "[3/4] 환경변수 파일 확인..."
