@@ -329,6 +329,23 @@ PY
 
     UDIR=$(user_dir "$ID")
 
+    # Pre-check: marker가 이미 존재하면 (오늘 이 수업으로 이미 발송 완료) UCheck 호출
+    # 자체를 건너뛴다. stale cron 6개가 같은 분에 발사되어도 UCheck API를 6×3=18회
+    # 호출하지 않기 위함. lock 아닌 단순 존재 검사여서 첫 발사~marker create 사이의
+    # race window는 atomic create 단계가 잡는다 (#28 의 marker semantic 유지).
+    TODAY=$(TZ=Asia/Seoul date +%F)
+    if [[ -n "$LECTURE_NO" ]]; then
+      MARKER_KEY="$LECTURE_NO"
+    else
+      MARKER_KEY=$(printf '%s' "$COURSE" | tr -c '[:alnum:]가-힣' '_' | cut -c1-60)
+      [[ -z "$MARKER_KEY" ]] && MARKER_KEY="course"
+    fi
+    MARKER_DIR="$UDIR/.alert-sent"
+    MARKER_FILE="$MARKER_DIR/attendance-$TODAY-$MARKER_KEY.flag"
+    if [[ -e "$MARKER_FILE" ]]; then
+      exit 0
+    fi
+
     QUERY_OK=0
     QUERY_ERR=""
     for attempt in 1 2 3; do
@@ -405,19 +422,10 @@ PY
       exit 0
     fi
 
-    # 멱등 marker — 실제 발송 대상임을 확인한 뒤에만 생성한다. UCheck 조회 실패나
-    # JSON 파싱 실패가 "오늘 발송 완료"로 굳지 않도록 marker를 조회 앞에 두지 않는다.
-    # cron이 Asia/Seoul로 발사되므로 marker 키도 KST 기준 날짜로 통일.
-    TODAY=$(TZ=Asia/Seoul date +%F)
-    if [[ -n "$LECTURE_NO" ]]; then
-      MARKER_KEY="$LECTURE_NO"
-    else
-      # course title은 다국어/특수문자 가능 — 파일명에 안전한 형태로 sanitize.
-      MARKER_KEY=$(printf '%s' "$COURSE" | tr -c '[:alnum:]가-힣' '_' | cut -c1-60)
-      [[ -z "$MARKER_KEY" ]] && MARKER_KEY="course"
-    fi
-    MARKER_DIR="$UDIR/.alert-sent"
-    MARKER_FILE="$MARKER_DIR/attendance-$TODAY-$MARKER_KEY.flag"
+    # 멱등 marker atomic lock — 실제 발송 대상임을 확인한 뒤 송신 직전에 잠근다.
+    # MARKER_FILE 경로는 위 pre-check에서 이미 계산됨 (중복 계산 제거).
+    # UCheck 조회 실패나 JSON 파싱 실패가 "오늘 발송 완료"로 굳지 않도록 marker는
+    # 조회 앞이 아니라 여기(CONTENT 확정 이후)에서 잡는다 — #28 의 marker semantic.
     mkdir -p "$MARKER_DIR"
     if ! (set -o noclobber; : > "$MARKER_FILE") 2>/dev/null; then
       # 이미 다른 프로세스가 marker를 잡은 상태 — 중복 발송 방지를 위해 즉시 종료.
