@@ -12,12 +12,30 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exit 1
 fi
 
+if [ -z "${MJUCLAW_ROUTER_URL:-}" ]; then
+  echo "ERR: MJUCLAW_ROUTER_URL is required (router service URL, 보통 http://mjuclaw-router:3100)" >&2
+  exit 1
+fi
+
+if [ -z "${MJUCLAW_ROUTER_TOKEN:-}" ]; then
+  echo "ERR: MJUCLAW_ROUTER_TOKEN is required (router HTTP_AUTH_TOKEN과 동일 값)" >&2
+  exit 1
+fi
+
+if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+  echo "ERR: OPENCLAW_GATEWAY_TOKEN is required (router가 agent의 OpenClaw gateway에" >&2
+  echo "    forward할 때 사용하는 인증 토큰. agent와 router 양쪽 env에 동일 값으로 둠. " >&2
+  echo "    예: openssl rand -hex 32)" >&2
+  exit 1
+fi
+
 MODEL="${OPENCLAW_MODEL:-gemini-2.5-flash}"
 DISCORD_SERVER_ID="${DISCORD_SERVER_ID:-1492100109997969499}"
 DISCORD_USER_ID="${DISCORD_USER_ID:-415349075274104832}"
 
 # Config 스키마 버전. 변경되면 기존 config를 백업하고 재생성한다.
-CONFIG_SCHEMA_VERSION="3"
+# v4: channels.discord.enabled=False — Discord WS 단독 소유는 mjuclaw-router로 이전.
+CONFIG_SCHEMA_VERSION="4"
 CONFIG_PATH="/home/agent/.openclaw/openclaw.json"
 VERSION_MARKER="/home/agent/.openclaw/.mjuclaw-schema-version"
 CONFIG_INPUTS_MARKER="/home/agent/.openclaw/.mjuclaw-config-inputs.json"
@@ -72,6 +90,7 @@ print(
             ),
             "discordBotTokenSha256": sha256(os.environ["DISCORD_BOT_TOKEN"]),
             "geminiApiKeySha256": sha256(os.environ["GEMINI_API_KEY"]),
+            "gatewayTokenSha256": sha256(os.environ["OPENCLAW_GATEWAY_TOKEN"]),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -144,20 +163,12 @@ config = {
     },
     'channels': {
         'defaults': {},
+        # Discord WS는 mjuclaw-router가 단독으로 listen한다. agent 측 discord
+        # 채널은 비활성화하여 토큰 충돌(같은 봇 토큰 동시 connect 불가)을 회피한다.
+        # 토큰은 schema 호환을 위해 그대로 두지만 enabled=False라 connect 시도 안 함.
         'discord': {
-            'enabled': True,
+            'enabled': False,
             'token': os.environ['DISCORD_BOT_TOKEN'],
-            # DM open — 누구나 DM 가능 (온보딩이 실질적 방어선)
-            'dmPolicy': 'open',
-            'allowFrom': ['*'],
-            # 길드는 allowlist — MJU 서버 멤버만 사용 가능
-            'groupPolicy': 'allowlist',
-            'guilds': {
-                os.environ.get('DISCORD_SERVER_ID', '1492100109997969499'): {
-                    'requireMention': True,
-                    'users': [],  # 빈 배열 = 길드 멤버 전체 허용
-                }
-            }
         }
     },
     'gateway': {
@@ -167,7 +178,9 @@ config = {
             'allowInsecureAuth': True,
             'dangerouslyDisableDeviceAuth': True,
         },
-        'auth': {'token': secrets.token_hex(32)},
+        # router가 cross-container로 forward할 때 사용. env로 고정해야 양쪽이
+        # 같은 값을 알 수 있다. env 미설정은 위에서 fail-fast로 차단됨.
+        'auth': {'token': os.environ['OPENCLAW_GATEWAY_TOKEN']},
         'trustedProxies': ['127.0.0.1', '::1'],
     },
     'meta': {
@@ -277,6 +290,62 @@ attendance_backfill() {
 }
 attendance_backfill &
 echo "Started attendance alert backfill in background (PID $!)"
+
+# ── mjuclaw-router pairing 자동 승인 (백그라운드) ───────────────
+# router는 docker-compose 내부 네트워크에서만 접근 가능한 신뢰 클라이언트지만,
+# OpenClaw gateway는 모든 새 client에게 device pairing을 요구한다. 첫 부팅 시
+# router가 pairing 요청을 보내면 자동 승인하고, 이후엔 router의 router-data
+# volume에 device key가 영속되어 재요청이 발생하지 않는다.
+auto_approve_router_pairings() {
+  # gateway readiness 대기 (최대 60초)
+  local waited=0
+  until curl -sf -o /dev/null --max-time 1 http://127.0.0.1:18789/healthz; do
+    if (( waited >= 60 )); then
+      echo "WARN entrypoint: gateway not ready after 60s, skip pairing auto-approve" >&2
+      return
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  # 5분 동안 5초 간격으로 pending 확인 → 승인. CLI가 gateway에 붙기까지 healthz보다
+  # 더 오래 걸리는 경우가 있어 윈도우를 넉넉히 둔다. 일단 device가 paired되면
+  # router 측 router-data 볼륨에 key가 영속되어 재요청이 발생하지 않는다.
+  local rounds=0
+  while (( rounds < 60 )); do
+    local pending_json
+    pending_json=$(openclaw devices list --json 2>/dev/null || echo '{}')
+    local request_ids
+    request_ids=$(PENDING_JSON="$pending_json" python3 - <<'PY'
+import json, os
+try:
+    data = json.loads(os.environ["PENDING_JSON"])
+except Exception:
+    raise SystemExit(0)
+for entry in data.get("pending", []) or []:
+    rid = entry.get("requestId")
+    ip = entry.get("remoteIp", "")
+    # docker-compose 내부 네트워크 (172.x / 10.x 사설 대역)만 자동 승인
+    if rid and (ip.startswith("172.") or ip.startswith("10.") or ip.startswith("192.168.")):
+        print(rid)
+PY
+)
+    if [[ -n "$request_ids" ]]; then
+      while IFS= read -r rid; do
+        [[ -z "$rid" ]] && continue
+        if openclaw devices approve "$rid" --json >/dev/null 2>&1; then
+          echo "Auto-approved router pairing $rid"
+        else
+          echo "WARN entrypoint: failed to auto-approve $rid" >&2
+        fi
+      done <<< "$request_ids"
+    fi
+    sleep 5
+    rounds=$((rounds + 1))
+  done
+}
+auto_approve_router_pairings &
+echo "Started router pairing auto-approver in background (PID $!)"
 
 echo ""
 echo "  ┌─────────────────────────────────────────────┐"

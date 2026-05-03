@@ -56,6 +56,9 @@ clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git
 # mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
 # dev 브랜치에 변경이 진행 중이면 아래 한 줄을 `git checkout dev`로 교체.
 clone_or_pull mju-news https://github.com/university-claw/mju-news.git
+# mjuclaw-router : Discord WS 입구 + 온보딩 게이트 + cron alert 우회 HTTP 서버.
+# OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
+clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""
@@ -76,9 +79,9 @@ echo "  ✓ .env 존재"
 
 # 필수값 체크
 missing=()
-for key in DISCORD_BOT_TOKEN GEMINI_API_KEY PGPASSWORD STORAGE_LOCAL_ROOT; do
+for key in DISCORD_BOT_TOKEN GEMINI_API_KEY PGPASSWORD STORAGE_LOCAL_ROOT MJUCLAW_ROUTER_TOKEN; do
   val=$(grep "^$key=" .env | cut -d= -f2-)
-  if [ -z "$val" ] || [[ "$val" == your_* ]] || [[ "$val" == "change-me" ]] || [[ "$val" == /absolute/* ]]; then
+  if [ -z "$val" ] || [[ "$val" == your_* ]] || [[ "$val" == "change-me" ]] || [[ "$val" == /absolute/* ]] || [[ "$val" == replace-me-* ]]; then
     missing+=("$key")
   fi
 done
@@ -97,7 +100,8 @@ echo ""
 echo "┌─────────────────────────────────────────────┐"
 echo "│  ✅ 셋업 완료                                │"
 echo "│                                             │"
-echo "│  로그 확인:   docker logs -f mjuclaw-agent   │"
+echo "│  로그 확인:   docker logs -f mjuclaw-agent  │"
+echo "│              docker logs -f mjuclaw-router  │"
 echo "│  컨테이너 진입: docker exec -it mjuclaw-agent bash │"
 echo "│  정지:       docker compose down            │"
 echo "└─────────────────────────────────────────────┘"

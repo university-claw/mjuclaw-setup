@@ -327,10 +327,35 @@ PY
       exit 0
     fi
 
-    if ! openclaw message send --channel discord --target "user:$DISCORD_ID" --message "$CONTENT"; then
-      echo "ERR: failed to deliver news alert to $DISCORD_ID" >&2
+    # OpenClaw discord 채널은 비활성화되어 있고 봇 토큰은 mjuclaw-router가 단독
+    # 소유한다. 따라서 outbound DM은 router HTTP `POST /discord/send`로 위임한다.
+    ROUTER_URL="${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}"
+    ROUTER_TOKEN="${MJUCLAW_ROUTER_TOKEN-}"
+    if [[ -z "$ROUTER_TOKEN" ]]; then
+      echo "ERR: MJUCLAW_ROUTER_TOKEN env가 비어있어 router로 DM을 보낼 수 없습니다." >&2
       exit 1
     fi
+
+    SEND_BODY=$(DISCORD_ID="$DISCORD_ID" CONTENT="$CONTENT" python3 - <<'PY'
+import json, os
+print(json.dumps({"discordUserId": os.environ["DISCORD_ID"], "content": os.environ["CONTENT"]}))
+PY
+)
+
+    HTTP_OUT=$(mktemp "${TMPDIR:-/tmp}/router-send.XXXXXX")
+    HTTP_CODE=$(curl -sS -o "$HTTP_OUT" -w "%{http_code}" \
+      -X POST "$ROUTER_URL/discord/send" \
+      -H "Authorization: Bearer $ROUTER_TOKEN" \
+      -H "Content-Type: application/json" \
+      --max-time 30 \
+      --data-raw "$SEND_BODY" || echo "000")
+    if [[ "$HTTP_CODE" != "200" ]]; then
+      RESP_BODY=$(cat "$HTTP_OUT" 2>/dev/null || true)
+      rm -f "$HTTP_OUT"
+      echo "ERR: router /discord/send → HTTP $HTTP_CODE: ${RESP_BODY:-<no body>}" >&2
+      exit 1
+    fi
+    rm -f "$HTTP_OUT"
 
     if ! update_last_sent_at "$F"; then
       echo "ERR: delivered news alert but failed to update lastSentAt" >&2
