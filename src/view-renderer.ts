@@ -43,7 +43,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -378,6 +378,80 @@ body {
   letter-spacing: -0.005em; margin-top: 2px;
 }
 .urgent-meta { font-size: 12px; color: var(--ink-3); }
+
+/* Action queue */
+.action-next {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+}
+.action-next.is-urgent {
+  border-color: var(--red-soft);
+  background: linear-gradient(180deg, var(--red-soft), var(--bg-alt));
+}
+.action-next-top,
+.action-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px; align-items: center;
+}
+.action-next-top {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.action-type {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 38px; height: 24px; padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg); color: var(--ink-2);
+  font-size: 11px; font-weight: 800; letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.action-next.is-urgent .action-type,
+.action-row.is-urgent .action-type,
+.action-row.is-today .action-type {
+  background: var(--red-soft); color: var(--red);
+}
+.action-row.is-notice .action-type {
+  background: var(--accent-soft); color: var(--accent);
+}
+.action-next-title {
+  margin-top: 10px; color: var(--ink);
+  font-size: 17px; line-height: 1.35; font-weight: 800;
+  letter-spacing: -0.015em; word-break: keep-all;
+}
+.action-next-meta {
+  margin-top: 6px; color: var(--ink-3);
+  font-size: 12.5px; font-weight: 600; word-break: keep-all;
+}
+.action-list {
+  margin-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+.action-row {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.action-row-title {
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 1.35; word-break: keep-all;
+}
+.action-row-meta {
+  margin-top: 3px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600; word-break: keep-all;
+}
+.action-due {
+  color: var(--ink-2); font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.action-next.is-urgent .action-due,
+.action-row.is-urgent .action-due,
+.action-row.is-today .action-due {
+  color: var(--red); font-weight: 800;
+}
+.action-row.is-notice .action-due {
+  color: var(--ink-3); font-weight: 600;
+}
 
 /* Badge (chip) */
 .badge {
@@ -980,6 +1054,31 @@ type NoticeItem = {
   isUnread?: boolean;
 };
 
+type OnlineActionItem = {
+  courseTitle?: string;
+  weekLabel?: string;
+  lectureTitle?: string;
+  dueLabel?: string;
+  dueAt?: string;
+  statusText?: string;
+  priority?: string;
+  isExpired?: boolean;
+};
+
+type ActionQueueItem = {
+  source: "assignment" | "online" | "notice";
+  lane: "urgent" | "today" | "soon" | "notice";
+  title: string;
+  courseTitle?: string;
+  weekLabel?: string;
+  dueLabel?: string;
+  dueAt?: string;
+  statusText?: string;
+  postedAt?: string;
+  priority?: string;
+  order: number;
+};
+
 function codeChip(title: string): string {
   return esc((title || "").slice(0, 2));
 }
@@ -1436,56 +1535,194 @@ function renderActionItems(data: unknown): string {
   const unsub = (d.unsubmittedAssignments as AssignmentItem[] | undefined) ?? [];
   const due = (d.dueAssignments as AssignmentItem[] | undefined) ?? [];
   const notices = (d.unreadNotices as NoticeItem[] | undefined) ?? [];
-  const online = (d.incompleteOnlineWeeks as Array<{ courseTitle?: string; weekLabel?: string; lectureTitle?: string }> | undefined) ?? [];
+  const online = (d.incompleteOnlineWeeks as OnlineActionItem[] | undefined) ?? [];
   const total = unsub.length + due.length + notices.length + online.length;
-  if (total === 0) return `<section class="section"><div class="section-title"><h2>Today's briefing</h2></div><div class="section-sub">지금 해야 할 일이 없어요. 훌륭해요.</div></section>`;
+  if (total === 0) {
+    return `<section class="section"><div class="section-title"><h2>다음에 할 일</h2></div><div class="section-sub">지금 해야 할 일이 없어요. 훌륭해요.</div></section>`;
+  }
 
-  const urgent = unsub.find((a) => a.priority === "high" || !isAssignmentExpired(a));
-  const urgentCount = unsub.filter((a) => a.priority === "high").length;
+  const queue = buildActionQueue(unsub, due, online, notices);
+  const nextAction = queue.find((item) => item.source !== "notice");
+  const lanes = nextAction ? queue.filter((item) => item !== nextAction) : queue;
+  const urgentItems = lanes.filter((item) => item.lane === "urgent");
+  const todayItems = lanes.filter((item) => item.lane === "today");
+  const soonItems = lanes.filter((item) => item.lane === "soon");
+  const noticeItems = lanes.filter((item) => item.lane === "notice");
 
-  let html = `<section class="section"><div class="section-title"><h2>Today's briefing</h2></div><div class="section-sub">총 ${total}건${urgentCount ? ` · 오늘 마감 <span style="color:var(--red);font-weight:600">${urgentCount}건</span>` : ""}</div>`;
-
-  // Urgent hero
-  if (urgent) {
-    html += `<div class="urgent-card"><div class="urgent-head"><div class="row-icon red">${codeChip(urgent.courseTitle || "")}</div><div style="flex:1;min-width:0"><div class="urgent-badge">${urgent.priority === "high" ? "오늘 마감" : "진행중"}</div><div class="urgent-title">${esc(urgent.title || "")}</div></div><div class="row-value red">${esc(urgent.dueLabel || urgent.dueAt || "")}</div></div><div class="urgent-meta">${joinMeta([urgent.courseTitle, urgent.weekLabel])}</div></div>`;
+  let html = `<section class="section action-queue"><div class="section-title"><h2>다음에 할 일</h2></div><div class="section-sub">총 ${total}건 중 가장 먼저 처리할 항목이에요.</div>`;
+  if (nextAction) {
+    html += renderActionNext(nextAction);
+  } else {
+    html += `<div class="section-sub">마감이 있는 항목은 없고 확인할 공지만 있어요.</div>`;
   }
   html += `</section>`;
 
-  if (unsub.length) {
-    html += `<section class="section"><div class="section-title"><h2>미제출 과제<span class="count">${unsub.length}</span></h2></div>`;
-    for (const a of unsub.slice(0, 5)) {
-      const exp = isAssignmentExpired(a);
-      const valCls = exp ? "red" : a.priority === "high" ? "red" : "";
-      html += `<div class="row"><div class="row-icon">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${esc(a.courseTitle || "")}</div></div><div class="row-value ${valCls}">${esc(a.dueLabel || a.dueAt || (exp ? "만료" : ""))}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
-  if (due.length) {
-    html += `<section class="section"><div class="section-title"><h2>마감 임박<span class="count">${due.length}</span></h2></div>`;
-    for (const a of due.slice(0, 5)) {
-      html += `<div class="row"><div class="row-icon">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${esc(a.courseTitle || "")}</div></div><div class="row-value">${esc(a.dueLabel || a.dueAt || a.statusText || "")}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
-  if (notices.length) {
-    html += `<section class="section"><div class="section-title"><h2>안 읽은 공지<span class="count">${notices.length}</span></h2></div>`;
-    for (const n of notices.slice(0, 5)) {
-      html += `<div class="row"><div class="row-icon accent">${codeChip(n.courseTitle || "")}</div><div class="row-main"><div class="row-title"><span class="dot"></span><span>${esc(n.title || "")}</span></div><div class="row-sub">${esc(n.courseTitle || "")}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">${esc(n.postedAt || "")}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
-  if (online.length) {
-    html += `<section class="section"><div class="section-title"><h2>미수강 온라인<span class="count">${online.length}</span></h2></div>`;
-    for (const o of online.slice(0, 5)) {
-      html += `<div class="row"><div class="row-icon">${codeChip(o.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(o.lectureTitle || o.weekLabel || "")}</div><div class="row-sub">${joinMeta([o.courseTitle, o.weekLabel])}</div></div><div class="row-value accent">시청</div></div>`;
-    }
-    html += `</section>`;
-  }
+  html += renderActionLane("지금 위험함", urgentItems);
+  html += renderActionLane("오늘 해야 함", todayItems);
+  html += renderActionLane("곧 해야 함", soonItems);
+  html += renderActionLane("확인만 하면 됨", noticeItems);
 
   return html;
+}
+
+function buildActionQueue(
+  unsubmitted: AssignmentItem[],
+  dueAssignments: AssignmentItem[],
+  onlineItems: OnlineActionItem[],
+  notices: NoticeItem[],
+): ActionQueueItem[] {
+  const queue: ActionQueueItem[] = [];
+  let order = 0;
+
+  for (const item of unsubmitted) {
+    queue.push({
+      source: "assignment",
+      lane: actionLane(item),
+      title: item.title || "과제 제출",
+      courseTitle: item.courseTitle,
+      weekLabel: item.weekLabel,
+      dueLabel: item.dueLabel,
+      dueAt: item.dueAt,
+      statusText: item.statusText,
+      priority: item.priority,
+      order: order++,
+    });
+  }
+
+  for (const item of dueAssignments) {
+    queue.push({
+      source: "assignment",
+      lane: actionLane(item),
+      title: item.title || "마감 임박 과제",
+      courseTitle: item.courseTitle,
+      weekLabel: item.weekLabel,
+      dueLabel: item.dueLabel,
+      dueAt: item.dueAt,
+      statusText: item.statusText,
+      priority: item.priority,
+      order: order++,
+    });
+  }
+
+  for (const item of onlineItems) {
+    queue.push({
+      source: "online",
+      lane: actionLane(item),
+      title: item.lectureTitle || item.weekLabel || "온라인 강의 시청",
+      courseTitle: item.courseTitle,
+      weekLabel: item.weekLabel,
+      dueLabel: item.dueLabel,
+      dueAt: item.dueAt,
+      statusText: item.statusText,
+      priority: item.priority,
+      order: order++,
+    });
+  }
+
+  for (const item of notices) {
+    queue.push({
+      source: "notice",
+      lane: "notice",
+      title: item.title || "공지 확인",
+      courseTitle: item.courseTitle,
+      postedAt: item.postedAt,
+      order: order++,
+    });
+  }
+
+  return queue.sort((a, b) => actionLaneRank(a) - actionLaneRank(b) || actionPriorityRank(a) - actionPriorityRank(b) || actionDueRank(a) - actionDueRank(b) || a.order - b.order);
+}
+
+function renderActionNext(item: ActionQueueItem): string {
+  const urgentClass = item.lane === "urgent" || item.lane === "today" ? " is-urgent" : "";
+  return `<article class="action-next${urgentClass}"><div class="action-next-top"><span class="action-type">${actionTypeLabel(item)}</span><span></span><span class="action-due">${esc(actionDueText(item))}</span></div><div class="action-next-title">${esc(item.title)}</div><div class="action-next-meta">${joinMeta([item.courseTitle, item.weekLabel, actionReason(item)])}</div></article>`;
+}
+
+function renderActionLane(title: string, items: ActionQueueItem[]): string {
+  if (!items.length) return "";
+  let html = `<section class="section action-lane"><div class="section-title"><h2>${title}<span class="count">${items.length}</span></h2></div><div class="action-list">`;
+  for (const item of items.slice(0, 6)) {
+    html += renderActionRow(item);
+  }
+  html += `</div></section>`;
+  return html;
+}
+
+function renderActionRow(item: ActionQueueItem): string {
+  const rowClass = item.lane === "notice" ? " is-notice" : item.lane === "today" ? " is-today" : item.lane === "urgent" ? " is-urgent" : "";
+  return `<article class="action-row${rowClass}"><span class="action-type">${actionTypeLabel(item)}</span><div><div class="action-row-title">${esc(item.title)}</div><div class="action-row-meta">${joinMeta([item.courseTitle, item.weekLabel])}</div></div><span class="action-due">${esc(actionDueText(item))}</span></article>`;
+}
+
+function actionLane(item: AssignmentItem | OnlineActionItem): ActionQueueItem["lane"] {
+  if (isActionExpired(item)) return "urgent";
+  if (isActionToday(item)) return "today";
+  return "soon";
+}
+
+function isActionExpired(item: AssignmentItem | OnlineActionItem): boolean {
+  if (item.isExpired === true) return true;
+  return textIncludesAny([item.statusText, item.dueLabel], ["만료", "기한 지남", "overdue", "expired"]);
+}
+
+function isActionToday(item: AssignmentItem | OnlineActionItem): boolean {
+  return item.priority === "high" || textIncludesAny([item.dueLabel, item.statusText], ["오늘", "today"]);
+}
+
+function actionLaneRank(item: ActionQueueItem): number {
+  return { urgent: 0, today: 1, soon: 2, notice: 3 }[item.lane];
+}
+
+function actionPriorityRank(item: ActionQueueItem): number {
+  return item.priority === "high" ? 0 : 1;
+}
+
+function actionDueRank(item: ActionQueueItem): number {
+  if (item.source === "notice") return 9999 + item.order;
+
+  if (item.dueAt) {
+    const parsed = new Date(item.dueAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      return (parsed.getMonth() + 1) * 100 + parsed.getDate();
+    }
+  }
+
+  const label = (item.dueLabel || item.statusText || "").toLowerCase();
+  if (label.includes("오늘") || label.includes("today")) return 0;
+  if (label.includes("내일") || label.includes("tomorrow")) return 1;
+
+  const koreanDate = label.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (koreanDate) return Number(koreanDate[1]) * 100 + Number(koreanDate[2]);
+
+  const englishMayDate = label.match(/may\s+(\d{1,2})/);
+  if (englishMayDate) return 500 + Number(englishMayDate[1]);
+
+  const dDay = label.match(/d-(\d{1,2})/);
+  if (dDay) return Number(dDay[1]);
+
+  return 9999 + item.order;
+}
+
+function actionTypeLabel(item: ActionQueueItem): string {
+  if (item.source === "online") return "영상";
+  if (item.source === "notice") return "공지";
+  return "과제";
+}
+
+function actionDueText(item: ActionQueueItem): string {
+  if (item.source === "notice") return item.postedAt || "확인";
+  return item.dueLabel || item.dueAt || item.statusText || (item.source === "online" ? "기한 확인" : "");
+}
+
+function actionReason(item: ActionQueueItem): string {
+  if (item.lane === "urgent") return "기한 확인 필요";
+  if (item.lane === "today") return "오늘 처리";
+  if (item.source === "online") return "시청 필요";
+  return "";
+}
+
+function textIncludesAny(values: Array<string | undefined>, needles: string[]): boolean {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+  return needles.some((needle) => text.includes(needle.toLowerCase()));
 }
 
 // ── 과제 리스트 ───────────────────────────────────────
