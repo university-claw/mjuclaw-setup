@@ -1,8 +1,8 @@
 #!/bin/bash
-# mju-attendance-alert: 수업 시작 N분 후에 출석 체크 안돼있으면 DM 알림
+# mju-attendance-alert: 출석 인정 종료 5분 전에 출석 체크 안돼있으면 DM 알림
 #
 # 동작:
-#   subscribe  — mju msi timetable로 시간표 가져와서 각 수업마다 (시작+grace)분 cron 등록
+#   subscribe  — mju ucheck alert-plan으로 수업별 출석 인정 시간을 읽고 cron 등록
 #   unsubscribe — 유저 관련 모든 attendance cron 제거
 #   check      — cron이 호출. 특정 과목 오늘 출석 상태 확인, 미체크면 직접 DM 전송
 #   refresh    — 시간표 변경 시 cron 재생성 (unsubscribe + subscribe)
@@ -20,59 +20,114 @@ fi
 
 user_dir() { printf '/data/users/%s\n' "$1"; }
 config_file() { printf '%s/attendance-alert.json\n' "$(user_dir "$1")"; }
-job_prefix() { printf 'attend-%s\n' "$1"; }
+job_prefix() { printf 'attend-%s-\n' "$1"; }
 
 usage() {
   cat <<EOF
 Usage:
-  mju-attendance-alert subscribe <discord_id> [grace_min=10]
+  mju-attendance-alert subscribe <discord_id> [lead_min=5]
   mju-attendance-alert unsubscribe <discord_id>
   mju-attendance-alert refresh <discord_id>
   mju-attendance-alert status <discord_id>
-  mju-attendance-alert check <discord_id> "<course_title>"
+  mju-attendance-alert check <discord_id> "<course_title>" [lecture_no]
+  mju-attendance-alert check <discord_id> --lecture-no <lecture_no>
 EOF
 }
 
-# 유저의 모든 attendance-<id>-* cron 제거
-remove_all_crons() {
+# 유저의 모든 attendance-<id>-* cron 제거 (config의 cronJobName에 없는 것만).
+# 실패 시 return 1. 호출자가 cron 누적 위험을 인지할 수 있도록.
+#
+# 과거 결함: cron list 실패를 silent(`2>/dev/null || true`)로 흘렸기 때문에 gateway
+# 미준비 시점에 호출되면 jobs를 빈 list로 보고 stale을 못 지우고, 새 generation cron만
+# 누적되었다 (#duplicate-attendance-alerts).
+remove_stale_crons() {
   local id="$1"
+  local config_path="${2-}"
   local prefix
   prefix=$(job_prefix "$id")
-  local jobs_json
-  jobs_json=$(openclaw cron list --json 2>/dev/null || true)
-  PREFIX="$prefix" CRON_LIST_JSON="$jobs_json" python3 - <<'PY' 2>/dev/null || true
+
+  local jobs_json=""
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if jobs_json=$(openclaw cron list --json 2>/dev/null) && [[ -n "$jobs_json" ]]; then
+      break
+    fi
+    jobs_json=""
+    sleep 1
+  done
+
+  if [[ -z "$jobs_json" ]]; then
+    echo "ERR remove_stale_crons: openclaw cron list failed for $id after 5 retries; skipping cleanup to avoid masking failure" >&2
+    return 1
+  fi
+
+  PREFIX="$prefix" CONFIG_PATH="$config_path" CRON_LIST_JSON="$jobs_json" python3 - <<'PY'
 import json
 import os
 import subprocess
+import sys
 
 prefix = os.environ["PREFIX"]
+config_path = os.environ.get("CONFIG_PATH", "")
+keep = set()
+
+if config_path:
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config = json.load(f)
+        keep = {
+            course.get("cronJobName")
+            for course in config.get("courses", [])
+            if course.get("cronJobName")
+        }
+    except Exception:
+        # config 읽기 실패는 keep을 빈 set으로 두면 모든 attend-<id>- cron이 정리 대상이 된다.
+        # subscribe 직후엔 절대 일어나선 안 되는 상태이므로 명확히 abort.
+        print(f"ERR remove_stale_crons: failed to read config {config_path}", file=sys.stderr)
+        sys.exit(1)
 
 try:
-    data = json.loads(os.environ["CRON_LIST_JSON"] or "[]")
+    data = json.loads(os.environ["CRON_LIST_JSON"])
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except Exception:
-    raise SystemExit(0)
+except Exception as exc:
+    print(f"ERR remove_stale_crons: invalid cron list JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
 
+failures = []
 for job in jobs:
     name = job.get("name", "")
-    if name.startswith(prefix):
-        subprocess.run(["openclaw", "cron", "rm", job.get("id") or name], check=False, capture_output=True)
+    if name.startswith(prefix) and name not in keep:
+        result = subprocess.run(
+            ["openclaw", "cron", "rm", job.get("id") or name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            failures.append((name, (result.stderr or result.stdout or "").strip()))
+
+if failures:
+    for name, msg in failures:
+        print(f"ERR remove_stale_crons: failed to remove {name}: {msg}", file=sys.stderr)
+    sys.exit(1)
 PY
+}
+
+remove_all_crons() {
+  remove_stale_crons "$1"
 }
 
 case "$CMD" in
   subscribe)
     ID="${1-}"
-    GRACE="${2-10}"
+    LEAD="${2-5}"
     [[ -z "$ID" ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$ID")
     mkdir -p "$UDIR"
 
-    remove_all_crons "$ID"
-
-    if ! TT=$(mju msi timetable --app-dir "$UDIR" --format json 2>&1); then
-      echo "ERR: 시간표 조회 실패. 먼저 로그인이 필요합니다." >&2
+    if ! PLAN=$(mju ucheck alert-plan --lead-minutes "$LEAD" --app-dir "$UDIR" --format json 2>&1); then
+      echo "ERR: 출석 알림 계획 조회 실패. 먼저 로그인이 필요합니다." >&2
       exit 1
     fi
 
@@ -81,57 +136,60 @@ case "$CMD" in
     mkdir -p "$CONFIG_DIR"
     CONFIG_TMP=$(mktemp "$CONFIG_DIR/.attendance-alert.XXXXXX")
 
-    if ! TIMETABLE_JSON="$TT" GRACE_MIN="$GRACE" USER_ID="$ID" CONFIG_TMP="$CONFIG_TMP" python3 - <<'PY'
+    if ! ALERT_PLAN_JSON="$PLAN" LEAD_MIN="$LEAD" USER_ID="$ID" CONFIG_TMP="$CONFIG_TMP" python3 - <<'PY'
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 
 def cleanup(names):
     for name in names:
         subprocess.run(["openclaw", "cron", "rm", name], check=False, capture_output=True, text=True)
 
-data = json.loads(os.environ["TIMETABLE_JSON"])
-entries = data.get("entries", [])
-grace = int(os.environ["GRACE_MIN"])
+data = json.loads(os.environ["ALERT_PLAN_JSON"])
+schedules = data.get("schedules", [])
+lead = int(os.environ["LEAD_MIN"])
 user_id = os.environ["USER_ID"]
 config_tmp = os.environ["CONFIG_TMP"]
 
 seen = set()
 registered = []
 registered_names = []
+generation = f"{datetime.now(timezone.utc):%Y%m%d%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 try:
-    for entry in entries:
-        dow = entry.get("dayOfWeek")
-        if not dow or dow > 5:
+    for schedule in schedules:
+        dow = schedule.get("cronDayOfWeek", schedule.get("dayOfWeek"))
+        if dow is None or dow < 0 or dow > 6:
             continue
 
-        time_range = entry.get("timeRange", "")
-        # quoted heredoc(<<'PY')을 통해 넘어오기 때문에 백슬래시가 그대로 전달된다.
-        # 따라서 raw string에서 \d 한 번만 써야 regex engine이 digit로 해석한다.
-        match = re.match(r"(\d{1,2}):(\d{2})", time_range)
+        alert_time = schedule.get("alertTime", "")
+        match = re.match(r"^(\d{1,2}):(\d{2})$", alert_time)
         if not match:
             continue
 
-        hour, minute = int(match.group(1)), int(match.group(2))
-        total = hour * 60 + minute + grace
-        alert_h = (total // 60) % 24
-        alert_m = total % 60
+        alert_h, alert_m = int(match.group(1)), int(match.group(2))
 
-        title = entry.get("courseTitle", "")
-        key = f"{dow}-{alert_h:02d}{alert_m:02d}-{title}"
+        title = schedule.get("courseTitle", "")
+        lecture_no = schedule.get("lectureNo")
+        key = f"{dow}-{alert_h:02d}{alert_m:02d}-{lecture_no or title}"
         if key in seen:
             continue
         seen.add(key)
 
         cron_expr = f"{alert_m} {alert_h} * * {dow}"
         slug = re.sub(r"[^가-힣a-zA-Z0-9]", "", title)[:20] or "course"
-        job_name = f"attend-{user_id}-{dow}-{alert_h:02d}{alert_m:02d}-{slug}"
-        check_cmd = f"mju-attendance-alert check {shlex.quote(user_id)} {shlex.quote(title)}"
+        suffix = str(lecture_no) if lecture_no else slug
+        job_name = f"attend-{user_id}-{generation}-{dow}-{alert_h:02d}{alert_m:02d}-{suffix}"
+        if lecture_no:
+            check_parts = ["mju-attendance-alert", "check", user_id, "--lecture-no", str(lecture_no)]
+        else:
+            check_parts = ["mju-attendance-alert", "check", user_id, title]
+        check_cmd = " ".join(shlex.quote(part) for part in check_parts)
         message = f"다음을 정확히 실행: exec로 {check_cmd} 를 실행하고, 추가 명령 없이 <final></final>로 종료."
 
         result = subprocess.run(
@@ -163,22 +221,40 @@ try:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"failed to add cron {job_name}")
 
         registered_names.append(job_name)
-        registered.append({"day": dow, "time": f"{alert_h:02d}:{alert_m:02d}", "course": title})
+        registered.append({
+            "cronJobName": job_name,
+            "day": dow,
+            "dayLabel": schedule.get("dayLabel", ""),
+            "time": f"{alert_h:02d}:{alert_m:02d}",
+            "course": title,
+            "lectureNo": lecture_no,
+            "startTime": schedule.get("startTime", ""),
+            "endTime": schedule.get("endTime", ""),
+            "timeRange": schedule.get("timeRange", ""),
+            "attendEndMinute": schedule.get("attendEndMinute"),
+            "lateEndMinute": schedule.get("lateEndMinute"),
+            "alertAfterStartMinute": schedule.get("alertAfterStartMinute"),
+            "sessionCount": schedule.get("sessionCount", 0),
+        })
 
     config = {
         "enabled": True,
-        "graceMin": grace,
+        "leadMinutes": lead,
         "timezone": "Asia/Seoul",
         "subscribedAt": datetime.now(timezone.utc).isoformat(),
+        "planYear": data.get("year"),
+        "planTerm": data.get("term"),
+        "warnings": data.get("warnings", []),
         "courses": registered,
     }
     with open(config_tmp, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
     print(f"OK: {len(registered)}개 수업 알림 등록됨")
-    days = ["", "월", "화", "수", "목", "금"]
+    days = ["일", "월", "화", "수", "목", "금", "토"]
     for item in registered:
-        print(f"  - {days[item['day']]} {item['time']} : {item['course']}")
+        day_label = item.get("dayLabel") or days[item["day"]]
+        print(f"  - {day_label} {item['time']} : {item['course']}")
 except Exception as exc:
     cleanup(registered_names)
     try:
@@ -194,12 +270,20 @@ PY
     fi
 
     mv "$CONFIG_TMP" "$CONFIG_PATH"
+    # config는 swap 됐고 새 cron도 등록 완료. stale 정리가 실패해도 subscribe 자체는
+    # 성공이지만, 옛 cron이 남아 같은 알림이 N번 갈 수 있으므로 stderr로 명확히 경고.
+    if ! remove_stale_crons "$ID" "$CONFIG_PATH"; then
+      echo "WARN: stale cron 정리 실패. 다음 subscribe 호출 시 다시 시도됩니다." >&2
+    fi
     ;;
 
   unsubscribe)
     ID="${1-}"
     [[ -z "$ID" ]] && { usage; exit 1; }
-    remove_all_crons "$ID"
+    if ! remove_all_crons "$ID"; then
+      echo "ERR: cron 제거 실패. 재시도 필요." >&2
+      exit 1
+    fi
     rm -f "$(config_file "$ID")"
     echo "OK: unsubscribed $ID"
     ;;
@@ -209,15 +293,16 @@ PY
     [[ -z "$ID" ]] && { usage; exit 1; }
     F=$(config_file "$ID")
     [[ ! -f "$F" ]] && { echo "ERR: 구독 정보 없음. subscribe 먼저 실행." >&2; exit 1; }
-    GRACE=$(FILE_PATH="$F" python3 - <<'PY'
+    LEAD=$(FILE_PATH="$F" python3 - <<'PY'
 import json
 import os
 
 with open(os.environ["FILE_PATH"], encoding="utf-8") as f:
-    print(json.load(f).get("graceMin", 10))
+    payload = json.load(f)
+    print(payload.get("leadMinutes", 5))
 PY
 )
-    exec "$0" subscribe "$ID" "$GRACE"
+    exec "$0" subscribe "$ID" "$LEAD"
     ;;
 
   status)
@@ -234,11 +319,47 @@ PY
   check)
     ID="${1-}"
     COURSE="${2-}"
-    [[ -z "$ID" || -z "$COURSE" ]] && { usage; exit 1; }
+    LECTURE_NO="${3-}"
+    if [[ "$COURSE" == "--lecture-no" ]]; then
+      LECTURE_NO="${3-}"
+      COURSE=""
+    fi
+    [[ -z "$ID" || ( -z "$COURSE" && -z "$LECTURE_NO" ) ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$ID")
-    if ! RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1); then
+
+    # 멱등 marker — 같은 사용자/날짜/수업 조합으로는 하루 한 번만 발송. cron이 어떤
+    # 이유(중복 등록, 재시도)로 두 번 이상 발사되어도 두 번째부터는 여기서 일찍 종료.
+    # cron이 Asia/Seoul로 발사되므로 marker 키도 KST 기준 날짜로 통일.
+    #
+    # 같은 슬롯에 cron이 6개 등록된 경우 OpenClaw가 같은 분에 6개를 동시 발사할 수
+    # 있다. 단순한 `[[ -e ]] + : >` 패턴은 6개가 모두 존재 검사를 통과한 뒤 모두
+    # 파일을 쓰는 TOCTOU race가 있어 실제로는 막지 못한다. `set -o noclobber` + `>`로
+    # 파일 생성 자체를 atomic lock으로 사용해 한 프로세스만 통과시킨다.
+    TODAY=$(TZ=Asia/Seoul date +%F)
+    if [[ -n "$LECTURE_NO" ]]; then
+      MARKER_KEY="$LECTURE_NO"
+    else
+      # course title은 다국어/특수문자 가능 — 파일명에 안전한 형태로 sanitize.
+      MARKER_KEY=$(printf '%s' "$COURSE" | tr -c '[:alnum:]가-힣' '_' | cut -c1-60)
+      [[ -z "$MARKER_KEY" ]] && MARKER_KEY="course"
+    fi
+    MARKER_DIR="$UDIR/.alert-sent"
+    MARKER_FILE="$MARKER_DIR/attendance-$TODAY-$MARKER_KEY.flag"
+    mkdir -p "$MARKER_DIR"
+    if ! (set -o noclobber; : > "$MARKER_FILE") 2>/dev/null; then
+      # 이미 다른 프로세스가 marker를 잡은 상태 — 중복 발송 방지를 위해 즉시 종료.
       exit 0
+    fi
+
+    if [[ -n "$LECTURE_NO" ]]; then
+      if ! RES=$(mju ucheck attendance --lecture-no "$LECTURE_NO" --app-dir "$UDIR" --format json 2>&1); then
+        exit 0
+      fi
+    else
+      if ! RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1); then
+        exit 0
+      fi
     fi
 
     CONTENT=$(ATTENDANCE_JSON="$RES" COURSE_NAME="$COURSE" python3 - <<'PY'
@@ -283,13 +404,20 @@ print("\n".join(lines))
 PY
 )
 
-    [[ -z "$CONTENT" ]] && exit 0
+    if [[ -z "$CONTENT" ]]; then
+      # 발송할 본문이 없는 경우(오늘 세션 없음 / 이미 출석 체크됨)에는 marker가 의미 없음.
+      # 다만 marker는 이미 atomic create로 잡혔으니, 다음 호출이 재시도하도록 풀어둔다.
+      rm -f "$MARKER_FILE"
+      exit 0
+    fi
 
     # OpenClaw discord 채널은 비활성화되어 있고 봇 토큰은 mjuclaw-router가 단독
     # 소유한다. 따라서 outbound DM은 router HTTP `POST /discord/send`로 위임한다.
     ROUTER_URL="${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}"
     ROUTER_TOKEN="${MJUCLAW_ROUTER_TOKEN-}"
     if [[ -z "$ROUTER_TOKEN" ]]; then
+      # send 불가 — marker 롤백해 다음 cron 발사가 재시도할 수 있도록.
+      rm -f "$MARKER_FILE"
       echo "ERR: MJUCLAW_ROUTER_TOKEN env가 비어있어 router로 DM을 보낼 수 없습니다." >&2
       exit 1
     fi
@@ -310,11 +438,14 @@ PY
     if [[ "$HTTP_CODE" != "200" ]]; then
       RESP_BODY=$(cat "$HTTP_OUT" 2>/dev/null || true)
       rm -f "$HTTP_OUT"
+      # send 실패는 marker 롤백 — 다음 cron 발사가 재시도할 수 있어야 한다.
+      rm -f "$MARKER_FILE"
       echo "ERR: router /discord/send → HTTP $HTTP_CODE: ${RESP_BODY:-<no body>}" >&2
       exit 1
     fi
     rm -f "$HTTP_OUT"
 
+    # 발송 성공 — marker는 이미 atomic create로 만들어진 상태이므로 그대로 유지.
     printf '%s\n' "$CONTENT"
     ;;
 
