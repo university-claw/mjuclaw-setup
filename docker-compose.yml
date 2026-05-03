@@ -13,6 +13,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      # ── Discord ───────────────────────────────────────────────────
+      # 봇 토큰은 mjuclaw-router가 단독으로 들고 있어야 한다 (Discord Gateway는
+      # 같은 토큰의 동시 WS 연결을 허용하지 않음). entrypoint.sh 설정상 agent의
+      # OpenClaw config는 channels.discord.enabled=False 라서 실제 connect 시도는
+      # 안 하지만, 기존 schema marker(SHA256)와 호환을 위해 같은 값을 전달한다.
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-2.5-flash}
@@ -20,6 +25,12 @@ services:
       - DISCORD_USER_ID=${DISCORD_USER_ID:-415349075274104832}
       - VIEW_PORT=${VIEW_PORT:-3001}
       - VIEW_BASE_URL=${VIEW_BASE_URL:-http://localhost:3001}
+      # ── 라우터 우회 (cron alert helper가 outbound DM 보낼 때) ──────
+      # bin/mju-news-alert / bin/mju-attendance-alert 가 사용한다.
+      - MJUCLAW_ROUTER_URL=${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}
+      - MJUCLAW_ROUTER_TOKEN=${MJUCLAW_ROUTER_TOKEN}
+      # ── OpenClaw gateway 인증 토큰 (router가 forward 시 사용) ─────
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       # ── 호스트 Postgres (mju-public-data-worker 공유 DB) ────────────
       - PGHOST=${PGHOST:-host.docker.internal}
       - PGPORT=${PGPORT:-5432}
@@ -39,14 +50,59 @@ services:
       # envelope encryption 키 (openssl rand -hex 32). 분실 시 복호화 불가.
       - MJU_VAULT_KEY=${MJU_VAULT_KEY}
     volumes:
-      # 에이전트 세션/데이터 영속화 (컨테이너 재생성해도 유지)
       - agent-data:/home/agent/.openclaw
-      # 유저별 크리덴셜 영속화 (온보딩 데이터)
       - user-data:/data/users
-      # worker가 쓴 공지 첨부/본문 이미지 원본을 on-demand로 읽기 위한 read-only 마운트.
-      # STORAGE_LOCAL_ROOT가 설정되지 않으면 docker compose가 에러를 낸다.
       - ${STORAGE_LOCAL_ROOT}:/data/assets:ro
+    depends_on:
+      router:
+        condition: service_started
+
+  # ── mjuclaw-router ────────────────────────────────────────────────
+  # Discord WS 단독 listener + 결정론적 온보딩 게이트 + cron alert 우회 HTTP.
+  # 봇 토큰을 단독으로 들고 OpenClaw 측 discord 채널은 비활성화된다.
+  # 빌드 시 mju-cli 소스를 additional_contexts로 주입한다 (setup.sh가 clone).
+  router:
+    build:
+      context: ./mjuclaw-router
+      dockerfile: Dockerfile
+      additional_contexts:
+        mju-cli: ./mju-cli
+    container_name: mjuclaw-router
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID=${DISCORD_SERVER_ID:-1492100109997969499}
+      - USER_DATA_ROOT=/data/users
+      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://mjuclaw-agent:18789}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      # docker-compose 내부 네트워크(trusted private)에서만 접근하므로 plaintext ws://
+      # 허용. 외부 노출 시 wss:// + 인증서로 전환할 것.
+      - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
+      - HTTP_PORT=3100
+      - HTTP_BIND_HOST=0.0.0.0
+      - HTTP_AUTH_TOKEN=${MJUCLAW_ROUTER_TOKEN}
+      - LOG_LEVEL=${ROUTER_LOG_LEVEL:-info}
+      - NODE_ENV=production
+      # mju-cli postgres 백엔드 (vault read/write를 router도 동일 ROLE로 수행)
+      - MJU_STORAGE=${MJU_STORAGE:-postgres}
+      - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
+      - MJU_PGPORT=${MJU_PGPORT:-${PGPORT:-5432}}
+      - MJU_PGDATABASE=${MJU_PGDATABASE:-${PGDATABASE:-mjuclaw}}
+      - MJU_PGUSER=${MJU_PGUSER:-mjuclaw_user_app}
+      - MJU_PGPASSWORD=${MJU_PGPASSWORD}
+      - MJU_PGSCHEMA=${MJU_PGSCHEMA:-user_data}
+      - MJU_VAULT_KEY=${MJU_VAULT_KEY}
+    volumes:
+      - user-data:/data/users
+      # router의 openclaw client state(device pairing key 등) 영속화. 이 볼륨이
+      # 없으면 컨테이너 재생성 시 새 device key가 생기고 매번 agent에서 수동
+      # 승인이 필요해진다.
+      - router-data:/home/router/.openclaw
+    # host port 매핑 없음 — compose 내부 네트워크 전용 (3100은 agent → router만)
 
 volumes:
   agent-data:
   user-data:
+  router-data:
