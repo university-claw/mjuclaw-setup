@@ -43,7 +43,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -806,6 +806,30 @@ body {
   letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
 }
 
+.grad-shortage-list {
+  margin-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+.grad-shortage-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px; align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.grad-shortage-title {
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 1.35; word-break: keep-all;
+}
+.grad-shortage-meta {
+  margin-top: 4px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.grad-shortage-gap {
+  color: var(--red); font-size: 12px; font-weight: 800;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
 .ring-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;
 }
@@ -1346,6 +1370,7 @@ function renderGraduation(data: unknown): string {
   const totalReq = d.overall?.required ?? d.creditGaps.reduce((a, g) => a + (g.required ?? 0), 0);
   const pct = d.overall?.pct ?? (totalReq > 0 ? Math.round((totalEarned / totalReq) * 100) : 0);
   const doneCount = d.creditGaps.filter((g) => (g.gap ?? 0) === 0).length;
+  const shortageItems = d.creditGaps.filter((g) => graduationGap(g) > 0);
 
   // Hero ring
   const size = 128, stroke = 10;
@@ -1357,6 +1382,17 @@ function renderGraduation(data: unknown): string {
   html += `<div class="ring" style="width:${size}px;height:${size}px"><svg width="${size}" height="${size}"><circle class="ring-track" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}"/><circle class="ring-fill" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}" stroke-dasharray="${dash} ${c - dash}"/></svg><div class="ring-text"><div class="ring-pct">${pct}<span class="u">%</span></div><div class="ring-cap">완료</div></div></div>`;
   html += `<div style="flex:1;min-width:0"><div class="metric-label">총 취득 학점</div><div class="metric-value" style="font-size:26px;margin-top:4px">${totalEarned}<span class="unit"> / ${totalReq}</span></div><div class="metric-trend" style="margin-top:8px">남은 <strong style="color:var(--ink);font-weight:600">${Math.max(0, totalReq - totalEarned)}학점</strong></div></div>`;
   html += `</div></section>`;
+
+  if (shortageItems.length) {
+    html += `<section class="section"><div class="section-title"><h2>부족한 요건<span class="count">${shortageItems.length}</span></h2></div><div class="section-sub">총 취득 학점 아래에서 먼저 확인할 항목이에요.</div><div class="grad-shortage-list">`;
+    for (const g of shortageItems) {
+      const earned = g.earned ?? 0;
+      const required = g.required ?? 0;
+      const gap = graduationGap(g);
+      html += `<article class="grad-shortage-row"><div><div class="grad-shortage-title">${esc(g.label)}</div><div class="grad-shortage-meta">${earned} / ${required} 학점</div></div><div class="grad-shortage-gap">${gap}학점 부족</div></article>`;
+    }
+    html += `</div></section>`;
+  }
 
   // Breakdown rings
   html += `<section class="section"><div class="section-title"><h2>영역별<span class="count">${d.creditGaps.length}</span></h2></div><div class="section-sub">완료 ${doneCount} · 진행 ${d.creditGaps.length - doneCount}</div><div class="ring-grid">`;
@@ -1374,6 +1410,10 @@ function renderGraduation(data: unknown): string {
   html += `</div></section>`;
 
   return html;
+}
+
+function graduationGap(item: { earned?: number; required?: number; gap?: number }): number {
+  return Math.max(0, item.gap ?? Math.max(0, (item.required ?? 0) - (item.earned ?? 0)));
 }
 
 // ── 수강과목 ──────────────────────────────────────────
