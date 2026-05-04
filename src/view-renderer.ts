@@ -42,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -386,6 +386,68 @@ body {
   border-left: 2px solid var(--rule);
   grid-column: 1 / -1;
   word-break: keep-all;
+}
+
+/* Cafeteria */
+.cafeteria-section .section-title {
+  margin-bottom: 10px;
+}
+.cafeteria-table {
+  border-top: 1px solid var(--rule-strong);
+}
+.cafeteria-table-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.cafeteria-table-row:last-child {
+  border-bottom: none;
+}
+.cafeteria-place {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.cafeteria-menu {
+  min-width: 0;
+}
+.cafeteria-menu-text {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.48;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.cafeteria-menu-note {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: keep-all;
+}
+.cafeteria-price {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+.cafeteria-table-row.is-empty .cafeteria-menu-text,
+.cafeteria-table-row.is-closed .cafeteria-menu-text {
+  color: var(--ink-3);
+  font-weight: 700;
+}
+.cafeteria-table-row.is-closed .cafeteria-price {
+  color: var(--ink-3);
 }
 
 /* News search results */
@@ -1246,7 +1308,7 @@ function renderData(dataType: string, data: unknown): string {
     attendance: renderAttendanceText,
     news: renderNewsList,
     "news-detail": renderNewsDetail,
-    cafeteria: renderCafeteriaMenus,
+    cafeteria: renderCafeteriaTable,
   };
   const renderer = renderers[dataType];
   if (renderer) return renderer(data);
@@ -2297,6 +2359,180 @@ function renderCafeteriaMenus(data: unknown): string {
 }
 
 // ── 출석 ──────────────────────────────────────────────
+
+type CafeteriaSource = {
+  key: string;
+  label: string;
+  aliases: string[];
+};
+
+const CAFETERIA_SOURCES: CafeteriaSource[] = [
+  { key: "student-hall", label: "학생회관", aliases: ["student", "student-cafeteria", "학생회관"] },
+  { key: "myeongjindang", label: "명진당", aliases: ["myeongjin", "myeongjindang", "명진당"] },
+  { key: "faculty", label: "교직원", aliases: ["faculty", "faculty-cafeteria", "교직원"] },
+  { key: "welfare", label: "복지동", aliases: ["welfare", "welfare-building", "복지동"] },
+];
+
+function renderCafeteriaTable(data: unknown): string {
+  const d = data as { items?: CafeteriaEntry[] };
+  if (!d.items?.length) return "";
+
+  type CafeteriaMealGroup = {
+    date: string;
+    mealType: string;
+    entries: CafeteriaEntry[];
+  };
+
+  const groups = new Map<string, CafeteriaMealGroup>();
+  for (const entry of d.items) {
+    const date = entry.serviceDate || "";
+    const mealType = entry.mealType || "";
+    const key = `${date}::${mealType}`;
+    if (!groups.has(key)) {
+      groups.set(key, { date, mealType, entries: [] });
+    }
+    groups.get(key)!.entries.push(entry);
+  }
+
+  const mealOrder = ["breakfast", "lunch", "dinner"];
+  const dates = Array.from(new Set(d.items.map((entry) => entry.serviceDate || "")));
+  for (const date of dates) {
+    for (const mealType of mealOrder) {
+      const key = `${date}::${mealType}`;
+      if (!groups.has(key)) {
+        groups.set(key, { date, mealType, entries: [] });
+      }
+    }
+  }
+
+  const sortedGroups = Array.from(groups.values()).sort((a, b) => {
+    const dateOrder = a.date.localeCompare(b.date);
+    if (dateOrder !== 0) return dateOrder;
+    return mealOrder.indexOf(a.mealType) - mealOrder.indexOf(b.mealType);
+  });
+
+  let html = "";
+  for (const group of sortedGroups) {
+    const bySource = new Map<string, CafeteriaEntry[]>();
+    const sourceLabels = new Map<string, string>();
+
+    for (const entry of group.entries) {
+      const source = cafeteriaSourceFor(entry);
+      if (!bySource.has(source.key)) bySource.set(source.key, []);
+      bySource.get(source.key)!.push(entry);
+      sourceLabels.set(source.key, source.label);
+    }
+
+    const knownKeys = new Set(CAFETERIA_SOURCES.map((source) => source.key));
+    const extraKeys = Array.from(bySource.keys()).filter((key) => !knownKeys.has(key));
+    const orderedSources = [
+      ...CAFETERIA_SOURCES.map((source) => ({ key: source.key, label: source.label })),
+      ...extraKeys.map((key) => ({ key, label: sourceLabels.get(key) || key })),
+    ];
+
+    html += `<section class="section cafeteria-section"><div class="section-title"><h2>${esc(cafeteriaGroupTitle(group.date, group.mealType))}</h2></div><div class="cafeteria-table">`;
+
+    for (const source of orderedSources) {
+      const entries = bySource.get(source.key) || [];
+      const row = cafeteriaRowFor(source.key, group.mealType, entries);
+      html += `<article class="cafeteria-table-row ${row.className}"><div class="cafeteria-place">${esc(source.label)}</div><div class="cafeteria-menu"><div class="cafeteria-menu-text">${esc(row.menuText)}</div>${row.note ? `<div class="cafeteria-menu-note">${esc(row.note)}</div>` : ""}</div><div class="cafeteria-price">${esc(row.priceText)}</div></article>`;
+    }
+
+    html += `</div></section>`;
+  }
+
+  return html;
+}
+
+function cafeteriaSourceFor(entry: CafeteriaEntry): { key: string; label: string } {
+  const sourceId = normalizeCafeteriaText(entry.sourceId || "");
+  const sourceName = normalizeCafeteriaText(entry.sourceName || "");
+  const haystack = `${sourceId} ${sourceName}`;
+
+  for (const source of CAFETERIA_SOURCES) {
+    if (source.aliases.some((alias) => haystack.includes(normalizeCafeteriaText(alias)))) {
+      return { key: source.key, label: source.label };
+    }
+  }
+
+  const fallback = entry.sourceName || entry.sourceId || "기타";
+  return { key: `extra:${fallback}`, label: fallback };
+}
+
+function normalizeCafeteriaText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, "").replace(/식당/g, "");
+}
+
+function cafeteriaGroupTitle(date: string, mealType: string): string {
+  const parts: string[] = [];
+  if (date) parts.push(formatCafeteriaDate(date));
+  if (mealType) parts.push(MEAL_LABEL[mealType] || mealType);
+  return parts.length ? `${parts.join(" ")} 식단표` : "식단표";
+}
+
+function formatCafeteriaDate(date: string): string {
+  const parsed = new Date(`${date}T00:00:00+09:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
+}
+
+function cafeteriaRowFor(sourceKey: string, mealType: string, entries: CafeteriaEntry[]): {
+  className: string;
+  menuText: string;
+  note: string;
+  priceText: string;
+} {
+  if (!entries.length) {
+    return { className: "is-empty", menuText: "메뉴 없음", note: "해당 식당의 식단 정보가 없습니다.", priceText: "" };
+  }
+
+  if (entries.every((entry) => entry.isClosed)) {
+    return { className: "is-closed", menuText: "휴무", note: "", priceText: "휴무" };
+  }
+
+  const openEntries = entries.filter((entry) => !entry.isClosed);
+  const menuLines = openEntries
+    .map((entry) => cafeteriaMenuItems(entry).join(" · "))
+    .filter(Boolean);
+
+  return {
+    className: "",
+    menuText: menuLines.length ? menuLines.join(" / ") : "메뉴 없음",
+    note: menuLines.length ? "" : "등록된 메뉴명이 없습니다.",
+    priceText: cafeteriaFixedPriceFor(sourceKey, mealType),
+  };
+}
+
+function cafeteriaFixedPriceFor(sourceKey: string, mealType: string): string {
+  if (sourceKey === "student-hall" && mealType === "breakfast") return "5,000원";
+  return sourceKey === "student-hall" ? "6,000원" : "6,500원";
+}
+
+function cafeteriaMenuItems(entry: CafeteriaEntry): string[] {
+  if (Array.isArray(entry.menuItems)) {
+    return entry.menuItems.map(cafeteriaMenuItemText).filter(Boolean);
+  }
+
+  if (entry.menuText) {
+    return entry.menuText.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
+function cafeteriaMenuItemText(item: unknown): string {
+  if (typeof item === "string") return item.trim();
+  if (!item || typeof item !== "object" || Array.isArray(item)) return "";
+
+  const record = item as Record<string, unknown>;
+  const name = record.name ?? record.title ?? record.menuName ?? record.text;
+  return typeof name === "string" ? name.trim() : "";
+}
 
 function renderAttendanceText(data: unknown): string {
   if (typeof data === "string") {
