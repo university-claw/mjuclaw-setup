@@ -42,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance" && entry.dataType !== "news") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -63,6 +63,8 @@ export function renderViewHtml(entry: ViewEntry): string {
     minute: "2-digit",
   });
   const meta = metaFor(entry.dataType);
+  const displayTitle = displayTitleForEntry(entry);
+  const heroSubHtml = renderHeroSub(entry, created, time);
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -71,7 +73,7 @@ export function renderViewHtml(entry: ViewEntry): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0A0B0D" media="(prefers-color-scheme: dark)">
-<title>${esc(entry.title)} · 묭묭이</title>
+<title>${esc(displayTitle)} · 묭묭이</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -93,11 +95,9 @@ ${pageStyles()}
 
   <section class="hero">
     <div class="hero-eyebrow">${esc(meta.detail)}</div>
-    <h1 class="hero-title">${esc(entry.title)}</h1>
+    <h1 class="hero-title">${esc(displayTitle)}</h1>
     <div class="hero-sub">
-      <time datetime="${esc(created.toISOString())}">${esc(time)}</time>
-      <span class="sep">·</span>
-      <span>30분 후 만료</span>
+      ${heroSubHtml}
     </div>
   </section>
 
@@ -107,8 +107,35 @@ ${pageStyles()}
     <span>묭묭이 · 명지대 학사 도우미</span>
   </footer>
 </main>
-</body>
-</html>`;
+  </body>
+  </html>`;
+}
+
+function displayTitleForEntry(entry: ViewEntry): string {
+  if (entry.dataType === "news-detail" && entry.rawData && typeof entry.rawData === "object" && !Array.isArray(entry.rawData)) {
+    const title = (entry.rawData as { title?: unknown }).title;
+    if (typeof title === "string" && title.trim()) return title.trim();
+  }
+  return entry.title;
+}
+
+function renderHeroSub(entry: ViewEntry, created: Date, createdLabel: string): string {
+  if (entry.dataType === "news-detail" && entry.rawData && typeof entry.rawData === "object" && !Array.isArray(entry.rawData)) {
+    const meta = noticeDetailMeta(entry.rawData as NoticeDetailData);
+    if (meta) return meta;
+  }
+
+  return `<time datetime="${esc(created.toISOString())}">${esc(createdLabel)}</time>
+      <span class="sep">·</span>
+      <span>30분 후 만료</span>`;
+}
+
+function noticeDetailMeta(d: NoticeDetailData): string {
+  const source = d.sourceName || (d.source && NEWS_SOURCE_LABEL[d.source]) || d.source || "";
+  const dateLabel = d.publishedAt
+    ? new Date(d.publishedAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric" })
+    : "";
+  return joinMeta([source, dateLabel, d.author, d.categoryLabel]);
 }
 
 export function renderExpiredHtml(): string {
@@ -374,6 +401,71 @@ body {
   -webkit-line-clamp: 2;
   white-space: normal;
   overflow: hidden;
+}
+
+/* News detail */
+.notice-detail-source {
+  padding: 16px 0 0;
+}
+.notice-source-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 34px; padding: 0 12px;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px; font-weight: 700;
+  text-decoration: none;
+}
+.notice-body-section { padding-top: 24px; }
+.notice-body {
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.82;
+  word-break: keep-all;
+}
+.notice-attachments-section { padding-top: 28px; }
+.notice-attachment-row {
+  align-items: center;
+}
+.notice-attachment-row .row-icon {
+  font-size: 10px;
+  letter-spacing: 0;
+}
+.notice-attachment-row .row-title a {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: keep-all;
+}
+.notice-download {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+.notice-download.muted {
+  color: var(--ink-3);
+  font-weight: 700;
+}
+.notice-preview {
+  margin-top: 8px;
+}
+.notice-preview.muted {
+  color: var(--ink-3);
+}
+.notice-ocr-section {
+  padding-top: 24px;
+}
+.notice-ocr-text {
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.65;
+  word-break: keep-all;
 }
 
 /* Unsubmitted assignments */
@@ -2056,44 +2148,43 @@ type NoticeDetailImage = {
   imageUrl?: string; altText?: string | null;
   ocr?: { status?: string; text?: string | null; confidence?: number | null; language?: string | null; error?: string | null } | null;
 };
+type NoticeDetailData = {
+  title?: string; source?: string; sourceName?: string; categoryLabel?: string | null;
+  author?: string | null; url?: string; publishedAt?: string;
+  bodyText?: string | null; attachments?: NoticeDetailAttachment[]; images?: NoticeDetailImage[];
+};
 
 function renderNewsDetail(data: unknown): string {
-  const d = data as {
-    title?: string; source?: string; sourceName?: string; categoryLabel?: string | null;
-    author?: string | null; url?: string; publishedAt?: string;
-    bodyText?: string | null; attachments?: NoticeDetailAttachment[]; images?: NoticeDetailImage[];
-  };
+  const d = data as NoticeDetailData;
 
   let html = "";
-  const source = d.sourceName || (d.source && NEWS_SOURCE_LABEL[d.source]) || d.source || "";
-  const dateLabel = d.publishedAt
-    ? new Date(d.publishedAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric" })
-    : "";
-  const meta = joinMeta([source, dateLabel, d.author, d.categoryLabel]);
 
-  html += `<section class="section"><div class="section-title"><h2>공지 정보</h2></div>`;
-  if (meta) html += `<div class="section-sub">${meta}</div>`;
-  if (d.url) html += `<div class="row" style="grid-template-columns:1fr"><div class="row-title"><a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--accent)">원문 페이지 열기 ↗</a></div></div>`;
-  html += `</section>`;
+  if (d.url) {
+    html += `<section class="notice-detail-source"><a class="notice-source-link" href="${esc(d.url)}" target="_blank" rel="noopener">원문 페이지 열기 ↗</a></section>`;
+  }
 
   if (d.bodyText && d.bodyText.trim()) {
-    html += `<section class="section"><div class="section-title"><h2>본문</h2></div><div class="briefing-body">${esc(d.bodyText).replace(/\n/g, "<br>")}</div></section>`;
+    html += `<section class="section notice-body-section"><div class="section-title"><h2>본문</h2></div><article class="notice-body">${esc(d.bodyText).replace(/\n/g, "<br>")}</article></section>`;
   }
 
   if (d.attachments && d.attachments.length > 0) {
-    html += `<section class="section"><div class="section-title"><h2>첨부<span class="count">${d.attachments.length}</span></h2></div>`;
+    html += `<section class="section notice-attachments-section"><div class="section-title"><h2>첨부파일<span class="count">${d.attachments.length}개</span></h2></div>`;
     for (const a of d.attachments) {
       const size = a.sizeBytes != null ? formatBytes(a.sizeBytes) : null;
-      const metaLine = joinMeta([a.contentType, size]);
+      const kind = attachmentKind(a);
+      const metaLine = joinMeta([kind, size]);
       const name = a.fileName || "파일";
-      html += `<div class="row"><div class="row-icon">📎</div><div class="row-main"><div class="row-title">${a.downloadUrl ? `<a href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">${esc(name)}</a>` : esc(name)}</div>${metaLine ? `<div class="row-sub">${metaLine}</div>` : ""}</div><div class="row-value" style="color:var(--ink-3);font-weight:500">↓</div>`;
+      const title = a.downloadUrl ? `<a href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">${esc(name)}</a>` : esc(name);
+      const action = a.downloadUrl
+        ? `<a class="notice-download" href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">다운로드</a>`
+        : `<span class="notice-download muted">파일</span>`;
+      html += `<div class="row notice-attachment-row"><div class="row-icon accent">${esc(kind || "파일")}</div><div class="row-main"><div class="row-title">${title}</div>${metaLine ? `<div class="row-sub">${metaLine}</div>` : ""}</div><div class="row-value">${action}</div>`;
       const ex = a.extraction;
       if (ex?.status === "succeeded" && ex.text) {
-        const preview = ex.text.length > 400 ? ex.text.slice(0, 400) + " …" : ex.text;
-        html += `<div class="row-preview">${esc(preview)}</div>`;
+        const preview = previewText(ex.text);
+        html += `<div class="row-preview notice-preview">${esc(preview)}</div>`;
       } else if (ex?.status && ex.status !== "pending") {
-        const label = { failed: "추출 실패", unsupported: "추출 미지원" }[ex.status] || ex.status;
-        html += `<div class="row-preview" style="color:var(--ink-3)">[${esc(label)}]</div>`;
+        html += `<div class="row-preview notice-preview muted">${esc(extractionStatusLabel(ex.status))}</div>`;
       }
       html += `</div>`;
     }
@@ -2102,16 +2193,37 @@ function renderNewsDetail(data: unknown): string {
 
   const ocrImages = (d.images || []).filter((im) => im.ocr?.status === "succeeded" && im.ocr.text);
   if (ocrImages.length > 0) {
-    html += `<section class="section"><div class="section-title"><h2>본문 이미지 텍스트<span class="count">${ocrImages.length}</span></h2></div>`;
+    html += `<section class="section notice-ocr-section"><div class="section-title"><h2>이미지에서 추출한 텍스트<span class="count">${ocrImages.length}개</span></h2></div>`;
     for (const im of ocrImages) {
       const text = im.ocr?.text ?? "";
-      const preview = text.length > 400 ? text.slice(0, 400) + " …" : text;
-      html += `<div class="row" style="grid-template-columns:1fr"><div class="row-preview" style="grid-column:unset;margin-left:0">${esc(preview)}</div></div>`;
+      const preview = previewText(text);
+      html += `<div class="notice-ocr-text">${esc(preview)}</div>`;
     }
     html += `</section>`;
   }
 
   return html || renderGeneric(data);
+}
+
+function attachmentKind(a: NoticeDetailAttachment): string {
+  const fileName = a.fileName || "";
+  const ext = fileName.includes(".") ? fileName.split(".").pop()?.trim() : "";
+  if (ext) return ext.toUpperCase().slice(0, 5);
+
+  const contentType = a.contentType || "";
+  if (contentType.includes("pdf")) return "PDF";
+  if (contentType.includes("hwp")) return "HWP";
+  if (contentType.includes("image")) return "IMG";
+  return "";
+}
+
+function previewText(text: string): string {
+  const normalized = text.trim();
+  return normalized.length > 400 ? `${normalized.slice(0, 400)} …` : normalized;
+}
+
+function extractionStatusLabel(status: string): string {
+  return { failed: "미리보기 추출 실패", unsupported: "미리보기 미지원" }[status] || status;
 }
 
 function formatBytes(n: number): string {
