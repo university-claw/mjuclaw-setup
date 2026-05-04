@@ -2,6 +2,22 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { renderViewHtml } = require("../dist/view-renderer.js");
 
+function dueAtInKorea(dayOffset, time) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const base = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
+  const date = new Date(base + dayOffset * 24 * 60 * 60 * 1000);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}T${time}+09:00`;
+}
+
 function unsubmittedEntry() {
   return {
     id: "unsubmitted-test-view",
@@ -25,28 +41,28 @@ function unsubmittedEntry() {
           courseTitle: "Constitutional Law",
           weekLabel: "Week 12",
           dueLabel: "Tomorrow 18:00",
-          dueAt: "2026-05-04T18:00:00+09:00",
+          dueAt: dueAtInKorea(1, "18:00:00"),
         },
         {
           title: "Midterm replacement report",
           courseTitle: "Administrative Law",
           weekLabel: "Week 10",
           dueLabel: "Tomorrow 23:59",
-          dueAt: "2026-05-04T23:59:00+09:00",
+          dueAt: dueAtInKorea(1, "23:59:00"),
         },
         {
           title: "Discussion post",
           courseTitle: "Civil Law",
           weekLabel: "Week 13",
           dueLabel: "May 5",
-          dueAt: "2026-05-05T23:59:00+09:00",
+          dueAt: dueAtInKorea(2, "23:59:00"),
         },
         {
           title: "Lab report revision",
           courseTitle: "Database",
           weekLabel: "Week 11",
           dueLabel: "May 6",
-          dueAt: "2026-05-06T23:59:00+09:00",
+          dueAt: dueAtInKorea(3, "23:59:00"),
         },
       ],
     },
