@@ -524,7 +524,7 @@ body {
   border-bottom: none;
 }
 .cafeteria-place {
-  color: var(--ink);
+  color: var(--accent-deep);
   font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
@@ -537,7 +537,7 @@ body {
 .cafeteria-menu-text {
   color: var(--ink);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 750;
   line-height: 1.48;
   letter-spacing: -0.01em;
   word-break: keep-all;
@@ -551,17 +551,21 @@ body {
   word-break: keep-all;
 }
 .cafeteria-price {
-  color: var(--ink-2);
+  color: var(--green);
   font-size: 12.5px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-align: right;
 }
+.cafeteria-table-row.is-empty .cafeteria-place,
+.cafeteria-table-row.is-closed .cafeteria-place {
+  color: var(--ink-3);
+}
 .cafeteria-table-row.is-empty .cafeteria-menu-text,
 .cafeteria-table-row.is-closed .cafeteria-menu-text {
   color: var(--ink-3);
-  font-weight: 700;
+  font-weight: 650;
 }
 .cafeteria-table-row.is-closed .cafeteria-price {
   color: var(--ink-3);
