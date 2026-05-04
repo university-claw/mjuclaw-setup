@@ -42,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "unread-notices" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -386,6 +386,123 @@ body {
   border-left: 2px solid var(--rule);
   grid-column: 1 / -1;
   word-break: keep-all;
+}
+
+/* LMS unread notices */
+.unread-notice-overview {
+  padding: 20px 0 2px;
+  border-bottom: 1px solid var(--rule);
+}
+.unread-overview-line {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+.unread-overview-count {
+  color: var(--ink);
+  font-size: 15.5px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+.unread-overview-count strong {
+  color: var(--accent);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.unread-overview-meta {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.unread-overview-note {
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+.unread-notice-section {
+  padding-top: 24px;
+}
+.unread-notice-section .section-title {
+  margin-bottom: 8px;
+}
+.unread-notice-list {
+  border-top: 1px solid var(--rule-strong);
+}
+.unread-notice-row {
+  padding: 15px 0 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.unread-notice-row:last-child {
+  border-bottom: none;
+}
+.unread-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.notice-course-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 68%;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notice-posted {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.unread-notice-title {
+  margin-top: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.38;
+  letter-spacing: 0;
+  word-break: keep-all;
+}
+.unread-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 7px;
+}
+.unread-notice-preview {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 12.8px;
+  font-weight: 500;
+  line-height: 1.58;
+  word-break: keep-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 /* Cafeteria */
@@ -1304,7 +1421,7 @@ function renderData(dataType: string, data: unknown): string {
     courses: renderCourses,
     "action-items": renderActionItems,
     unsubmitted: renderUnsubmittedAssignments,
-    "unread-notices": renderNoticeList,
+    "unread-notices": renderUnreadNoticeList,
     attendance: renderAttendanceText,
     news: renderNewsList,
     "news-detail": renderNewsDetail,
@@ -2158,6 +2275,57 @@ function assignmentDueText(item: AssignmentItem): string {
 }
 
 // ── 공지 리스트 (LMS) ──────────────────────────────────
+
+function renderUnreadNoticeList(data: unknown): string {
+  const items: NoticeItem[] = Array.isArray(data)
+    ? (data as NoticeItem[])
+    : ((data as { notices?: NoticeItem[]; items?: NoticeItem[] }).notices
+      || (data as { items?: NoticeItem[] }).items
+      || []);
+  if (!items.length) return "";
+
+  const todayCount = items.filter(isTodayNotice).length;
+  const recent = items.filter(isRecentNotice);
+  const past = items.filter((item) => !isRecentNotice(item));
+  const meta = todayCount > 0
+    ? `오늘 ${todayCount} · 이전 ${items.length - todayCount}`
+    : `최근 ${recent.length} · 지난 ${past.length}`;
+
+  let html = `<section class="unread-notice-overview"><div class="unread-overview-line"><div class="unread-overview-count">안 읽은 공지 <strong>${items.length}건</strong></div><div class="unread-overview-meta">${esc(meta)}</div></div><div class="unread-overview-note">과목과 날짜를 먼저 확인하고 필요한 공지만 바로 열어보세요.</div></section>`;
+  if (recent.length) html += renderUnreadNoticeSection("최근 공지", recent);
+  if (past.length) html += renderUnreadNoticeSection("지난 공지", past);
+  return html;
+}
+
+function renderUnreadNoticeSection(title: string, items: NoticeItem[]): string {
+  let html = `<section class="section unread-notice-section"><div class="section-title"><h2>${esc(title)}<span class="count">${items.length}</span></h2></div><div class="unread-notice-list">`;
+  for (const notice of items) {
+    html += renderUnreadNoticeRow(notice);
+  }
+  return html + `</div></section>`;
+}
+
+function renderUnreadNoticeRow(notice: NoticeItem): string {
+  const course = notice.courseTitle?.trim() || "LMS 공지";
+  const title = notice.title?.trim() || "제목 없음";
+  const posted = notice.postedAt?.trim() || "확인";
+  const unreadDot = notice.isUnread === false ? "" : `<span class="unread-dot" aria-hidden="true"></span>`;
+  const preview = notice.previewText?.trim()
+    ? `<div class="unread-notice-preview">${esc(notice.previewText.trim().slice(0, 220))}</div>`
+    : "";
+
+  return `<article class="unread-notice-row"><div class="unread-notice-head"><span class="notice-course-pill">${esc(course)}</span><span class="notice-posted">${esc(posted)}</span></div><div class="unread-notice-title">${unreadDot}<span>${esc(title)}</span></div>${preview}</article>`;
+}
+
+function isRecentNotice(notice: NoticeItem): boolean {
+  const label = notice.postedAt?.trim().toLowerCase() || "";
+  return isTodayNotice(notice) || label.includes("어제") || label.includes("yesterday");
+}
+
+function isTodayNotice(notice: NoticeItem): boolean {
+  const label = notice.postedAt?.trim().toLowerCase() || "";
+  return label.includes("오늘") || label.includes("today");
+}
 
 function renderNoticeList(data: unknown): string {
   const items: NoticeItem[] = Array.isArray(data)
