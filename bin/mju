@@ -5,7 +5,6 @@
 # dataType은 서브커맨드를 보고 자동 매핑:
 #   lms +action-items  → action-items
 #   lms +unsubmitted   → unsubmitted
-#   lms +due-assignments → due-assignments
 #   lms +unread-notices → unread-notices
 #   msi timetable      → timetable
 #   msi grades         → grades
@@ -56,7 +55,6 @@ detect_datatype() {
   case "$args" in
     *"lms +action-items"*) echo "action-items" ;;
     *"lms +unsubmitted"*) echo "unsubmitted" ;;
-    *"lms +due-assignments"*) echo "due-assignments" ;;
     *"lms +unread-notices"*) echo "unread-notices" ;;
     *"lms +digest"*) echo "action-items" ;;
     *"msi timetable"*) echo "timetable" ;;
@@ -64,7 +62,6 @@ detect_datatype() {
     *"msi current-grades"*) echo "grades" ;;
     *"msi grades"*) echo "grades" ;;
     *"msi graduation"*) echo "graduation" ;;
-    *"lms courses list"*) echo "courses" ;;
     *"ucheck"*) echo "attendance" ;;
     *"ucheck attendance"*) echo "attendance" ;;
     *) echo "" ;;
@@ -76,7 +73,7 @@ should_view() {
   local args="$*"
   case "$args" in
     *" +"*) return 0 ;;
-    *"timetable"*|*"grade-history"*|*"grades"*|*"graduation"*|*"courses list"*|*"attendance"*) return 0 ;;
+    *"timetable"*|*"grade-history"*|*"grades"*|*"graduation"*|*"attendance"*) return 0 ;;
     *"auth "*|*"config "*|*"doctor"*|*"skills"*) return 1 ;;
     *) return 1 ;;
   esac
@@ -84,15 +81,13 @@ should_view() {
 
 title_for_datatype() {
   case "$1" in
-    "action-items") echo "남은 일" ;;
+    "action-items") echo "우선 처리 항목" ;;
     "unsubmitted") echo "미제출 과제" ;;
-    "due-assignments") echo "마감 임박 과제" ;;
     "unread-notices") echo "안 읽은 공지" ;;
     "timetable") echo "시간표" ;;
     "grades") echo "성적" ;;
     "grade-history") echo "학기별 성적" ;;
     "graduation") echo "졸업요건" ;;
-    "courses") echo "수강과목" ;;
     "attendance") echo "출석" ;;
     *) echo "학사 데이터" ;;
   esac
