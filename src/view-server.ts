@@ -21,6 +21,7 @@ app.use(
 const ALLOWED_DATA_TYPES = new Set<ViewEntry["dataType"]>([
   "timetable",
   "grades",
+  "grade-history",
   "graduation",
   "courses",
   "action-items",

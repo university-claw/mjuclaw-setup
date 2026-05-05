@@ -28,7 +28,7 @@ async function waitForHealth(port) {
   throw new Error(`view server did not start on port ${port}`);
 }
 
-test("view API rejects the removed due-assignments data type", async (t) => {
+async function withViewServer(t, fn) {
   const port = await freePort();
   const root = path.resolve(__dirname, "..");
   const child = spawn(process.execPath, [path.join(root, "dist", "view-server.js")], {
@@ -45,18 +45,44 @@ test("view API rejects the removed due-assignments data type", async (t) => {
   t.after(() => child.kill());
 
   await waitForHealth(port);
+  await fn(port);
+}
 
-  const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      dataType: "due-assignments",
-      title: "Due Assignments",
-      rawData: { assignments: [] },
-    }),
+test("view API rejects the removed due-assignments data type", async (t) => {
+  await withViewServer(t, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dataType: "due-assignments",
+        title: "Due Assignments",
+        rawData: { assignments: [] },
+      }),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 400);
+    assert.equal(body.error, "invalid dataType");
   });
-  const body = await res.json();
+});
 
-  assert.equal(res.status, 400);
-  assert.equal(body.error, "invalid dataType");
+test("view API accepts the grade-history data type", async (t) => {
+  await withViewServer(t, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dataType: "grade-history",
+        title: "학기별 성적",
+        rawData: {
+          overview: { 전체평점: "4.08", 전체취득학점: "96" },
+          termRecords: [],
+        },
+      }),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
+  });
 });

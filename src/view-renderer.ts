@@ -42,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "unread-notices" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "grade-history" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "unread-notices" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -962,6 +962,208 @@ body {
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
+/* Grade history */
+.history-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 0.8fr));
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-alt), var(--bg));
+}
+.history-overview-item {
+  min-width: 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.history-overview-item.primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+.history-overview-label {
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.history-overview-item.primary .history-overview-label {
+  color: var(--bg);
+  opacity: 0.72;
+}
+.history-overview-value {
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-overview-item.primary .history-overview-value {
+  color: var(--bg);
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+.history-flow {
+  padding: 15px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.history-flow-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history-flow-title {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+.history-flow-scale {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-flow-chart {
+  height: 146px;
+  margin-top: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.history-flow-chart::-webkit-scrollbar { display: none; }
+.history-flow-plot {
+  position: relative;
+  width: 100%;
+  min-width: var(--plot-min-width);
+  height: 100%;
+}
+.history-flow-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.history-flow-grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.history-flow-area {
+  fill: var(--accent-soft);
+  opacity: 0.78;
+}
+.history-flow-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.history-flow-value {
+  position: absolute;
+  left: var(--point-x);
+  top: calc(var(--point-y) - 25px);
+  transform: translateX(-50%);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-flow-point {
+  position: absolute;
+  left: var(--point-x);
+  top: var(--point-y);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 3px solid var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  transform: translate(-50%, -50%);
+}
+.history-flow-point.latest {
+  width: 14px;
+  height: 14px;
+  background: var(--accent);
+}
+.history-flow-term {
+  position: absolute;
+  left: var(--point-x);
+  bottom: 0;
+  transform: translateX(-50%);
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.history-term-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.history-term-card {
+  padding: 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.history-term-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history-term-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 800;
+  word-break: keep-all;
+}
+.history-term-summary {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-term-summary .average {
+  color: var(--accent);
+  font-weight: 850;
+}
+.history-term-summary .sep { color: var(--rule-strong); margin: 0 5px; }
+.history-course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.history-course-card {
+  padding: 11px 12px;
+}
+.history-grade-pill {
+  color: var(--ink-2);
+  background: var(--chip-bg);
+}
+
 /* Timetable */
 .timetable-section { padding-top: 22px; }
 .timetable-focus {
@@ -1785,7 +1987,7 @@ function gpaBandDescription(gpa: number): string {
 
 function renderGradeHistory(data: unknown): string {
   const d = data as {
-    overview?: Record<string, string>;
+    overview?: Record<string, string | number>;
     termRecords?: Array<{
       title?: string;
       year?: number;
@@ -1803,24 +2005,14 @@ function renderGradeHistory(data: unknown): string {
       }>;
     }>;
   };
-  if (!d.termRecords?.length) return "";
+  const terms = (d.termRecords ?? []).filter((term) => term.courses?.length);
+  if (!terms.length) return "";
 
-  let html = "";
-
-  // Hero — 누적 평점/취득 학점 (있으면)
   const overview = d.overview ?? {};
-  const totalGpa =
-    overview["전체평점"] || overview["누적평점"] || overview["평점"] || "";
+  const totalGpa = overviewText(overview, ["전체평점", "누적평점", "평점"]);
   const totalCredits =
-    overview["전체취득학점"] || overview["취득학점"] || "";
-  if (totalGpa || totalCredits) {
-    html += `<section class="section"><div class="metric-hero">`;
-    html += `<div class="metric-label">누적 평점</div>`;
-    if (totalGpa) html += `<div class="metric-value">${esc(totalGpa)}</div>`;
-    if (totalCredits)
-      html += `<div class="metric-trend">전체 취득 ${esc(totalCredits)}학점</div>`;
-    html += `</div></section>`;
-  }
+    overviewText(overview, ["전체취득학점", "취득학점"]) ||
+    String(terms.reduce((sum, term) => sum + (term.earnedCredits ?? 0), 0) || "-");
 
   // 학기 정렬: year DESC, term DESC (2학기 > 1학기 > 계절)
   const termWeight = (label: string): number => {
@@ -1830,35 +2022,98 @@ function renderGradeHistory(data: unknown): string {
     if (label.includes("하계")) return 1.5;
     return 0;
   };
-  const sorted = [...d.termRecords].sort((a, b) => {
+  const sorted = [...terms].sort((a, b) => {
     const ay = a.year ?? 0;
     const by = b.year ?? 0;
     if (ay !== by) return by - ay;
     return termWeight(b.termLabel) - termWeight(a.termLabel);
   });
+  const chronological = [...sorted].reverse();
+  const flowTerms = chronological.filter((term) => typeof term.gpa === "number");
 
-  // 학기별 섹션
-  for (const term of sorted) {
-    if (!term.courses?.length) continue;
-    const title = term.title || `${term.year ?? ""} ${term.termLabel}`.trim();
+  let html = "";
 
-    html += `<section class="section">`;
-    html += `<div class="section-title"><h2>${esc(title)}<span class="count">${term.courses.length}</span></h2></div>`;
+  html += `<section class="section history-section"><div class="history-overview">`;
+  html += `<div class="history-overview-item primary"><div class="history-overview-label">누적 평균 학점</div><div class="history-overview-value">${esc(totalGpa || "-")}</div></div>`;
+  html += `<div class="history-overview-item"><div class="history-overview-label">취득 학점</div><div class="history-overview-value">${esc(totalCredits)}</div></div>`;
+  html += `<div class="history-overview-item"><div class="history-overview-label">조회 학기</div><div class="history-overview-value">${terms.length}</div></div>`;
+  html += `</div></section>`;
 
-    const sub: string[] = [];
-    if (typeof term.gpa === "number") sub.push(`평점 ${term.gpa.toFixed(2)}`);
-    if (term.earnedCredits != null) sub.push(`${term.earnedCredits}학점`);
-    if (sub.length) html += `<div class="section-sub">${sub.join(" · ")}</div>`;
+  if (flowTerms.length) {
+    const chartPoints = flowTerms.map((term, index) => historyChartPoint(term.gpa ?? 0, index, flowTerms.length));
+    const linePoints = chartPoints.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+    const firstPoint = chartPoints[0];
+    const lastPoint = chartPoints[chartPoints.length - 1];
+    const areaPoints = chartPoints.length > 1
+      ? `${firstPoint.x.toFixed(2)},88 ${linePoints} ${lastPoint.x.toFixed(2)},88`
+      : "";
+    const plotMinWidth = Math.max(260, flowTerms.length * 68);
 
-    for (const c of term.courses) {
-      const top = c.grade === "A+";
-      const iconCls = top ? "accent" : "";
-      html += `<div class="row"><div class="row-icon ${iconCls}">${codeChip(c.courseTitle)}</div><div class="row-main"><div class="row-title">${esc(c.courseTitle)}</div><div class="row-sub">${joinMeta([c.credits != null ? `${c.credits}학점` : null, c.category])}</div></div><div class="row-value">${esc(c.grade || "-")}</div></div>`;
+    html += `<section class="section"><div class="history-flow"><div class="history-flow-head"><div class="history-flow-title">학기별 학점 흐름</div><div class="history-flow-scale">4.5 만점</div></div><div class="history-flow-chart"><div class="history-flow-plot" style="--plot-min-width:${plotMinWidth}px"><svg class="history-flow-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line class="history-flow-grid" x1="0" y1="32" x2="100" y2="32"></line><line class="history-flow-grid" x1="0" y1="56" x2="100" y2="56"></line><line class="history-flow-grid" x1="0" y1="80" x2="100" y2="80"></line>${areaPoints ? `<polygon class="history-flow-area" points="${areaPoints}"></polygon>` : ""}<polyline class="history-flow-line" points="${linePoints}"></polyline></svg>`;
+    for (let i = 0; i < flowTerms.length; i++) {
+      const term = flowTerms[i];
+      const point = chartPoints[i];
+      const latestClass = term === sorted[0] ? " latest" : "";
+      const pointStyle = `--point-x:${point.x.toFixed(2)}%;--point-y:${point.y.toFixed(2)}%`;
+      html += `<div class="history-flow-value" style="${pointStyle}">${(term.gpa ?? 0).toFixed(2)}</div><div class="history-flow-point${latestClass}" style="${pointStyle}"></div><div class="history-flow-term" style="${pointStyle}">${esc(historyTermShortLabel(term))}</div>`;
     }
-    html += `</section>`;
+    html += `</div></div></div></section>`;
   }
 
+  html += `<section class="section"><div class="section-title"><h2>학기별 성적<span class="count">${terms.length}</span></h2></div><div class="history-term-list">`;
+  for (const term of sorted) {
+    const title = term.title || `${term.year ?? ""} ${term.termLabel}`.trim();
+    const summaryParts = [
+      typeof term.gpa === "number"
+        ? `<span class="average">평균 ${term.gpa.toFixed(2)}</span>`
+        : "",
+      term.earnedCredits != null
+        ? `<span>${term.earnedCredits}학점</span>`
+        : "",
+    ].filter(Boolean);
+    const summaryHtml = summaryParts.join(`<span class="sep">·</span>`);
+
+    html += `<article class="history-term-card">`;
+    html += `<div class="history-term-head"><div class="history-term-title">${esc(title || "학기 미정")}</div>${summaryHtml ? `<div class="history-term-summary">${summaryHtml}</div>` : ""}</div>`;
+    html += `<div class="history-course-list">`;
+
+    for (const c of term.courses) {
+      const grade = c.grade || "-";
+      html += `<article class="grade-course-card history-course-card"><div class="grade-course-main"><div class="grade-course-title">${esc(c.courseTitle || "과목명 미정")}</div><div class="grade-course-meta">${joinMeta([c.credits != null ? `${c.credits}학점` : null, c.category])}</div></div><div class="grade-course-result"><div class="grade-pill history-grade-pill">${esc(grade)}</div></div></article>`;
+    }
+    html += `</div></article>`;
+  }
+  html += `</div></section>`;
+
   return html;
+}
+
+function overviewText(overview: Record<string, string | number>, keys: string[]): string {
+  for (const key of keys) {
+    const value = overview[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+function historyChartPoint(gpa: number, index: number, total: number): { x: number; y: number } {
+  const x = total <= 1 ? 50 : 8 + (index / (total - 1)) * 84;
+  const ratio = Math.max(0, Math.min(1, (gpa - 3.0) / 1.5));
+  const y = 80 - ratio * 58;
+  return { x, y };
+}
+
+function historyTermShortLabel(term: { title?: string; year?: number; termLabel?: string }): string {
+  const title = term.title || "";
+  const yearMatch = title.match(/(\d{4})/);
+  const year = yearMatch?.[1] || (term.year != null ? String(term.year) : "");
+  const termLabel = term.termLabel || "";
+  const termMatch = termLabel.match(/(\d)/) || title.match(/(\d)\s*학기/);
+  if (year && termMatch) return `${year.slice(2)}-${termMatch[1]}`;
+  if (year) return year.slice(2);
+  return termLabel || title || "-";
 }
 
 // ── 졸업요건 (동심원 ring) ────────────────────────────
