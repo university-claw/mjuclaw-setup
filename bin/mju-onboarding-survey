@@ -4,6 +4,10 @@
 # LLM이 파싱/분기에 개입하지 않는다. 에이전트는 start 호출만 보고,
 # 결과 수거(collect)는 openclaw 크론이 주기적으로 돌린다.
 #
+# Discord 도메인 호출(메시지 전송, Poll 발사, 채널 조회, 메시지 삭제)은
+# mjuclaw-router HTTP로 위임. agent는 Discord 토큰을 갖고 있지 않다
+# (2026-05-03 데이터 누출 fix 이후 router 단독 소유).
+#
 # Usage:
 #   mju-onboarding-survey start <discord_id>
 #   mju-onboarding-survey collect <discord_id>     # cron 내부용
@@ -40,30 +44,6 @@ Usage:
 EOF
 }
 
-# --- 프리셋 정의 (mju-news-alert preset 과 동일 id 체계) -------------
-# time answer_id → preset_id
-time_preset_for() {
-  case "$1" in
-    1) echo 'morning-daily' ;;
-    2) echo 'weekday-morning' ;;
-    3) echo 'evening-daily' ;;
-    4) echo 'weekly-monday' ;;
-    5) echo 'skip' ;;
-    *) return 1 ;;
-  esac
-}
-
-# category answer_id → source name
-cat_source_for() {
-  case "$1" in
-    1) echo 'general' ;;
-    2) echo 'scholarship' ;;
-    3) echo 'event' ;;
-    4) echo 'career' ;;
-    *) return 1 ;;
-  esac
-}
-
 TIME_QUESTION='🔔 학교 공지 알림을 언제 받을까요? (1시간 안에 투표 안 하면 매일 아침 8시로 자동 설정)'
 TIME_OPTIONS=(
   '아침 8시 매일'
@@ -81,64 +61,105 @@ CAT_OPTIONS=(
   '진로/취업'
 )
 
-# --- 유틸: DM 채널 id 얻기 (message send가 반환) -----------------------
-get_dm_channel_id() {
-  local discord_id="$1"
-  # 빈 ping 메시지로 channelId를 캐시한다. 내용은 유저에게 보이지 않게 공백 한 칸.
-  # 실패하면 비워둔 채 exit 1.
-  local resp
-  if ! resp=$(openclaw message send --channel discord --target "user:$discord_id" --message "." --silent --json 2>&1); then
-    echo "ERR: get_dm_channel_id send failed: $resp" >&2
+# Poll answer index(1-based) → preset/source id 매핑은 collect의 python 안에서.
+
+# --- router HTTP 헬퍼 -------------------------------------------------
+router_url()   { printf '%s' "${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}"; }
+router_token() { printf '%s' "${MJUCLAW_ROUTER_TOKEN-}"; }
+
+# router_call <method> <path-with-query> [json-body]  → stdout: response body
+# 비-200 응답은 stderr로 에러 메시지 + return 1.
+router_call() {
+  local method="$1" path="$2" body="${3-}"
+  local token
+  token=$(router_token)
+  if [[ -z "$token" ]]; then
+    echo "ERR: MJUCLAW_ROUTER_TOKEN env가 비어있어 router 호출 불가" >&2
     return 1
   fi
-  local channel_id
-  channel_id=$(RESP_JSON="$resp" python3 - <<'PY'
-import json, os, sys
-try:
-    p = json.loads(os.environ["RESP_JSON"])
-    print(p.get("payload", {}).get("result", {}).get("channelId", ""))
-except Exception as e:
-    print("", file=sys.stderr)
-    sys.exit(0)
-PY
-)
-  if [[ -z "$channel_id" ]]; then
-    echo "ERR: no channelId in send response" >&2
+
+  local url out code curl_args
+  url="$(router_url)$path"
+  out=$(mktemp "${TMPDIR:-/tmp}/router-call.XXXXXX")
+  curl_args=(-sS -o "$out" -w "%{http_code}"
+    -X "$method" "$url"
+    -H "Authorization: Bearer $token"
+    --max-time 30)
+  if [[ -n "$body" ]]; then
+    curl_args+=(-H "Content-Type: application/json" --data-raw "$body")
+  fi
+
+  code=$(curl "${curl_args[@]}" 2>/dev/null || echo "000")
+  if [[ "$code" != "200" ]]; then
+    local resp
+    resp=$(cat "$out" 2>/dev/null || true)
+    echo "ERR: $method $url → HTTP $code: ${resp:-<no body>}" >&2
+    rm -f "$out"
     return 1
   fi
-  # 같은 턴에 보낸 ping 메시지 ID도 함께 반환해 뒤에서 delete 가능하도록.
-  local ping_id
-  ping_id=$(RESP_JSON="$resp" python3 - <<'PY'
-import json, os
-p = json.loads(os.environ["RESP_JSON"])
-print(p.get("payload", {}).get("result", {}).get("messageId", ""))
-PY
-)
-  echo "$channel_id|$ping_id"
+  cat "$out"
+  rm -f "$out"
 }
 
-# --- 유틸: 최근 메시지 중 poll.question이 일치하는 첫 id 반환 ----------
-find_poll_message_id() {
-  local channel_id="$1"
-  local question="$2"
-  local resp
-  if ! resp=$(openclaw message read --channel discord --target "channel:$channel_id" --limit 5 --json 2>&1); then
-    echo "ERR: read failed: $resp" >&2
-    return 1
-  fi
-  RESP_JSON="$resp" QUESTION="$question" python3 - <<'PY'
-import json, os, sys
-resp = json.loads(os.environ["RESP_JSON"])
-target_q = os.environ["QUESTION"]
-msgs = resp.get("payload", {}).get("messages", []) or []
-for m in msgs:
-    poll = m.get("poll")
-    if poll and (poll.get("question") or {}).get("text") == target_q:
-        print(m.get("id", ""))
-        sys.exit(0)
-print("")
-sys.exit(0)
+# router_send <discord_id> <content>  → stdout: response (channelId, messageId 포함)
+router_send() {
+  local discord_id="$1" content="$2"
+  local body
+  body=$(DISCORD_ID="$discord_id" CONTENT="$content" python3 - <<'PY'
+import json, os
+print(json.dumps({"discordUserId": os.environ["DISCORD_ID"], "content": os.environ["CONTENT"]}))
 PY
+)
+  router_call POST "/discord/send" "$body"
+}
+
+# router_poll <discord_id> <question> <duration-hours> <multi:true|false> <opt1> [opt2 ...]
+router_poll() {
+  local discord_id="$1" question="$2" duration="$3" multi="$4"
+  shift 4
+  local body
+  body=$(
+    DISCORD_ID="$discord_id" QUESTION="$question" DURATION="$duration" MULTI="$multi" \
+    OPTIONS_JSON=$(printf '%s\n' "$@" | python3 -c 'import json,sys; print(json.dumps([l.rstrip("\n") for l in sys.stdin if l.strip()]))') \
+    python3 - <<'PY'
+import json, os
+answers = json.loads(os.environ["OPTIONS_JSON"])
+print(json.dumps({
+    "discordUserId": os.environ["DISCORD_ID"],
+    "question": os.environ["QUESTION"],
+    "answers": answers,
+    "durationHours": int(os.environ["DURATION"]),
+    "allowMultiselect": os.environ["MULTI"] == "true",
+}))
+PY
+)
+  router_call POST "/discord/poll" "$body"
+}
+
+# router_list_messages <channel_id> <limit>  → stdout: response (messages[] with poll results)
+router_list_messages() {
+  local channel_id="$1" limit="$2"
+  router_call GET "/discord/messages?channelId=${channel_id}&limit=${limit}" ""
+}
+
+# router_delete_message <channel_id> <message_id>
+router_delete_message() {
+  local channel_id="$1" message_id="$2"
+  router_call DELETE "/discord/messages?channelId=${channel_id}&messageId=${message_id}" "" >/dev/null
+}
+
+# JSON에서 .channelId / .messageId 등 단일 필드 추출 (python3 의존)
+json_field() {
+  local json="$1" field="$2"
+  printf '%s' "$json" | JSON_FIELD="$field" python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+    v = d.get(os.environ["JSON_FIELD"])
+    print(v if v is not None else "")
+except Exception:
+    sys.exit(1)
+'
 }
 
 # --- start ------------------------------------------------------------
@@ -160,26 +181,8 @@ cmd_start() {
 
   # 이미 한 번 물어봤거나, 현재 세션이 진행중이면 skip (멱등).
   if [[ -f "$pf" ]] || [[ -f "$sf" ]]; then
-    if [[ -f "$sf" ]]; then
-      cat "$sf"
-    else
-      cat "$pf"
-    fi
+    if [[ -f "$sf" ]]; then cat "$sf"; else cat "$pf"; fi
     exit 0
-  fi
-
-  # DM 채널 id + 임시 ping 메시지 id.
-  local ch_and_ping channel_id ping_id
-  if ! ch_and_ping=$(get_dm_channel_id "$discord_id"); then
-    echo '{"state":"error","reason":"dm_channel_lookup_failed"}'
-    exit 1
-  fi
-  channel_id="${ch_and_ping%%|*}"
-  ping_id="${ch_and_ping#*|}"
-
-  # ping 메시지 정리 (유저 DM 스팸 방지)
-  if [[ -n "$ping_id" ]]; then
-    openclaw message delete --channel discord --target "channel:$channel_id" --message-id "$ping_id" >/dev/null 2>&1 || true
   fi
 
   # 웰컴 카드 (기능 요약 + 투표 안내). 출석 알림은 이미 자동 등록됐다는 점 강조.
@@ -202,29 +205,32 @@ cmd_start() {
 EOF
 )
 
-  openclaw message send --channel discord --target "user:$discord_id" --message "$welcome_body" >/dev/null || true
+  local welcome_resp channel_id
+  if ! welcome_resp=$(router_send "$discord_id" "$welcome_body"); then
+    echo '{"state":"error","reason":"welcome_send_failed"}'
+    exit 1
+  fi
+  channel_id=$(json_field "$welcome_resp" channelId)
+  if [[ -z "$channel_id" ]]; then
+    echo '{"state":"error","reason":"channel_id_missing"}'
+    exit 1
+  fi
 
-  # Poll 1: time (single-select)
-  local poll1_args=(openclaw message poll --channel discord --target "user:$discord_id"
-    --poll-question "$TIME_QUESTION" --poll-duration-hours 1)
-  for opt in "${TIME_OPTIONS[@]}"; do poll1_args+=(--poll-option "$opt"); done
-  if ! "${poll1_args[@]}" >/dev/null; then
+  # Poll 1: time (single-select, 1시간 만료)
+  local poll1_resp time_msg_id
+  if ! poll1_resp=$(router_poll "$discord_id" "$TIME_QUESTION" 1 false "${TIME_OPTIONS[@]}"); then
     echo '{"state":"error","reason":"poll_time_send_failed"}'
     exit 1
   fi
-  local time_msg_id
-  time_msg_id=$(find_poll_message_id "$channel_id" "$TIME_QUESTION" 2>/dev/null || true)
+  time_msg_id=$(json_field "$poll1_resp" messageId)
 
-  # Poll 2: categories (multi-select)
-  local poll2_args=(openclaw message poll --channel discord --target "user:$discord_id"
-    --poll-question "$CAT_QUESTION" --poll-duration-hours 1 --poll-multi)
-  for opt in "${CAT_OPTIONS[@]}"; do poll2_args+=(--poll-option "$opt"); done
-  if ! "${poll2_args[@]}" >/dev/null; then
+  # Poll 2: categories (multi-select, 1시간 만료)
+  local poll2_resp cat_msg_id
+  if ! poll2_resp=$(router_poll "$discord_id" "$CAT_QUESTION" 1 true "${CAT_OPTIONS[@]}"); then
     echo '{"state":"error","reason":"poll_category_send_failed"}'
     exit 1
   fi
-  local cat_msg_id
-  cat_msg_id=$(find_poll_message_id "$channel_id" "$CAT_QUESTION" 2>/dev/null || true)
+  cat_msg_id=$(json_field "$poll2_resp" messageId)
 
   # 세션 파일 저장
   CHANNEL_ID="$channel_id" TIME_MSG="$time_msg_id" CAT_MSG="$cat_msg_id" SESSION_FILE="$sf" python3 - <<'PY'
@@ -309,10 +315,10 @@ cmd_collect() {
     exit 1
   fi
 
-  # DM 채널 최신 메시지 20건에서 해당 poll 두 건을 찾아 결과 집계.
+  # DM 채널 최신 메시지 25건에서 해당 poll 두 건을 찾아 결과 집계.
   local resp
-  if ! resp=$(openclaw message read --channel discord --target "channel:$channel_id" --limit 25 --json 2>&1); then
-    echo "ERR: read failed: $resp" >&2
+  if ! resp=$(router_list_messages "$channel_id" 25); then
+    echo "ERR: router list_messages 실패" >&2
     exit 1
   fi
 
@@ -327,7 +333,7 @@ with open(sf, encoding="utf-8") as f:
     state = json.load(f)
 
 resp = json.loads(os.environ["RESP_JSON"])
-msgs = resp.get("payload", {}).get("messages", []) or []
+msgs = resp.get("messages", []) or []
 
 def find_poll(question_text):
     for m in msgs:
@@ -339,17 +345,21 @@ def find_poll(question_text):
 _, time_poll = find_poll(os.environ["TIME_Q"])
 _, cat_poll  = find_poll(os.environ["CAT_Q"])
 
-def voted_ids(poll):
+def voted_indices_1based(poll):
+    """voteCount >= 1 인 answer를 1-based 순서로 반환.
+
+    router /discord/messages 응답의 poll.answers 는 Discord 답변 순서대로 정렬되어
+    오므로 enumerate index+1 가 곧 사용자가 본 1-based 선택 번호.
+    """
     if not poll:
         return [], False
-    results = poll.get("results") or {}
-    counts = results.get("answer_counts") or []
-    finalized = bool(results.get("is_finalized"))
-    chosen = [c["id"] for c in counts if (c.get("count") or 0) >= 1]
+    answers = poll.get("answers") or []
+    finalized = bool(poll.get("resultsFinalized"))
+    chosen = [i + 1 for i, a in enumerate(answers) if (a.get("voteCount") or 0) >= 1]
     return chosen, finalized
 
-time_choices, time_final = voted_ids(time_poll)
-cat_choices,  cat_final  = voted_ids(cat_poll)
+time_choices, time_final = voted_indices_1based(time_poll)
+cat_choices,  cat_final  = voted_indices_1based(cat_poll)
 
 # 만료 체크 (서버 시계 기준)
 expiry = state.get("expiryAt")
@@ -430,7 +440,7 @@ with open(pf, "w", encoding="utf-8") as f:
         "sources": sources,
     }, f, ensure_ascii=False, indent=2)
 
-# 유저에게 확인 DM
+# 유저에게 확인 DM (router HTTP 위임)
 if preset == "skip":
     confirm = "🔕 알림을 받지 않기로 하셨어요. 나중에 바꾸고 싶으면 '알림 설정 다시'라고 말씀해주세요."
 else:
@@ -444,12 +454,22 @@ else:
     prefix = "⏰ 기본값으로" if decision == "timeout" else "✅"
     confirm = f"{prefix} 공지 알림이 등록됐어요: **{pretty_time}** · 카테고리: **{pretty_cats}** 🦁"
 
-subprocess.run(
-    ["openclaw", "message", "send", "--channel", "discord",
-     "--target", f"user:{os.environ['DISCORD_ID']}",
-     "--message", confirm],
-    check=False, capture_output=True, text=True,
-)
+# router /discord/send 로 위임. 실패는 non-blocking.
+import urllib.request, urllib.error
+router_url = os.environ.get("MJUCLAW_ROUTER_URL", "http://mjuclaw-router:3100")
+router_token = os.environ.get("MJUCLAW_ROUTER_TOKEN", "")
+if router_token:
+    body = json.dumps({"discordUserId": os.environ["DISCORD_ID"], "content": confirm}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{router_url}/discord/send",
+        data=body,
+        headers={"Authorization": f"Bearer {router_token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=15)
+    except Exception as exc:
+        print(f"WARN: confirm DM 전송 실패: {exc}", file=sys.stderr)
 
 print(json.dumps({"state": state["state"], "preset": preset, "sources": sources}, ensure_ascii=False))
 PY
