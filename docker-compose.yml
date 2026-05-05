@@ -24,7 +24,58 @@ services:
       # 유저별 크리덴셜 영속화 (온보딩 데이터)
       - user-data:/data/users
 
+  public-data-db:
+    image: postgres:16-alpine
+    container_name: mjuclaw-public-data-db
+    profiles:
+      - public-data
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${PUBLIC_DATA_PGDATABASE:-mjuclaw}
+      - POSTGRES_USER=${PUBLIC_DATA_PGUSER:-mjuclaw_app}
+      - POSTGRES_PASSWORD=${PUBLIC_DATA_PGPASSWORD:-change-me}
+    volumes:
+      - public-data-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  public-data-worker:
+    build:
+      context: ${PUBLIC_DATA_WORKER_CONTEXT:-./mju-public-data-worker}
+      dockerfile: Dockerfile
+    container_name: mjuclaw-public-data-worker
+    profiles:
+      - public-data
+    restart: unless-stopped
+    depends_on:
+      public-data-db:
+        condition: service_healthy
+    environment:
+      - PGHOST=public-data-db
+      - PGPORT=5432
+      - PGDATABASE=${PUBLIC_DATA_PGDATABASE:-mjuclaw}
+      - PGUSER=${PUBLIC_DATA_PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PUBLIC_DATA_PGPASSWORD:-change-me}
+      - PGSCHEMA=${PUBLIC_DATA_PGSCHEMA:-public_data}
+      - STORAGE_PROVIDER=local
+      - STORAGE_LOCAL_ROOT=/data/public-assets
+      - OCR_LANGUAGES=${PUBLIC_DATA_OCR_LANGUAGES:-kor+eng}
+      - CAFETERIA_OCR_COMMAND=${CAFETERIA_OCR_COMMAND:-python scripts/cafeteria_paddleocr_candidate.py {image}}
+      - PADDLE_OCR_DET_MODEL_NAME=${PADDLE_OCR_DET_MODEL_NAME:-}
+      - PADDLE_OCR_REC_MODEL_NAME=${PADDLE_OCR_REC_MODEL_NAME:-korean_PP-OCRv5_mobile_rec}
+      - PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS=${PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS:-600}
+      - PUBLIC_DATA_WORKER_RUN_MIGRATIONS=${PUBLIC_DATA_WORKER_RUN_MIGRATIONS:-1}
+    volumes:
+      - public-data-assets:/data/public-assets
+      - public-data-paddle-models:/root/.paddlex
+
 volumes:
   agent-data:
   news-data:
   user-data:
+  public-data-db:
+  public-data-assets:
+  public-data-paddle-models:

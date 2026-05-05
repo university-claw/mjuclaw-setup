@@ -4,6 +4,12 @@ mju-cli/.DS_Store
 mju-news/node_modules
 mju-news/dist
 mju-news/.DS_Store
+mju-public-data-worker/node_modules
+mju-public-data-worker/dist
+mju-public-data-worker/reports
+mju-public-data-worker/.cache
+mju-public-data-worker/.env
+mju-public-data-worker/.DS_Store
 .env
 .DS_Store
 .git

@@ -49,6 +49,7 @@ clone_or_pull() {
 
 clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git
 clone_or_pull mju-news https://github.com/university-claw/mju-news.git
+clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""
