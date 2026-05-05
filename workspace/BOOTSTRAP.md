@@ -134,7 +134,11 @@ PW_END
 
 **Step A. `mju` 명령 실행** — JSON 결과에서 `viewUrl` 추출
 
-**Step B. AI 요약 웹뷰에 주입** (유저가 웹뷰 열었을 때 "AI 요약" 카드를 채우기 위해)
+**Step B. 필요한 경우에만 보조 AI 요약 주입**
+
+전문화된 웹뷰(`timetable`, `grades`, `grade-history`, `graduation`, `action-items`, `unsubmitted`, `unread-notices`, `attendance`, `news`, `news-detail`, `cafeteria`)는 렌더러가 화면 구조와 브리핑을 직접 만들며 `aiResponse`를 화면에 표시하지 않을 수 있습니다. 이런 웹뷰의 본문을 바꾸려고 PATCH 요약을 쓰지 마세요.
+
+범용/레거시 웹뷰에서 별도 "AI 요약" 카드가 필요한 경우에만 아래 PATCH를 사용합니다.
 
 ```bash
 # URL에서 id 추출 (예: https://.../view/abc-123)

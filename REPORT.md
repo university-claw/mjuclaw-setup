@@ -85,7 +85,7 @@ flowchart TB
     MjuWrapper --> MjuSSO
     MjuNews --> MjuBoard
     MjuWrapper --> POST
-    Helpers --> PATCH
+    Helpers -->|optional summary patch| PATCH
     GET --> DiscordDM
     Ngrok -->|tunnel| GET
     POST --> ViewStore
@@ -264,11 +264,11 @@ sequenceDiagram
     VS-->>W: {"id": "abc", "url": "https://.../view/abc"}
     W->>W: JSON에 viewUrl 필드 주입
     W-->>A: 확장된 JSON
-    A->>A: AI 요약 markdown 생성
-    A->>VS: PATCH /api/view/abc/summary<br/>(aiResponse = markdown)
+    A->>A: Discord 응답 요약 생성
+    A->>VS: PATCH /api/view/abc/summary<br/>(선택: 범용 웹뷰 보조 요약이 필요할 때만)
     A->>U: "📋 남은 과제 4건<br/>- ...<br/>🔗 [자세히 보기](url)"
     U->>VS: (링크 클릭) GET /view/abc
-    VS->>U: HTML (AI 요약 + 전체 과제 테이블)
+    VS->>U: HTML (전문화된 레이아웃 + 상세 데이터)
 ```
 
 ---
@@ -397,7 +397,7 @@ flowchart LR
 | 유저별로 다른 에러 | SKILL.md가 존재하지 않는 명령어 예시 사용 | 12개 SKILL.md 실제 CLI와 정렬 |
 | 링크 누르면 빈 페이지 | 렌더러가 `assignments`/`notices` 필드 못 찾음 (items만 봄) | 실제 필드 구조 반영한 렌더러 |
 | "30분 후 만료"를 바로 보여줌 | view-store 메모리만 쓰고 재시작에 소실 | 디스크 persistence (JSON + atomic write) |
-| AI 요약 카드가 비어있음 | wrapper는 rawData만 POST, aiResponse는 ""로 두고 에이전트가 빼먹음 | PATCH `/api/view/:id/summary` 엔드포인트로 요약 주입 |
+| 범용 웹뷰의 보조 요약이 비어있음 | wrapper는 rawData만 POST, aiResponse는 ""로 둠 | PATCH `/api/view/:id/summary` 엔드포인트 유지. 단, 전문 웹뷰는 렌더러 브리핑을 우선하고 `aiResponse`를 숨길 수 있음 |
 | view-server XSS | `marked.parse(aiResponse)` 후 innerHTML | 서버사이드 마크다운 + DOMPurify |
 | 외부에서 view POST 가능 | origin 검증 없음 | localhost/RFC1918만 허용 |
 | file-vault race condition | 두 유저 동시 첫 로그인 시 키 파일 충돌 | `O_CREAT|O_EXCL` 원자적 생성 |

@@ -82,7 +82,7 @@ should_view() {
 
 title_for_datatype() {
   case "$1" in
-    "action-items") echo "남은 일" ;;
+    "action-items") echo "우선 처리 항목" ;;
     "unsubmitted") echo "미제출 과제" ;;
     "unread-notices") echo "안 읽은 공지" ;;
     "timetable") echo "시간표" ;;
