@@ -4,3 +4,5 @@ node_modules/
 dist/
 mju-cli/
 mju-news/
+.tmp/
+output/

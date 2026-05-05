@@ -117,7 +117,8 @@ flowchart TB
 | `lms +action-items` | 미제출 과제 + 마감임박 + 안읽은 공지 + 미수강 온라인 한 번에 |
 | `lms +unsubmitted` / `+unread-notices` / `+incomplete-online` | 각 항목별 필터링 |
 | `msi timetable` | 시간표 |
-| `msi current-grades` / `grade-history` | 성적 |
+| `msi course-scores` | 현재 학기 수강점수 |
+| `msi grade-history` | 지난 학기/전체 성적 이력 |
 | `msi graduation` | 졸업요건 |
 | `ucheck attendance` / `lectures list` | 과목별 출석 현황 |
 | `library ...` | 도서관 좌석/스터디룸 예약 |
@@ -200,6 +201,7 @@ mjuclaw-setup/
 │   └── types.ts
 ├── skills/                 # 에이전트 전용 skill 오버라이드
 │   ├── mju-shared/SKILL.md  # Discord User ID 기반 --app-dir 규칙
+│   ├── mju-msi/SKILL.md     # 현재 학기 성적 의도를 course-scores로 라우팅
 │   └── mju-onboarding/SKILL.md
 └── workspace/              # OpenClaw 에이전트 시스템 프롬프트
     ├── BOOTSTRAP.md         # 핵심 행동 규칙
@@ -492,7 +494,7 @@ docker exec mjuclaw-agent cat /home/agent/.openclaw/view-store.json | jq 'length
 
 - 등록 유저: 4명
 - 활성 cron 수: 7개 (공용 1 + 출석 6)
-- 지원 dataType 렌더러: 11종
+- 지원 dataType 렌더러: 12종
 - 총 라이브 테스트 시간: ~3일
 - 최근 해결 이슈: view-renderer 필드 mismatch, AI 요약 빈 카드, view-store 휘발성
 

@@ -83,7 +83,7 @@ PW_END
 예시:
 ```bash
 mju lms courses list --app-dir /data/users/{DISCORD_USER_ID} --format json
-mju msi grades --app-dir /data/users/{DISCORD_USER_ID} --format json
+mju msi course-scores --app-dir /data/users/{DISCORD_USER_ID} --format json
 ```
 
 ## 로그아웃
