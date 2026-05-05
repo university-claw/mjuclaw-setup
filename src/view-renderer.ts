@@ -17,6 +17,7 @@ import type { ViewEntry } from "./types";
 
 const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
   timetable: { kicker: "TIMETABLE", detail: "시간표" },
+  "course-scores": { kicker: "COURSE SCORES", detail: "수강점수" },
   grades: { kicker: "GRADES", detail: "성적" },
   "grade-history": { kicker: "GRADE HISTORY", detail: "학기별 성적" },
   graduation: { kicker: "GRADUATION", detail: "졸업요건" },
@@ -41,7 +42,7 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
   let briefingHtml = "";
-  if (entry.dataType !== "timetable" && entry.dataType !== "grades" && entry.dataType !== "grade-history" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "unread-notices" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
+  if (entry.dataType !== "timetable" && entry.dataType !== "course-scores" && entry.dataType !== "grades" && entry.dataType !== "grade-history" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "unread-notices" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
     const aiResponseEffective = entry.aiResponse?.trim()
       ? entry.aiResponse
       : generateFallbackSummary(entry.dataType, entry.rawData);
@@ -961,6 +962,147 @@ body {
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
+/* Course scores */
+.course-score-detail-section {
+  padding-top: 22px;
+}
+.course-score-summary {
+  margin-top: 22px;
+  padding: 18px 16px 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-alt), var(--bg));
+}
+.course-score-summary-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 850;
+}
+.course-score-summary-main {
+  margin-top: 11px;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 850;
+  word-break: keep-all;
+}
+.course-score-summary-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.course-score-summary-stat {
+  min-width: 0;
+  min-height: 56px;
+  padding: 10px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.course-score-summary-stat strong {
+  display: block;
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+.course-score-summary-stat span {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.25;
+  font-weight: 750;
+  word-break: keep-all;
+}
+.course-score-course-list {
+  margin-top: 18px;
+  border-top: 1px solid var(--rule-strong);
+}
+.course-score-course {
+  margin-top: 16px;
+  padding: 16px;
+  border-top: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+}
+.course-score-course:first-child { border-top: none; }
+.course-score-course-head {
+  margin-bottom: 14px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.course-score-course-title {
+  min-width: 0;
+  color: var(--ink); font-size: 16px; line-height: 1.3; font-weight: 850;
+  word-break: keep-all;
+}
+.course-score-row {
+  padding: 13px 0;
+  border-top: 1px solid var(--rule);
+}
+.course-score-row:first-of-type { border-top: none; padding-top: 0; }
+.course-score-row-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px;
+}
+.course-score-title {
+  color: var(--ink); font-size: 14px; line-height: 1.35; font-weight: 750;
+  word-break: keep-all;
+}
+.course-score-category {
+  margin-top: 4px;
+  color: var(--ink-3); font-size: 12px; font-weight: 600;
+  word-break: keep-all;
+}
+.course-score-metrics {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px; margin-top: 10px;
+}
+.course-score-metric {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.course-score-metric-label {
+  color: var(--ink-3); font-size: 10.5px; font-weight: 700;
+}
+.course-score-metric-value {
+  margin-top: 4px;
+  color: var(--ink); font-size: 12.5px; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+}
+.course-score-empty {
+  margin-top: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--rule-strong);
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+@media (max-width: 420px) {
+  .course-score-course {
+    padding: 14px;
+  }
+  .course-score-summary-meta {
+    gap: 6px;
+  }
+  .course-score-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Grade history */
 .history-overview {
   display: grid;
@@ -1622,6 +1764,7 @@ function renderData(dataType: string, data: unknown): string {
   if (!data) return "";
   const renderers: Record<string, (d: unknown) => string> = {
     timetable: renderTimetable,
+    "course-scores": renderCourseScores,
     grades: renderGrades,
     "grade-history": renderGradeHistory,
     graduation: renderGraduation,
@@ -1935,6 +2078,146 @@ function renderGrades(data: unknown): string {
   html += `</div></section>`;
 
   return html;
+}
+
+type CourseScoreValue = {
+  rawValue?: string;
+  earned?: number;
+  total?: number;
+  value?: number;
+};
+
+type CourseScoreItem = {
+  assessmentCategory?: string;
+  itemName?: string;
+  ratio?: CourseScoreValue;
+  rawScore?: CourseScoreValue;
+  averageScore?: CourseScoreValue;
+  note?: string;
+};
+
+type CourseScoreSummary = {
+  enteredItems: CourseScoreItem[];
+  courseCount: number;
+  aboveAverage: number;
+  equalAverage: number;
+  belowAverage: number;
+};
+
+type CourseScoreCourse = {
+  title?: string;
+  courseCode?: string;
+  courseTitle?: string;
+  items?: CourseScoreItem[];
+};
+
+function renderCourseScores(data: unknown): string {
+  const d = data as {
+    year?: number;
+    termLabel?: string;
+    courses?: CourseScoreCourse[];
+  };
+  const courses = (d.courses ?? []).filter((course) => course.items?.length);
+  const termText = [d.year != null ? `${d.year}학년도` : "", d.termLabel || ""].filter(Boolean).join(" · ");
+  const sectionSub = [termText, "중간·기말·퀴즈 등 학기 중 평가 항목별 점수입니다."].filter(Boolean).join(" · ");
+  if (!courses.length) {
+    return `<section class="section course-score-detail-section"><div class="section-title"><h2>과목별 상세</h2></div><div class="section-sub">${esc(sectionSub)}</div><div class="course-score-empty">조회된 수강점수 항목이 없습니다.</div></section>`;
+  }
+
+  const summary = courseScoreSummary(courses);
+
+  let html = renderCourseScoreSummary(summary);
+  html += `<section class="section course-score-detail-section"><div class="section-title"><h2>과목별 상세</h2></div><div class="section-sub">${esc(sectionSub)}</div><div class="course-score-course-list">`;
+  for (const course of courses) {
+    const courseTitle = courseScoreCourseTitle(course);
+    const courseItems = course.items ?? [];
+    html += `<section class="course-score-course"><div class="course-score-course-head"><div class="course-score-course-title">${esc(courseTitle)}</div></div>`;
+
+    for (const item of courseItems) {
+      const pending = !isCourseScoreEntered(item);
+      const statusBadge = pending ? `<span class="badge badge-gray">미공개</span>` : "";
+      html += `<article class="course-score-row"><div class="course-score-row-head"><div><div class="course-score-title">${esc(item.itemName || item.assessmentCategory || "평가 항목")}</div><div class="course-score-category">${esc(item.assessmentCategory || "")}</div></div>${statusBadge}</div>`;
+      html += `<div class="course-score-metrics">`;
+      html += renderCourseScoreMetric("반영비율", scoreValueText(item.ratio));
+      html += renderCourseScoreMetric("내 점수", pending ? "미공개" : scoreValueText(item.rawScore));
+      html += renderCourseScoreMetric("평균", scoreValueText(item.averageScore));
+      html += `</div></article>`;
+    }
+
+    html += `</section>`;
+  }
+  html += `</div></section>`;
+
+  return html;
+}
+
+function courseScoreCourseTitle(course: CourseScoreCourse): string {
+  const title = course.title?.trim();
+  if (title) return title;
+  return [course.courseCode, course.courseTitle].filter(Boolean).join(" - ") || "과목명 미정";
+}
+
+function scoreValueText(value: CourseScoreValue | undefined): string {
+  if (!value) return "-";
+  if (value.rawValue && value.rawValue.trim()) return value.rawValue.trim();
+  if (typeof value.earned === "number" && typeof value.total === "number") return `${value.earned} / ${value.total}`;
+  if (typeof value.value === "number") return String(value.value);
+  return "-";
+}
+
+function courseScoreSummary(courses: CourseScoreCourse[]): CourseScoreSummary {
+  const enteredItems = courses.flatMap((course) => course.items ?? []).filter(isCourseScoreEntered);
+  const courseCount = courses.filter((course) => (course.items ?? []).some(isCourseScoreEntered)).length;
+  let aboveAverage = 0;
+  let equalAverage = 0;
+  let belowAverage = 0;
+
+  for (const item of enteredItems) {
+    const rawScore = scoreValueNumber(item.rawScore);
+    const averageScore = scoreValueNumber(item.averageScore);
+    if (rawScore == null || averageScore == null) continue;
+    if (rawScore > averageScore) aboveAverage += 1;
+    else if (rawScore < averageScore) belowAverage += 1;
+    else equalAverage += 1;
+  }
+
+  return { enteredItems, courseCount, aboveAverage, equalAverage, belowAverage };
+}
+
+function renderCourseScoreSummary(summary: CourseScoreSummary): string {
+  if (!summary.enteredItems.length) {
+    return `<section class="course-score-summary"><div class="course-score-summary-label">공개된 수강점수</div><div class="course-score-summary-main">아직 공개된 평가 항목이 없습니다.</div></section>`;
+  }
+
+  const chips = [
+    { label: "평균보다 높음", value: summary.aboveAverage },
+    { label: "평균 동일", value: summary.equalAverage },
+    { label: "평균보다 낮음", value: summary.belowAverage },
+  ];
+  return `<section class="course-score-summary"><div class="course-score-summary-label">공개된 수강점수</div><div class="course-score-summary-main">${summary.courseCount}과목에서 ${summary.enteredItems.length}개 평가 항목이 공개됐어요.</div><div class="course-score-summary-meta">${chips.map((chip) => `<div class="course-score-summary-stat"><strong>${chip.value}</strong><span>${esc(chip.label)}</span></div>`).join("")}</div></section>`;
+}
+
+function scoreValueNumber(value: CourseScoreValue | undefined): number | undefined {
+  if (!value) return undefined;
+  if (typeof value.earned === "number") return value.earned;
+  if (typeof value.value === "number") return value.value;
+  const raw = value.rawValue?.trim();
+  if (!raw) return undefined;
+  const match = raw.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return undefined;
+  return Number(match[0]);
+}
+
+function isCourseScoreEntered(item: CourseScoreItem): boolean {
+  const note = item.note?.trim().toLowerCase() || "";
+  const rawScore = scoreValueText(item.rawScore);
+  const statusText = `${note} ${rawScore}`.toLowerCase();
+  if (statusText.includes("미입력") || statusText.includes("not entered") || statusText.includes("pending")) return false;
+  return rawScore !== "-";
+}
+
+function renderCourseScoreMetric(label: string, value: string): string {
+  return `<div class="course-score-metric"><div class="course-score-metric-label">${esc(label)}</div><div class="course-score-metric-value">${esc(value)}</div></div>`;
 }
 
 function gradeTone(grade: string): "high" | "mid" | "watch" | "other" {

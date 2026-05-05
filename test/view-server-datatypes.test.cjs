@@ -88,3 +88,48 @@ test("view API accepts the grade-history data type", async (t) => {
     assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
   });
 });
+
+test("view API accepts and renders the course-scores data type", async (t) => {
+  await withViewServer(t, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dataType: "course-scores",
+        title: "수강점수",
+        rawData: {
+          year: 2026,
+          termLabel: "1학기",
+          courses: [
+            {
+              title: "0752 - 시스템클라우드보안",
+              items: [
+                {
+                  assessmentCategory: "수시시험(중간시험, QUIZ포함)",
+                  itemName: "중간시험",
+                  ratio: { rawValue: "40 / 40 %" },
+                  rawScore: { rawValue: "0 / 100 점" },
+                  averageScore: { rawValue: "0 점" },
+                  note: "미입력",
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
+
+    const viewRes = await fetch(body.url);
+    const html = await viewRes.text();
+
+    assert.equal(viewRes.status, 200);
+    assert.match(html, /COURSE SCORES/);
+    assert.match(html, /0752 - 시스템클라우드보안/);
+    assert.match(html, /중간시험/);
+    assert.doesNotMatch(html, /AI 요약/);
+  });
+});

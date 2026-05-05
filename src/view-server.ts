@@ -20,6 +20,7 @@ app.use(
 
 const ALLOWED_DATA_TYPES = new Set<ViewEntry["dataType"]>([
   "timetable",
+  "course-scores",
   "grades",
   "grade-history",
   "graduation",
