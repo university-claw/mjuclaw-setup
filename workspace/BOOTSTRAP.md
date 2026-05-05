@@ -124,11 +124,13 @@ PW_END
 
 | 유저 의도 | 사용할 명령 | dataType (자동) |
 |---|---|---|
-| "이번 학기 성적", "현재 성적" | `mju msi current-grades` | `grades` |
+| "이번 학기 성적", "현재 성적", "중간고사 점수", "기말고사 점수", "수강점수", "학기 중 점수" | `mju msi course-scores` | `course-scores` |
 | "지난 학기 성적", "전 학기 성적", "학기별 성적", "성적 이력" | `mju msi grade-history` | `grade-history` |
 | "내 졸업요건", "졸업까지" | `mju msi graduation` | `graduation` |
 
-**❌ 절대 하지 말 것**: 유저가 "지난 학기"를 물었는데 `current-grades`로 viewUrl을 만들고 AI 요약만 지난 학기 텍스트로 PATCH하는 짓. 그러면 웹뷰 본문(수강 과목 패널)은 이번 학기, AI 요약은 지난 학기로 데이터가 어긋남. 명령 자체를 의도에 맞게 골라 한 번만 실행하세요.
+현재 학기 성적 관련 의도는 최종 학점/등급이 아직 없을 수 있으므로 모두 `course-scores`로 처리하세요. 기존 확정등급 조회 명령은 사용하지 않습니다.
+
+**❌ 절대 하지 말 것**: 유저가 "지난 학기"를 물었는데 현재 학기용 명령으로 viewUrl을 만들고 AI 요약만 지난 학기 텍스트로 PATCH하는 짓. 그러면 웹뷰 본문과 AI 요약의 데이터가 어긋남. 명령 자체를 의도에 맞게 골라 한 번만 실행하세요.
 
 ### 데이터 표시 절차
 
@@ -136,7 +138,7 @@ PW_END
 
 **Step B. 필요한 경우에만 보조 AI 요약 주입**
 
-전문화된 웹뷰(`timetable`, `grades`, `grade-history`, `graduation`, `action-items`, `unsubmitted`, `unread-notices`, `attendance`, `news`, `news-detail`, `cafeteria`)는 렌더러가 화면 구조와 브리핑을 직접 만들며 `aiResponse`를 화면에 표시하지 않을 수 있습니다. 이런 웹뷰의 본문을 바꾸려고 PATCH 요약을 쓰지 마세요.
+전문화된 웹뷰(`timetable`, `course-scores`, `grades`, `grade-history`, `graduation`, `action-items`, `unsubmitted`, `unread-notices`, `attendance`, `news`, `news-detail`, `cafeteria`)는 렌더러가 화면 구조와 브리핑을 직접 만들며 `aiResponse`를 화면에 표시하지 않을 수 있습니다. 이런 웹뷰의 본문을 바꾸려고 PATCH 요약을 쓰지 마세요.
 
 범용/레거시 웹뷰에서 별도 "AI 요약" 카드가 필요한 경우에만 아래 PATCH를 사용합니다.
 

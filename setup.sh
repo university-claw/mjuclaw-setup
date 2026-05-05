@@ -17,6 +17,9 @@
 set -e
 cd "$(dirname "$0")"
 
+MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-msi-course-scores}"
+MJU_NEWS_BRANCH="${MJU_NEWS_BRANCH:-}"
+
 echo "┌─────────────────────────────────────────────┐"
 echo "│  MJUClaw Agent — 자동 셋업                  │"
 echo "└─────────────────────────────────────────────┘"
@@ -43,19 +46,39 @@ echo "[2/4] 도구 레포 준비..."
 clone_or_pull() {
   local DIR="$1"
   local REPO="$2"
+  local BRANCH="${3:-}"
   if [ -d "$DIR/.git" ]; then
-    echo "  → $DIR 이미 있음, pull 중..."
-    (cd "$DIR" && git pull --ff-only) || echo "  ⚠ $DIR pull 실패 (수동 해결 필요)"
+    if [ -n "$BRANCH" ]; then
+      echo "  → $DIR 이미 있음, origin/$BRANCH 동기화 중..."
+      (
+        cd "$DIR"
+        git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+        if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+          git checkout "$BRANCH"
+        else
+          git checkout -b "$BRANCH" "origin/$BRANCH"
+        fi
+        git pull --ff-only origin "$BRANCH"
+      )
+    else
+      echo "  → $DIR 이미 있음, pull 중..."
+      (cd "$DIR" && git pull --ff-only)
+    fi
   else
-    echo "  → $DIR clone 중..."
-    git clone "$REPO" "$DIR"
+    if [ -n "$BRANCH" ]; then
+      echo "  → $DIR clone 중... ($BRANCH)"
+      git clone --branch "$BRANCH" "$REPO" "$DIR"
+    else
+      echo "  → $DIR clone 중..."
+      git clone "$REPO" "$DIR"
+    fi
   fi
 }
 
-clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git
+clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git "$MJU_CLI_BRANCH"
 # mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
 # dev 브랜치에 변경이 진행 중이면 아래 한 줄을 `git checkout dev`로 교체.
-clone_or_pull mju-news https://github.com/university-claw/mju-news.git
+clone_or_pull mju-news https://github.com/university-claw/mju-news.git "$MJU_NEWS_BRANCH"
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""
