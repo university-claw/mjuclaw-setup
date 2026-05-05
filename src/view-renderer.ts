@@ -20,7 +20,6 @@ const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
   grades: { kicker: "GRADES", detail: "성적" },
   "grade-history": { kicker: "GRADE HISTORY", detail: "학기별 성적" },
   graduation: { kicker: "GRADUATION", detail: "졸업요건" },
-  courses: { kicker: "COURSES", detail: "수강과목" },
   "action-items": { kicker: "TODAY'S BRIEFING", detail: "지금 할 일" },
   unsubmitted: { kicker: "ASSIGNMENTS", detail: "미제출 과제" },
   "unread-notices": { kicker: "NOTICES", detail: "LMS 공지" },
@@ -1626,7 +1625,6 @@ function renderData(dataType: string, data: unknown): string {
     grades: renderGrades,
     "grade-history": renderGradeHistory,
     graduation: renderGraduation,
-    courses: renderCourses,
     "action-items": renderActionItems,
     unsubmitted: renderUnsubmittedAssignments,
     "unread-notices": renderUnreadNoticeList,
@@ -2173,19 +2171,6 @@ function renderGraduation(data: unknown): string {
 
 function graduationGap(item: { earned?: number; required?: number; gap?: number }): number {
   return Math.max(0, item.gap ?? Math.max(0, (item.required ?? 0) - (item.earned ?? 0)));
-}
-
-// ── 수강과목 ──────────────────────────────────────────
-
-function renderCourses(data: unknown): string {
-  const d = data as { courses?: Array<{ title: string; professor?: string; code?: string }> };
-  if (!d.courses?.length) return "";
-
-  let html = `<section class="section"><div class="section-title"><h2>수강 과목<span class="count">${d.courses.length}</span></h2></div>`;
-  for (const c of d.courses) {
-    html += `<div class="row"><div class="row-icon">${codeChip(c.title)}</div><div class="row-main"><div class="row-title">${esc(c.title)}</div><div class="row-sub">${joinMeta([c.professor, c.code])}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">›</div></div>`;
-  }
-  return html + `</section>`;
 }
 
 // ── 할 일 (Today's briefing) ──────────────────────────
@@ -3075,11 +3060,6 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
       const entries = pickItems("entries");
       if (!entries.length) return "_등록된 시간표가 없습니다._";
       return `이번 학기 **${entries.length}개 수업**이 등록되어 있어요.`;
-    }
-    case "courses": {
-      const items = pickItems("courses", "items");
-      if (!items.length) return "_수강 과목이 없습니다._";
-      return `총 **${items.length}개 과목**을 수강 중입니다.`;
     }
     case "grades": {
       const items = pickItems("items", "grades");

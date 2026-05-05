@@ -48,21 +48,23 @@ async function withViewServer(t, fn) {
   await fn(port);
 }
 
-test("view API rejects the removed due-assignments data type", async (t) => {
+test("view API rejects removed webview data types", async (t) => {
   await withViewServer(t, async (port) => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        dataType: "due-assignments",
-        title: "Due Assignments",
-        rawData: { assignments: [] },
-      }),
-    });
-    const body = await res.json();
+    for (const dataType of ["courses", "due-assignments"]) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          dataType,
+          title: dataType,
+          rawData: {},
+        }),
+      });
+      const body = await res.json();
 
-    assert.equal(res.status, 400);
-    assert.equal(body.error, "invalid dataType");
+      assert.equal(res.status, 400);
+      assert.equal(body.error, "invalid dataType");
+    }
   });
 });
 

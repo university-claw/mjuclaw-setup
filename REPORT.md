@@ -492,7 +492,7 @@ docker exec mjuclaw-agent cat /home/agent/.openclaw/view-store.json | jq 'length
 
 - 등록 유저: 4명
 - 활성 cron 수: 7개 (공용 1 + 출석 6)
-- 지원 dataType 렌더러: 10종
+- 지원 dataType 렌더러: 11종
 - 총 라이브 테스트 시간: ~3일
 - 최근 해결 이슈: view-renderer 필드 mismatch, AI 요약 빈 카드, view-store 휘발성
 

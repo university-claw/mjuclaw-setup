@@ -62,7 +62,6 @@ detect_datatype() {
     *"msi current-grades"*) echo "grades" ;;
     *"msi grades"*) echo "grades" ;;
     *"msi graduation"*) echo "graduation" ;;
-    *"lms courses list"*) echo "courses" ;;
     *"ucheck"*) echo "attendance" ;;
     *"ucheck attendance"*) echo "attendance" ;;
     *) echo "" ;;
@@ -74,7 +73,7 @@ should_view() {
   local args="$*"
   case "$args" in
     *" +"*) return 0 ;;
-    *"timetable"*|*"grade-history"*|*"grades"*|*"graduation"*|*"courses list"*|*"attendance"*) return 0 ;;
+    *"timetable"*|*"grade-history"*|*"grades"*|*"graduation"*|*"attendance"*) return 0 ;;
     *"auth "*|*"config "*|*"doctor"*|*"skills"*) return 1 ;;
     *) return 1 ;;
   esac
@@ -89,7 +88,6 @@ title_for_datatype() {
     "grades") echo "성적" ;;
     "grade-history") echo "학기별 성적" ;;
     "graduation") echo "졸업요건" ;;
-    "courses") echo "수강과목" ;;
     "attendance") echo "출석" ;;
     *) echo "학사 데이터" ;;
   esac
