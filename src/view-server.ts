@@ -1,5 +1,6 @@
 import express from "express";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import { getView, storeView, startViewCleanup, updateViewSummary } from "./view-store";
 import { renderViewHtml, renderExpiredHtml } from "./view-renderer";
 import type { ViewEntry } from "./types";
@@ -85,6 +86,94 @@ app.post("/api/view", (req, res) => {
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
+
+// ── 온보딩 후속 트리거 (router → agent) ────────────────────────
+// router의 OnboardingLoginRunner가 mju auth login 성공 직후 호출.
+// agent 컨테이너 안에서 mju-attendance-alert subscribe + mju-onboarding-
+// survey start 를 비-블로킹으로 실행해 출석 알림 cron + 공지 알림 설문
+// Poll 두 건을 등록한다. helper들이 router HTTP로 Discord 호출을 위임
+// 하므로 agent에 Discord 토큰이 없어도 정상 동작한다.
+app.post("/internal/onboarding-postlogin", (req, res) => {
+  const expected = process.env.MJUCLAW_ROUTER_TOKEN || "";
+  if (!expected) {
+    res.status(503).json({ ok: false, reason: "router_token_unset" });
+    return;
+  }
+  const auth = req.headers["authorization"];
+  if (typeof auth !== "string" || !constantTimeBearerEqual(auth, expected)) {
+    res.status(401).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const body = req.body as { discordUserId?: unknown };
+  const discordUserId =
+    typeof body?.discordUserId === "string" ? body.discordUserId.trim() : "";
+  if (!/^\d{17,20}$/.test(discordUserId)) {
+    res.status(400).json({ ok: false, reason: "invalid_discordUserId" });
+    return;
+  }
+
+  // 두 helper를 동시 실행. 한 쪽이 실패해도 다른 쪽 결과는 유지.
+  Promise.allSettled([
+    runHelper("mju-attendance-alert", ["subscribe", discordUserId]),
+    runHelper("mju-onboarding-survey", ["start", discordUserId]),
+  ]).then(([attendanceResult, surveyResult]) => {
+    res.json({
+      ok: true,
+      attendance: settledToJson(attendanceResult),
+      survey: settledToJson(surveyResult),
+    });
+  });
+});
+
+function runHelper(
+  bin: string,
+  args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      bin,
+      args,
+      { timeout: 60_000, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const exitCode =
+          (err as NodeJS.ErrnoException | null)?.code === "ETIMEDOUT"
+            ? 124
+            : err
+              ? typeof (err as { code?: number }).code === "number"
+                ? ((err as { code: number }).code as number)
+                : 1
+              : 0;
+        resolve({
+          exitCode,
+          stdout: stdout?.slice(0, 8 * 1024) ?? "",
+          stderr: stderr?.slice(0, 8 * 1024) ?? "",
+        });
+      },
+    );
+  });
+}
+
+function settledToJson(
+  r: PromiseSettledResult<{ exitCode: number; stdout: string; stderr: string }>,
+): Record<string, unknown> {
+  if (r.status === "fulfilled") {
+    return { ok: r.value.exitCode === 0, ...r.value };
+  }
+  return { ok: false, error: String(r.reason) };
+}
+
+function constantTimeBearerEqual(header: string, expected: string): boolean {
+  const m = /^Bearer\s+(.+)$/.exec(header);
+  if (!m || !m[1]) return false;
+  const a = m[1];
+  if (a.length !== expected.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
 
 // ── 서버 시작 ───────────────────────────────────────────────────
 
