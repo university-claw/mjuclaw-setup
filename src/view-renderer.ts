@@ -17,13 +17,12 @@ import type { ViewEntry } from "./types";
 
 const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
   timetable: { kicker: "TIMETABLE", detail: "시간표" },
+  "course-scores": { kicker: "COURSE SCORES", detail: "수강점수" },
   grades: { kicker: "GRADES", detail: "성적" },
   "grade-history": { kicker: "GRADE HISTORY", detail: "학기별 성적" },
   graduation: { kicker: "GRADUATION", detail: "졸업요건" },
-  courses: { kicker: "COURSES", detail: "수강과목" },
   "action-items": { kicker: "TODAY'S BRIEFING", detail: "지금 할 일" },
   unsubmitted: { kicker: "ASSIGNMENTS", detail: "미제출 과제" },
-  "due-assignments": { kicker: "DUE SOON", detail: "마감 임박" },
   "unread-notices": { kicker: "NOTICES", detail: "LMS 공지" },
   attendance: { kicker: "ATTENDANCE", detail: "출석" },
   news: { kicker: "PUBLIC NOTICES", detail: "학교 공지" },
@@ -42,10 +41,18 @@ function metaFor(dataType: string): { kicker: string; detail: string } {
 
 export function renderViewHtml(entry: ViewEntry): string {
   const dataHtml = renderData(entry.dataType, entry.rawData);
-  const aiResponseEffective = entry.aiResponse?.trim()
-    ? entry.aiResponse
-    : generateFallbackSummary(entry.dataType, entry.rawData);
-  const aiSummaryHtml = renderMarkdown(aiResponseEffective);
+  let briefingHtml = "";
+  if (entry.dataType !== "timetable" && entry.dataType !== "course-scores" && entry.dataType !== "grades" && entry.dataType !== "grade-history" && entry.dataType !== "graduation" && entry.dataType !== "action-items" && entry.dataType !== "unsubmitted" && entry.dataType !== "unread-notices" && entry.dataType !== "attendance" && entry.dataType !== "news" && entry.dataType !== "news-detail" && entry.dataType !== "cafeteria") {
+    const aiResponseEffective = entry.aiResponse?.trim()
+      ? entry.aiResponse
+      : generateFallbackSummary(entry.dataType, entry.rawData);
+    const aiSummaryHtml = renderMarkdown(aiResponseEffective);
+    briefingHtml = `<section class="briefing">
+    <div class="briefing-label">AI 요약</div>
+    <div class="briefing-body">${aiSummaryHtml}</div>
+  </section>`;
+  }
+  const contentHtml = `${briefingHtml}${dataHtml}`;
   const created = new Date(entry.createdAt);
   const time = created.toLocaleString("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -56,6 +63,8 @@ export function renderViewHtml(entry: ViewEntry): string {
     minute: "2-digit",
   });
   const meta = metaFor(entry.dataType);
+  const displayTitle = displayTitleForEntry(entry);
+  const heroSubHtml = renderHeroSub(entry, created, time);
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -64,7 +73,7 @@ export function renderViewHtml(entry: ViewEntry): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0A0B0D" media="(prefers-color-scheme: dark)">
-<title>${esc(entry.title)} · 묭묭이</title>
+<title>${esc(displayTitle)} · 묭묭이</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,27 +95,47 @@ ${pageStyles()}
 
   <section class="hero">
     <div class="hero-eyebrow">${esc(meta.detail)}</div>
-    <h1 class="hero-title">${esc(entry.title)}</h1>
+    <h1 class="hero-title">${esc(displayTitle)}</h1>
     <div class="hero-sub">
-      <time datetime="${esc(created.toISOString())}">${esc(time)}</time>
-      <span class="sep">·</span>
-      <span>30분 후 만료</span>
+      ${heroSubHtml}
     </div>
   </section>
 
-  <section class="briefing">
-    <div class="briefing-label">AI 요약</div>
-    <div class="briefing-body">${aiSummaryHtml}</div>
-  </section>
-
-  ${dataHtml}
+  ${contentHtml}
 
   <footer class="footer">
     <span>묭묭이 · 명지대 학사 도우미</span>
   </footer>
 </main>
-</body>
-</html>`;
+  </body>
+  </html>`;
+}
+
+function displayTitleForEntry(entry: ViewEntry): string {
+  if (entry.dataType === "news-detail" && entry.rawData && typeof entry.rawData === "object" && !Array.isArray(entry.rawData)) {
+    const title = (entry.rawData as { title?: unknown }).title;
+    if (typeof title === "string" && title.trim()) return title.trim();
+  }
+  return entry.title;
+}
+
+function renderHeroSub(entry: ViewEntry, created: Date, createdLabel: string): string {
+  if (entry.dataType === "news-detail" && entry.rawData && typeof entry.rawData === "object" && !Array.isArray(entry.rawData)) {
+    const meta = noticeDetailMeta(entry.rawData as NoticeDetailData);
+    if (meta) return meta;
+  }
+
+  return `<time datetime="${esc(created.toISOString())}">${esc(createdLabel)}</time>
+      <span class="sep">·</span>
+      <span>30분 후 만료</span>`;
+}
+
+function noticeDetailMeta(d: NoticeDetailData): string {
+  const source = d.sourceName || (d.source && NEWS_SOURCE_LABEL[d.source]) || d.source || "";
+  const dateLabel = d.publishedAt
+    ? new Date(d.publishedAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric" })
+    : "";
+  return joinMeta([source, dateLabel, d.author, d.categoryLabel]);
 }
 
 export function renderExpiredHtml(): string {
@@ -210,9 +239,10 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   padding: 0 20px 60px;
+  overflow-x: hidden;
 }
 
-.page { max-width: 560px; margin: 0 auto; }
+.page { width: 100%; max-width: 560px; margin: 0 auto; overflow: hidden; }
 .page-center { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
 
 /* Topbar */
@@ -231,10 +261,13 @@ body {
   font-size: 15px; font-weight: 700; color: var(--ink);
   letter-spacing: -0.01em;
 }
+.topbar-meta { min-width: 0; overflow: hidden; }
 .kicker {
+  display: block;
   font-size: 11px; font-weight: 600;
   color: var(--ink-3);
   letter-spacing: 0.12em; text-transform: uppercase;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* Hero */
@@ -355,6 +388,321 @@ body {
   word-break: keep-all;
 }
 
+/* LMS unread notices */
+.unread-notice-overview {
+  padding: 20px 0 2px;
+  border-bottom: 1px solid var(--rule);
+}
+.unread-overview-line {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+.unread-overview-count {
+  color: var(--ink);
+  font-size: 15.5px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+.unread-overview-count strong {
+  color: var(--accent);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.unread-overview-meta {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.unread-overview-note {
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+.unread-notice-section {
+  padding-top: 24px;
+}
+.unread-notice-section .section-title {
+  margin-bottom: 8px;
+}
+.unread-notice-list {
+  border-top: 1px solid var(--rule-strong);
+}
+.unread-notice-row {
+  padding: 15px 0 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.unread-notice-row:last-child {
+  border-bottom: none;
+}
+.unread-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.notice-course-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 68%;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notice-posted {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.unread-notice-title {
+  margin-top: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.38;
+  letter-spacing: 0;
+  word-break: keep-all;
+}
+.unread-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 7px;
+}
+.unread-notice-preview {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 12.8px;
+  font-weight: 500;
+  line-height: 1.58;
+  word-break: keep-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Cafeteria */
+.cafeteria-section .section-title {
+  margin-bottom: 10px;
+}
+.cafeteria-table {
+  border-top: 1px solid var(--rule-strong);
+}
+.cafeteria-table-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.cafeteria-table-row:last-child {
+  border-bottom: none;
+}
+.cafeteria-place {
+  color: var(--accent-deep);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.cafeteria-menu {
+  min-width: 0;
+}
+.cafeteria-menu-text {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.48;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.cafeteria-menu-note {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: keep-all;
+}
+.cafeteria-price {
+  color: var(--green);
+  font-size: 12.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+.cafeteria-table-row.is-empty .cafeteria-place,
+.cafeteria-table-row.is-closed .cafeteria-place {
+  color: var(--ink-3);
+}
+.cafeteria-table-row.is-empty .cafeteria-menu-text,
+.cafeteria-table-row.is-closed .cafeteria-menu-text {
+  color: var(--ink-3);
+  font-weight: 650;
+}
+.cafeteria-table-row.is-closed .cafeteria-price {
+  color: var(--ink-3);
+}
+
+/* News search results */
+.news-list-section {
+  padding-top: 22px;
+}
+.news-row .row-title {
+  align-items: flex-start;
+}
+.news-row .row-title a {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
+}
+
+/* News detail */
+.notice-detail-source {
+  padding: 16px 0 0;
+}
+.notice-source-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 34px; padding: 0 12px;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px; font-weight: 700;
+  text-decoration: none;
+}
+.notice-body-section { padding-top: 24px; }
+.notice-body {
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.82;
+  word-break: keep-all;
+}
+.notice-attachments-section { padding-top: 28px; }
+.notice-attachment-row {
+  align-items: center;
+}
+.notice-attachment-row .row-icon {
+  font-size: 10px;
+  letter-spacing: 0;
+}
+.notice-attachment-row .row-title a {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: keep-all;
+}
+.notice-download {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+.notice-download.muted {
+  color: var(--ink-3);
+  font-weight: 700;
+}
+.notice-preview {
+  margin-top: 8px;
+}
+.notice-preview.muted {
+  color: var(--ink-3);
+}
+.notice-ocr-section {
+  padding-top: 24px;
+}
+.notice-ocr-text {
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.65;
+  word-break: keep-all;
+}
+
+/* Unsubmitted assignments */
+.unsubmitted-summary {
+  margin-top: 18px;
+}
+.unsubmitted-band {
+  padding: 15px;
+  border: 1px solid var(--red-soft);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--red-soft), var(--bg-alt));
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+}
+.unsubmitted-band-top,
+.unsubmitted-band-bottom {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 14px;
+}
+.unsubmitted-band-kicker {
+  color: var(--red); font-size: 11px; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.unsubmitted-band-main {
+  margin-top: 4px; color: var(--ink);
+  font-size: 22px; line-height: 1.18; font-weight: 800;
+  letter-spacing: -0.025em; word-break: keep-all;
+}
+.unsubmitted-band-urgent {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--bg); color: var(--red);
+  font-size: 12px; font-weight: 800;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.unsubmitted-band-bottom {
+  margin-top: 11px; padding-top: 10px;
+  border-top: 1px solid rgba(207, 32, 47, 0.14);
+  align-items: center;
+}
+.unsubmitted-band-note {
+  color: var(--ink-2); font-size: 12.5px; font-weight: 700;
+  word-break: keep-all;
+}
+.unsubmitted-band-due {
+  color: var(--red); font-size: 12.5px; font-weight: 800;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.unsubmitted-lane { padding-top: 22px; }
+.unsubmitted-lane .section-title { margin-bottom: 2px; }
+.assignment-row.is-urgent .row-icon {
+  background: var(--red-soft); color: var(--red);
+}
+
 /* Urgent hero card */
 .urgent-card {
   background: var(--bg-alt); border-radius: var(--radius-lg);
@@ -372,6 +720,80 @@ body {
 }
 .urgent-meta { font-size: 12px; color: var(--ink-3); }
 
+/* Action queue */
+.action-next {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+}
+.action-next.is-urgent {
+  border-color: var(--red-soft);
+  background: linear-gradient(180deg, var(--red-soft), var(--bg-alt));
+}
+.action-next-top,
+.action-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px; align-items: center;
+}
+.action-next-top {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.action-type {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 38px; height: 24px; padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg); color: var(--ink-2);
+  font-size: 11px; font-weight: 800; letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.action-next.is-urgent .action-type,
+.action-row.is-urgent .action-type,
+.action-row.is-today .action-type {
+  background: var(--red-soft); color: var(--red);
+}
+.action-row.is-notice .action-type {
+  background: var(--accent-soft); color: var(--accent);
+}
+.action-next-title {
+  margin-top: 10px; color: var(--ink);
+  font-size: 17px; line-height: 1.35; font-weight: 800;
+  letter-spacing: -0.015em; word-break: keep-all;
+}
+.action-next-meta {
+  margin-top: 6px; color: var(--ink-3);
+  font-size: 12.5px; font-weight: 600; word-break: keep-all;
+}
+.action-list {
+  margin-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+.action-row {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.action-row-title {
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 1.35; word-break: keep-all;
+}
+.action-row-meta {
+  margin-top: 3px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600; word-break: keep-all;
+}
+.action-due {
+  color: var(--ink-2); font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.action-next.is-urgent .action-due,
+.action-row.is-urgent .action-due,
+.action-row.is-today .action-due {
+  color: var(--red); font-weight: 800;
+}
+.action-row.is-notice .action-due {
+  color: var(--ink-3); font-weight: 600;
+}
+
 /* Badge (chip) */
 .badge {
   display: inline-flex; align-items: center;
@@ -385,37 +807,711 @@ body {
 .badge-blue { color: var(--accent); background: var(--accent-soft); }
 .badge-gray { color: var(--ink-2); background: var(--chip-bg); }
 
-/* Day pills (timetable) */
-.day-pills {
-  display: flex; gap: 6px; margin: 12px 0 18px;
+/* Grades */
+.grades-section { padding-top: 22px; }
+.grades-snapshot {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+  padding: 16px;
 }
-.day-pill {
-  flex: 1; padding: 10px 0; border-radius: var(--radius-md);
-  background: var(--chip-bg); color: var(--ink-2);
-  text-align: center;
+.grades-snapshot-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px;
 }
-.day-pill.today { background: var(--ink); color: var(--bg); }
-.day-pill-label {
-  font-size: 10px; font-weight: 600;
-  letter-spacing: 0.05em; opacity: 0.75;
+.grades-label {
+  color: var(--accent); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
 }
-.day-pill-date {
-  font-size: 15px; font-weight: 700;
-  margin-top: 3px; letter-spacing: -0.02em;
+.grades-gpa {
+  margin-top: 7px;
+  color: var(--ink); font-size: 34px; line-height: 1; font-weight: 700;
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+}
+.grades-gpa .unit {
+  color: var(--ink-3); font-size: 16px; font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.grades-scale {
+  margin-top: 7px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600;
+}
+.grades-level {
+  flex: 0 0 auto;
+  min-width: 58px; padding: 7px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 12px; font-weight: 700; text-align: center;
+}
+.grades-gpa-graph {
+  margin-top: 18px;
+}
+.grades-gpa-rail {
+  position: relative;
+  padding-top: 28px;
+}
+.grades-gpa-segments {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  height: 12px;
+}
+.grades-gpa-segment {
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg);
+}
+.grades-gpa-segment.low { background: var(--chip-bg); }
+.grades-gpa-segment.stable { background: var(--rule-strong); }
+.grades-gpa-segment.strong { background: var(--accent-soft-2); }
+.grades-gpa-segment.top { background: var(--accent); }
+.grades-gpa-marker {
+  position: absolute; left: var(--gpa-marker); top: 0;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 5px;
+  transform: translateX(-50%);
+}
+.grades-gpa-marker strong {
+  min-width: 42px; padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 12px; line-height: 1; font-weight: 800;
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.grades-gpa-marker span {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-alt);
+}
+.grades-gpa-band-labels {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px; margin-top: 8px;
+  color: var(--ink-3);
+  font-size: 10.5px; font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.grades-gpa-band-labels span {
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+.grades-stats {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.grades-stat {
+  min-width: 0; min-height: 38px; padding: 8px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.grades-stat strong {
+  display: block; color: var(--ink);
+  font-size: 14px; line-height: 1.1; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.grades-stat span {
+  display: block; margin-top: 0;
+  color: var(--ink-3); font-size: 10.5px; font-weight: 650;
+  white-space: nowrap;
+}
+.grade-course-list {
+  display: flex; flex-direction: column; gap: 9px;
+  margin-top: 12px;
+}
+.grade-course-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px; align-items: center;
+  padding: 13px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.grade-course-card.top {
+  border-color: var(--accent-soft-2);
+  background: linear-gradient(180deg, var(--accent-soft), var(--bg));
+}
+.grade-course-main { min-width: 0; }
+.grade-course-title {
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 1.35; letter-spacing: -0.01em; word-break: keep-all;
+}
+.grade-course-meta {
+  margin-top: 5px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.grade-course-result {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 5px; min-width: 48px;
+}
+.grade-pill {
+  min-width: 42px; padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  text-align: center;
+  font-size: 13px; line-height: 1; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.grade-pill.high { color: var(--accent); background: var(--accent-soft); }
+.grade-pill.mid { color: var(--ink); background: var(--chip-bg); }
+.grade-pill.watch { color: var(--warn); background: var(--warn-soft); }
+.grade-pill.other { color: var(--ink-2); background: var(--chip-bg); }
+.grade-score {
+  color: var(--ink-3); font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 
-/* Day group */
-.day-group { margin-bottom: 18px; }
-.day-group:last-child { margin-bottom: 0; }
-.day-group-head {
-  display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px;
+/* Course scores */
+.course-score-detail-section {
+  padding-top: 22px;
 }
-.day-group-label {
-  font-size: 14px; font-weight: 700; color: var(--ink);
-  letter-spacing: -0.005em;
+.course-score-summary {
+  margin-top: 22px;
+  padding: 18px 16px 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-alt), var(--bg));
 }
-.day-group-today { font-size: 11.5px; color: var(--accent); font-weight: 600; }
+.course-score-summary-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 850;
+}
+.course-score-summary-main {
+  margin-top: 11px;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 850;
+  word-break: keep-all;
+}
+.course-score-summary-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.course-score-summary-stat {
+  min-width: 0;
+  min-height: 56px;
+  padding: 10px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.course-score-summary-stat strong {
+  display: block;
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+.course-score-summary-stat span {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.25;
+  font-weight: 750;
+  word-break: keep-all;
+}
+.course-score-course-list {
+  margin-top: 18px;
+  border-top: 1px solid var(--rule-strong);
+}
+.course-score-course {
+  margin-top: 16px;
+  padding: 16px;
+  border-top: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+}
+.course-score-course:first-child { border-top: none; }
+.course-score-course-head {
+  margin-bottom: 14px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.course-score-course-title {
+  min-width: 0;
+  color: var(--ink); font-size: 16px; line-height: 1.3; font-weight: 850;
+  word-break: keep-all;
+}
+.course-score-row {
+  padding: 13px 0;
+  border-top: 1px solid var(--rule);
+}
+.course-score-row:first-of-type { border-top: none; padding-top: 0; }
+.course-score-row-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px;
+}
+.course-score-title {
+  color: var(--ink); font-size: 14px; line-height: 1.35; font-weight: 750;
+  word-break: keep-all;
+}
+.course-score-category {
+  margin-top: 4px;
+  color: var(--ink-3); font-size: 12px; font-weight: 600;
+  word-break: keep-all;
+}
+.course-score-metrics {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px; margin-top: 10px;
+}
+.course-score-metric {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.course-score-metric-label {
+  color: var(--ink-3); font-size: 10.5px; font-weight: 700;
+}
+.course-score-metric-value {
+  margin-top: 4px;
+  color: var(--ink); font-size: 12.5px; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+}
+.course-score-empty {
+  margin-top: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--rule-strong);
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+@media (max-width: 420px) {
+  .course-score-course {
+    padding: 14px;
+  }
+  .course-score-summary-meta {
+    gap: 6px;
+  }
+  .course-score-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Grade history */
+.history-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 0.8fr));
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-alt), var(--bg));
+}
+.history-overview-item {
+  min-width: 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.history-overview-item.primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+.history-overview-label {
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.history-overview-item.primary .history-overview-label {
+  color: var(--bg);
+  opacity: 0.72;
+}
+.history-overview-value {
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-overview-item.primary .history-overview-value {
+  color: var(--bg);
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+.history-flow {
+  padding: 15px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.history-flow-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history-flow-title {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+.history-flow-scale {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-flow-chart {
+  height: 146px;
+  margin-top: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.history-flow-chart::-webkit-scrollbar { display: none; }
+.history-flow-plot {
+  position: relative;
+  width: 100%;
+  min-width: var(--plot-min-width);
+  height: 100%;
+}
+.history-flow-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.history-flow-grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.history-flow-area {
+  fill: var(--accent-soft);
+  opacity: 0.78;
+}
+.history-flow-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.history-flow-value {
+  position: absolute;
+  left: var(--point-x);
+  top: calc(var(--point-y) - 25px);
+  transform: translateX(-50%);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-flow-point {
+  position: absolute;
+  left: var(--point-x);
+  top: var(--point-y);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 3px solid var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  transform: translate(-50%, -50%);
+}
+.history-flow-point.latest {
+  width: 14px;
+  height: 14px;
+  background: var(--accent);
+}
+.history-flow-term {
+  position: absolute;
+  left: var(--point-x);
+  bottom: 0;
+  transform: translateX(-50%);
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.history-term-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.history-term-card {
+  padding: 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.history-term-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history-term-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 800;
+  word-break: keep-all;
+}
+.history-term-summary {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-term-summary .average {
+  color: var(--accent);
+  font-weight: 850;
+}
+.history-term-summary .sep { color: var(--rule-strong); margin: 0 5px; }
+.history-course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.history-course-card {
+  padding: 11px 12px;
+}
+.history-grade-pill {
+  color: var(--ink-2);
+  background: var(--chip-bg);
+}
+
+/* Timetable */
+.timetable-section { padding-top: 22px; }
+.timetable-focus {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+  padding: 16px;
+}
+.focus-kicker {
+  display: inline-flex; align-items: center;
+  min-height: 22px; padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+}
+.focus-title {
+  margin-top: 12px;
+  font-size: 22px; line-height: 1.22; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; word-break: keep-all;
+}
+.focus-primary {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 6px; margin-top: 10px;
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.focus-arrow { color: var(--ink-3); font-weight: 500; }
+.focus-place {
+  margin-left: 4px; padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 12px; font-weight: 700;
+}
+.focus-sub {
+  margin-top: 8px; color: var(--ink-3);
+  font-size: 12.5px; font-weight: 500; word-break: keep-all;
+}
+.weekday-tabs {
+  position: sticky; top: 0; z-index: 3;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px; margin: 16px -2px 22px; padding: 8px 2px;
+  background: var(--bg);
+  backdrop-filter: blur(10px);
+}
+.weekday-tab {
+  min-width: 0; min-height: 46px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg); color: var(--ink-2);
+  text-decoration: none;
+}
+.weekday-tab span {
+  font-size: 12px; font-weight: 700; letter-spacing: -0.005em;
+}
+.weekday-tab strong {
+  color: var(--ink-3); font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.weekday-tab.active {
+  background: var(--ink); border-color: var(--ink); color: var(--bg);
+}
+.weekday-tab.active strong { color: var(--bg); opacity: 0.72; }
+.weekday-tab.today:not(.active) {
+  border-color: var(--accent-soft-2);
+  color: var(--accent);
+}
+.weekday-tab.empty { opacity: 0.62; }
+.timetable-title { margin-top: 2px; }
+.timeline-day {
+  scroll-margin-top: 74px;
+  padding: 18px 0 2px;
+  border-top: 1px solid var(--rule);
+}
+.timeline-day:first-of-type { border-top: none; }
+.timeline-day-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+  color: var(--ink-3); font-size: 12px; font-weight: 600;
+}
+.timeline-day-head > div {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+}
+.timeline-day-label {
+  color: var(--ink); font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
+}
+.today-chip {
+  padding: 2px 7px; border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 700;
+}
+.timeline-list {
+  position: relative;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.timeline-list::before {
+  content: "";
+  position: absolute; left: 53px; top: 10px; bottom: 10px;
+  width: 1px; background: var(--rule-strong);
+}
+.timeline-course {
+  position: relative;
+  display: grid; grid-template-columns: 46px minmax(0, 1fr);
+  gap: 14px; align-items: stretch;
+}
+.timeline-time {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: flex-end;
+  padding-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-time::after {
+  content: "";
+  position: absolute; top: 16px; right: -20px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--rule-strong);
+}
+.timeline-time strong {
+  color: var(--ink); font-size: 12.5px; font-weight: 700;
+}
+.timeline-time span {
+  margin-top: 2px; color: var(--ink-3); font-size: 11px; font-weight: 600;
+}
+.timeline-card {
+  min-width: 0; padding: 13px 14px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.timeline-card-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 10px;
+}
+.timeline-course-title {
+  min-width: 0;
+  color: var(--ink); font-size: 15px; line-height: 1.35; font-weight: 700;
+  letter-spacing: -0.01em; word-break: keep-all;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.timeline-place {
+  margin-top: 7px;
+  color: var(--accent); font-size: 14px; line-height: 1.25; font-weight: 700;
+}
+.timeline-meta {
+  margin-top: 4px;
+  color: var(--ink-3); font-size: 12px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.status-pill {
+  flex: 0 0 auto;
+  padding: 2px 7px; border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 700;
+}
+.status-pill.next { background: var(--accent-soft); color: var(--accent); }
+.status-pill.live { background: var(--green-soft); color: var(--green); }
+.timeline-course.is-next .timeline-card {
+  border-color: var(--accent-soft-2);
+  background: linear-gradient(180deg, var(--accent-soft), var(--bg));
+}
+.timeline-course.is-live .timeline-card {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.timeline-course.is-next .timeline-time::after,
+.timeline-course.is-live .timeline-time::after {
+  border-color: var(--accent); background: var(--accent);
+}
+.timeline-course.is-past { opacity: 0.52; }
+.timeline-gap {
+  position: relative;
+  display: grid; grid-template-columns: 46px minmax(0, 1fr);
+  gap: 14px; align-items: center;
+  min-height: 26px;
+}
+.timeline-gap span {
+  justify-self: end;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rule-strong); margin-right: -18px; z-index: 1;
+}
+.timeline-gap strong {
+  color: var(--ink-3); font-size: 12px; font-weight: 600;
+}
+.timeline-empty {
+  padding: 18px 14px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-3); font-size: 13px; font-weight: 500;
+  background: var(--bg-alt);
+}
+
+@media (max-width: 480px) {
+  body { padding-left: 16px; padding-right: 16px; }
+  .topbar-meta { display: none; }
+  .weekday-tabs { gap: 4px; margin-left: 0; margin-right: 0; }
+  .weekday-tab { min-height: 44px; border-radius: var(--radius-sm); }
+  .timeline-list::before { left: 48px; }
+  .timeline-course,
+  .timeline-gap {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .timeline-time::after { right: -17px; }
+  .timeline-gap span { margin-right: -16px; }
+  .timeline-card { padding: 12px; }
+  .status-pill { font-size: 10.5px; padding: 2px 6px; }
+}
 
 /* Metrics row (GPA / earned / etc) */
 .metric-hero {
@@ -446,6 +1542,70 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Attendance */
+.attendance-summary {
+  padding-top: 24px;
+}
+.attendance-briefing {
+  padding: 2px 0 4px;
+}
+.attendance-course {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.attendance-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 14px;
+  padding: 15px 0 12px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.attendance-count {
+  min-width: 0;
+}
+.attendance-count span {
+  display: block;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 700;
+}
+.attendance-count strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.attendance-count.danger strong {
+  color: var(--red);
+}
+.attendance-count.warn strong {
+  color: var(--warn);
+}
+.attendance-count .unit {
+  display: inline;
+  margin-left: 2px;
+  color: currentColor;
+  font-size: 15px;
+  font-weight: 800;
+}
+.attendance-support {
+  margin-top: 10px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Graduation rings */
 .grad-hero {
   display: flex; align-items: center; gap: 20px; padding-top: 4px;
@@ -468,6 +1628,30 @@ body {
 .ring-cap {
   font-size: 10px; color: var(--ink-3); margin-top: 4px;
   letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+}
+
+.grad-shortage-list {
+  margin-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+.grad-shortage-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px; align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.grad-shortage-title {
+  color: var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 1.35; word-break: keep-all;
+}
+.grad-shortage-meta {
+  margin-top: 4px; color: var(--ink-3);
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.grad-shortage-gap {
+  color: var(--red); font-size: 12px; font-weight: 800;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
 .ring-grid {
@@ -580,18 +1764,17 @@ function renderData(dataType: string, data: unknown): string {
   if (!data) return "";
   const renderers: Record<string, (d: unknown) => string> = {
     timetable: renderTimetable,
+    "course-scores": renderCourseScores,
     grades: renderGrades,
     "grade-history": renderGradeHistory,
     graduation: renderGraduation,
-    courses: renderCourses,
     "action-items": renderActionItems,
-    unsubmitted: renderAssignmentList,
-    "due-assignments": renderAssignmentList,
-    "unread-notices": renderNoticeList,
+    unsubmitted: renderUnsubmittedAssignments,
+    "unread-notices": renderUnreadNoticeList,
     attendance: renderAttendanceText,
     news: renderNewsList,
     "news-detail": renderNewsDetail,
-    cafeteria: renderCafeteriaMenus,
+    cafeteria: renderCafeteriaTable,
   };
   const renderer = renderers[dataType];
   if (renderer) return renderer(data);
@@ -620,53 +1803,239 @@ type NoticeItem = {
   isUnread?: boolean;
 };
 
+type OnlineActionItem = {
+  courseTitle?: string;
+  weekLabel?: string;
+  lectureTitle?: string;
+  dueLabel?: string;
+  dueAt?: string;
+  statusText?: string;
+  priority?: string;
+  isExpired?: boolean;
+};
+
+type ActionQueueItem = {
+  source: "assignment" | "online" | "notice";
+  lane: "urgent" | "today" | "soon" | "notice";
+  title: string;
+  courseTitle?: string;
+  weekLabel?: string;
+  dueLabel?: string;
+  dueAt?: string;
+  statusText?: string;
+  postedAt?: string;
+  priority?: string;
+  order: number;
+};
+
+type AssignmentDeadlineGroup = {
+  key: "expired" | "today" | "tomorrow" | "week" | "later" | "unknown";
+  title: string;
+  items: AssignmentItem[];
+};
+
 function codeChip(title: string): string {
   return esc((title || "").slice(0, 2));
 }
 
 // ── 시간표 ────────────────────────────────────────────
 
+type TimetableEntry = {
+  dayOfWeek: number;
+  dayLabel?: string;
+  courseTitle: string;
+  location?: string;
+  timeRange?: string;
+  professor?: string;
+};
+
+type NormalizedTimetableEntry = TimetableEntry & {
+  sourceIndex: number;
+  dayIndex: number;
+  dayLabel: string;
+  start: string;
+  end: string;
+  startMinutes: number;
+  endMinutes: number;
+};
+
 function renderTimetable(data: unknown): string {
-  const d = data as { entries?: Array<{ dayOfWeek: number; dayLabel?: string; courseTitle: string; location?: string; timeRange?: string; professor?: string }> };
+  const d = data as { entries?: TimetableEntry[] };
   if (!d.entries?.length) return "";
 
   const days = ["월", "화", "수", "목", "금"];
-  const todayIdx = new Date().getDay() - 1; // 월=0
-  const byDay = new Map<string, NonNullable<typeof d.entries>>();
-  for (const e of d.entries) {
-    const day = e.dayLabel || days[e.dayOfWeek - 1] || "?";
-    if (!byDay.has(day)) byDay.set(day, []);
-    byDay.get(day)!.push(e);
+  const now = new Date();
+  const todayIdx = now.getDay() - 1; // 월=0
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const normalized = d.entries
+    .map((entry, sourceIndex) => normalizeTimetableEntry(entry, sourceIndex, days))
+    .filter((entry) => entry.dayIndex >= 0 && entry.dayIndex < days.length)
+    .sort(compareTimetableEntries);
+
+  const byDay: NormalizedTimetableEntry[][] = days.map(() => []);
+  for (const entry of normalized) {
+    byDay[entry.dayIndex].push(entry);
   }
 
-  // Date pills (Mon-Fri this week)
-  const today = new Date();
-  const mon = new Date(today);
-  mon.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-  let html = `<section class="section"><div class="section-title"><h2>이번 주</h2></div>`;
-  html += `<div class="section-sub">수업 ${d.entries.length}개</div>`;
-  html += `<div class="day-pills">`;
-  for (let i = 0; i < 5; i++) {
-    const dt = new Date(mon); dt.setDate(mon.getDate() + i);
-    const isToday = i === todayIdx;
-    html += `<div class="day-pill${isToday ? " today" : ""}"><div class="day-pill-label">${days[i]}</div><div class="day-pill-date">${dt.getDate()}</div></div>`;
-  }
+  const focusEntry = findFocusTimetableEntry(normalized, todayIdx, nowMinutes) || normalized[0];
+  const focusDayIdx = todayIdx >= 0 && todayIdx < days.length && byDay[todayIdx].length > 0
+    ? todayIdx
+    : focusEntry.dayIndex;
+  const focusStatus = describeTimetableFocus(focusEntry, todayIdx, nowMinutes);
+  const weekClassCount = normalized.length;
+
+  let html = `<section class="section timetable-section">`;
+  html += `<div class="timetable-focus">`;
+  html += `<div class="focus-kicker">${esc(focusStatus.kicker)}</div>`;
+  html += `<div class="focus-title">${esc(focusEntry.courseTitle)}</div>`;
+  html += `<div class="focus-primary"><span>${esc(focusEntry.start)}</span><span class="focus-arrow">→</span><span>${esc(focusEntry.end)}</span><span class="focus-place">${esc(focusEntry.location || "강의실 미정")}</span></div>`;
+  html += `<div class="focus-sub">${esc(focusStatus.detail)}${focusEntry.professor ? ` · ${esc(focusEntry.professor)}` : ""}</div>`;
   html += `</div>`;
-
+  html += `<nav class="weekday-tabs" aria-label="요일별 시간표">`;
   for (let i = 0; i < days.length; i++) {
-    const day = days[i];
-    const entries = byDay.get(day);
-    if (!entries) continue;
-    entries.sort((a, b) => (a.timeRange || "").localeCompare(b.timeRange || ""));
-    const isToday = i === todayIdx;
-    html += `<div class="day-group"><div class="day-group-head"><div class="day-group-label">${day}요일</div><div class="day-group-today">${isToday ? "TODAY · " : ""}${entries.length}개</div></div>`;
-    for (const e of entries) {
-      const [start, end] = (e.timeRange || " – ").split(" – ");
-      html += `<div class="row"><div class="row-icon">${codeChip(e.courseTitle)}</div><div class="row-main"><div class="row-title">${esc(e.courseTitle)}</div><div class="row-sub">${joinMeta([e.location, e.professor])}</div></div><div class="row-value"><div>${esc(start)}</div><div style="font-size:11px;color:var(--ink-3);margin-top:2px">${esc(end)}</div></div></div>`;
-    }
-    html += `</div>`;
+    const count = byDay[i].length;
+    const cls = [
+      "weekday-tab",
+      i === focusDayIdx ? "active" : "",
+      i === todayIdx ? "today" : "",
+      count === 0 ? "empty" : "",
+    ].filter(Boolean).join(" ");
+    html += `<a class="${cls}" href="#day-${i + 1}"><span>${days[i]}</span><strong>${count}</strong></a>`;
   }
+  html += `</nav>`;
+
+  html += `<div class="section-title timetable-title"><h2>요일별 시간표<span class="count">${weekClassCount}</span></h2></div>`;
+  html += `<div class="section-sub">시간, 강의실, 공강을 하루 흐름으로 볼 수 있어요.</div>`;
+
+  for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+    const entries = byDay[dayIndex];
+    const isToday = dayIndex === todayIdx;
+    const isFocusDay = dayIndex === focusDayIdx;
+    html += `<section class="timeline-day${isFocusDay ? " focus-day" : ""}" id="day-${dayIndex + 1}">`;
+    html += `<div class="timeline-day-head"><div><span class="timeline-day-label">${days[dayIndex]}요일</span>${isToday ? `<span class="today-chip">오늘</span>` : ""}</div><span>${entries.length ? `${entries.length}개 수업` : "수업 없음"}</span></div>`;
+
+    if (!entries.length) {
+      html += `<div class="timeline-empty">이 날은 수업이 없어요.</div>`;
+      html += `</section>`;
+      continue;
+    }
+
+    html += `<div class="timeline-list">`;
+    entries.forEach((entry, index) => {
+      const previous = entries[index - 1];
+      if (previous) {
+        const gap = entry.startMinutes - previous.endMinutes;
+        if (gap >= 30) {
+          html += `<div class="timeline-gap"><span></span><strong>공강 ${formatDuration(gap)}</strong></div>`;
+        }
+      }
+
+      const statusClass = timetableEntryStatusClass(entry, focusEntry, todayIdx, nowMinutes);
+      html += `<article class="timeline-course ${statusClass}">`;
+      html += `<div class="timeline-time"><strong>${esc(entry.start)}</strong><span>${esc(entry.end)}</span></div>`;
+      html += `<div class="timeline-card">`;
+      html += `<div class="timeline-card-top"><div class="timeline-course-title">${esc(entry.courseTitle)}</div>${statusClass === "is-live" ? `<span class="status-pill live">진행 중</span>` : statusClass === "is-next" ? `<span class="status-pill next">다음</span>` : ""}</div>`;
+      html += `<div class="timeline-place">${esc(entry.location || "강의실 미정")}</div>`;
+      html += `<div class="timeline-meta">${joinMeta([entry.professor, entry.timeRange])}</div>`;
+      html += `</div></article>`;
+    });
+    html += `</div></section>`;
+  }
+
   return html + `</section>`;
+}
+
+function normalizeTimetableEntry(entry: TimetableEntry, sourceIndex: number, days: string[]): NormalizedTimetableEntry {
+  const dayIndex = Number.isFinite(entry.dayOfWeek) ? entry.dayOfWeek - 1 : days.indexOf(entry.dayLabel || "");
+  const parsed = parseTimeRange(entry.timeRange);
+  return {
+    ...entry,
+    sourceIndex,
+    dayIndex,
+    dayLabel: entry.dayLabel || days[dayIndex] || "?",
+    start: parsed.start,
+    end: parsed.end,
+    startMinutes: parsed.startMinutes,
+    endMinutes: parsed.endMinutes,
+  };
+}
+
+function parseTimeRange(timeRange?: string): { start: string; end: string; startMinutes: number; endMinutes: number } {
+  const raw = timeRange || "";
+  const parts = raw.split(/\s*[–-]\s*/);
+  const start = parts[0]?.trim() || "";
+  const end = parts[1]?.trim() || "";
+  return {
+    start,
+    end,
+    startMinutes: parseClockMinutes(start),
+    endMinutes: parseClockMinutes(end),
+  };
+}
+
+function parseClockMinutes(clock: string): number {
+  const match = clock.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  return hours * 60 + minutes;
+}
+
+function compareTimetableEntries(a: NormalizedTimetableEntry, b: NormalizedTimetableEntry): number {
+  if (a.dayIndex !== b.dayIndex) return a.dayIndex - b.dayIndex;
+  if (a.startMinutes !== b.startMinutes) return a.startMinutes - b.startMinutes;
+  return a.sourceIndex - b.sourceIndex;
+}
+
+function findFocusTimetableEntry(entries: NormalizedTimetableEntry[], todayIdx: number, nowMinutes: number): NormalizedTimetableEntry | undefined {
+  if (!entries.length) return undefined;
+
+  if (todayIdx >= 0 && todayIdx < 5) {
+    const remainingToday = entries.find((entry) => entry.dayIndex === todayIdx && entry.endMinutes >= nowMinutes);
+    if (remainingToday) return remainingToday;
+
+    const laterThisWeek = entries.find((entry) => entry.dayIndex > todayIdx);
+    if (laterThisWeek) return laterThisWeek;
+  }
+
+  return entries[0];
+}
+
+function describeTimetableFocus(entry: NormalizedTimetableEntry, todayIdx: number, nowMinutes: number): { kicker: string; detail: string } {
+  if (entry.dayIndex === todayIdx && nowMinutes >= entry.startMinutes && nowMinutes < entry.endMinutes) {
+    return { kicker: "진행 중", detail: `${entry.dayLabel}요일 ${formatDuration(entry.endMinutes - nowMinutes)} 뒤 종료` };
+  }
+
+  if (entry.dayIndex === todayIdx && entry.startMinutes > nowMinutes) {
+    return { kicker: "다음 수업", detail: `${formatDuration(entry.startMinutes - nowMinutes)} 뒤 시작` };
+  }
+
+  return { kicker: "다음 수업", detail: `${entry.dayLabel}요일 예정` };
+}
+
+function timetableEntryStatusClass(entry: NormalizedTimetableEntry, focusEntry: NormalizedTimetableEntry, todayIdx: number, nowMinutes: number): string {
+  if (entry.dayIndex === todayIdx && nowMinutes >= entry.startMinutes && nowMinutes < entry.endMinutes) {
+    return "is-live";
+  }
+
+  if (entry.sourceIndex === focusEntry.sourceIndex) {
+    return "is-next";
+  }
+
+  if (entry.dayIndex < todayIdx || (entry.dayIndex === todayIdx && entry.endMinutes < nowMinutes)) {
+    return "is-past";
+  }
+
+  return "";
+}
+
+function formatDuration(minutes: number): string {
+  const safeMinutes = Math.max(0, minutes);
+  const hours = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
+  if (hours > 0 && mins > 0) return `${hours}시간 ${mins}분`;
+  if (hours > 0) return `${hours}시간`;
+  return `${mins}분`;
 }
 
 // ── 성적 ──────────────────────────────────────────────
@@ -678,49 +2047,218 @@ function renderGrades(data: unknown): string {
   };
   if (!d.items?.length) return "";
 
-  let html = "";
+  const items = d.items;
+  const courseCount = items.length;
+  const totalCredits = typeof d.totalCredits === "number"
+    ? d.totalCredits
+    : items.reduce((sum, item) => sum + (item.credits ?? 0), 0);
+  const maxGpa = typeof d.maxGpa === "number" ? d.maxGpa : 4.5;
+  const gpaText = typeof d.gpa === "number" ? d.gpa.toFixed(2) : "-";
+  const markerPercent = typeof d.gpa === "number" ? gpaBandRailPosition(d.gpa, maxGpa) : 0;
+  const levelText = typeof d.gpa === "number" ? gpaBandName(d.gpa) : "GPA";
+  const scaleText = typeof d.gpa === "number" ? gpaBandDescription(d.gpa) : "GPA 구간 기준";
 
-  // Hero metric
-  if (typeof d.gpa === "number") {
-    html += `<section class="section"><div class="metric-hero"><div class="metric-label">이번 학기 GPA</div><div class="metric-value">${d.gpa.toFixed(2)}${d.maxGpa ? `<span class="unit"> / ${d.maxGpa.toFixed(2)}</span>` : ""}</div>`;
-    if (d.totalCredits) html += `<div class="metric-trend">${d.totalCredits}학점</div>`;
-    html += `</div></section>`;
-  }
-
-  // Courses list
-  html += `<section class="section"><div class="section-title"><h2>수강 과목<span class="count">${d.items.length}</span></h2></div>`;
-  for (const it of d.items) {
-    const grade = it.grade || it.statusMessage || "-";
-    const top = grade === "A+";
-    const iconCls = top ? "accent" : "";
-    html += `<div class="row"><div class="row-icon ${iconCls}">${codeChip(it.courseTitle)}</div><div class="row-main"><div class="row-title">${esc(it.courseTitle)}</div><div class="row-sub">${joinMeta([it.credits != null ? `${it.credits}학점` : null, it.score != null ? `${it.score}점` : null])}</div></div><div class="row-value">${esc(grade)}</div></div>`;
-  }
+  let html = `<section class="section grades-section">`;
+  html += `<div class="grades-snapshot">`;
+  html += `<div class="grades-snapshot-top"><div><div class="grades-label">이번 학기 GPA</div><div class="grades-gpa">${gpaText}${typeof d.gpa === "number" ? `<span class="unit"> / ${maxGpa.toFixed(2)}</span>` : ""}</div><div class="grades-scale">${esc(scaleText)}</div></div><div class="grades-level">${esc(levelText)}</div></div>`;
+  html += `<div class="grades-gpa-graph"><div class="grades-gpa-rail" style="--gpa-marker:${markerPercent.toFixed(1)}%"><div class="grades-gpa-marker"><strong>${esc(gpaText)}</strong><span></span></div><div class="grades-gpa-segments" aria-label="GPA band rail"><span class="grades-gpa-segment low"></span><span class="grades-gpa-segment stable"></span><span class="grades-gpa-segment strong"></span><span class="grades-gpa-segment top"></span></div><div class="grades-gpa-band-labels"><span>3.0 미만</span><span>3.0+</span><span>3.5+</span><span>4.0+</span></div></div></div>`;
+  html += `<div class="grades-stats">`;
+  html += `<div class="grades-stat"><strong>${totalCredits || "-"}</strong><span>이수 학점</span></div>`;
+  html += `<div class="grades-stat"><strong>${courseCount}</strong><span>과목</span></div>`;
+  html += `</div></div>`;
   html += `</section>`;
 
-  // Distribution
-  const dist: Record<string, number> = {};
-  for (const it of d.items) {
-    const g = it.grade || "";
-    dist[g] = (dist[g] || 0) + 1;
+  html += `<section class="section"><div class="section-title"><h2>과목별 성적<span class="count">${courseCount}</span></h2></div><div class="section-sub">오른쪽 성적 배지를 기준으로 빠르게 훑어볼 수 있어요.</div><div class="grade-course-list">`;
+  for (const item of items) {
+    const grade = item.grade || item.statusMessage || "-";
+    const tone = gradeTone(grade);
+    const topClass = tone === "high" ? " top" : "";
+    html += `<article class="grade-course-card${topClass}"><div class="grade-course-main"><div class="grade-course-title">${esc(item.courseTitle || "과목명 미정")}</div><div class="grade-course-meta">${joinMeta([item.credits != null ? `${item.credits}학점` : null])}</div></div><div class="grade-course-result"><div class="grade-pill ${tone}">${esc(grade)}</div></div></article>`;
   }
-  const gradeKeys = Object.keys(dist).sort();
-  if (gradeKeys.length > 0) {
-    const total = d.items.length;
-    html += `<section class="section"><div class="section-title"><h2>성적 분포</h2></div><div class="section-sub">이번 학기 기준</div>`;
-    html += `<div class="dist-bar">`;
-    const palette = ["var(--accent)", "var(--accent-soft-2)", "var(--rule-strong)", "var(--chip-bg)"];
-    gradeKeys.forEach((g, i) => {
-      const w = (dist[g] / total) * 100;
-      html += `<div style="flex:${dist[g]};background:${palette[Math.min(i, palette.length - 1)]}"></div>`;
-    });
-    html += `</div><div class="dist-legend">`;
-    for (const g of gradeKeys) {
-      html += `<span><strong style="color:var(--ink);font-weight:600">${esc(g)} ${dist[g]}</strong></span>`;
-    }
-    html += `</div></section>`;
-  }
+  html += `</div></section>`;
 
   return html;
+}
+
+type CourseScoreValue = {
+  rawValue?: string;
+  earned?: number;
+  total?: number;
+  value?: number;
+};
+
+type CourseScoreItem = {
+  assessmentCategory?: string;
+  itemName?: string;
+  ratio?: CourseScoreValue;
+  rawScore?: CourseScoreValue;
+  averageScore?: CourseScoreValue;
+  note?: string;
+};
+
+type CourseScoreSummary = {
+  enteredItems: CourseScoreItem[];
+  courseCount: number;
+  aboveAverage: number;
+  equalAverage: number;
+  belowAverage: number;
+};
+
+type CourseScoreCourse = {
+  title?: string;
+  courseCode?: string;
+  courseTitle?: string;
+  items?: CourseScoreItem[];
+};
+
+function renderCourseScores(data: unknown): string {
+  const d = data as {
+    year?: number;
+    termLabel?: string;
+    courses?: CourseScoreCourse[];
+  };
+  const courses = (d.courses ?? []).filter((course) => course.items?.length);
+  const termText = [d.year != null ? `${d.year}학년도` : "", d.termLabel || ""].filter(Boolean).join(" · ");
+  const sectionSub = [termText, "중간·기말·퀴즈 등 학기 중 평가 항목별 점수입니다."].filter(Boolean).join(" · ");
+  if (!courses.length) {
+    return `<section class="section course-score-detail-section"><div class="section-title"><h2>과목별 상세</h2></div><div class="section-sub">${esc(sectionSub)}</div><div class="course-score-empty">조회된 수강점수 항목이 없습니다.</div></section>`;
+  }
+
+  const summary = courseScoreSummary(courses);
+
+  let html = renderCourseScoreSummary(summary);
+  html += `<section class="section course-score-detail-section"><div class="section-title"><h2>과목별 상세</h2></div><div class="section-sub">${esc(sectionSub)}</div><div class="course-score-course-list">`;
+  for (const course of courses) {
+    const courseTitle = courseScoreCourseTitle(course);
+    const courseItems = course.items ?? [];
+    html += `<section class="course-score-course"><div class="course-score-course-head"><div class="course-score-course-title">${esc(courseTitle)}</div></div>`;
+
+    for (const item of courseItems) {
+      const pending = !isCourseScoreEntered(item);
+      const statusBadge = pending ? `<span class="badge badge-gray">미공개</span>` : "";
+      html += `<article class="course-score-row"><div class="course-score-row-head"><div><div class="course-score-title">${esc(item.itemName || item.assessmentCategory || "평가 항목")}</div><div class="course-score-category">${esc(item.assessmentCategory || "")}</div></div>${statusBadge}</div>`;
+      html += `<div class="course-score-metrics">`;
+      html += renderCourseScoreMetric("반영비율", scoreValueText(item.ratio));
+      html += renderCourseScoreMetric("내 점수", pending ? "미공개" : scoreValueText(item.rawScore));
+      html += renderCourseScoreMetric("평균", scoreValueText(item.averageScore));
+      html += `</div></article>`;
+    }
+
+    html += `</section>`;
+  }
+  html += `</div></section>`;
+
+  return html;
+}
+
+function courseScoreCourseTitle(course: CourseScoreCourse): string {
+  const title = course.title?.trim();
+  if (title) return title;
+  return [course.courseCode, course.courseTitle].filter(Boolean).join(" - ") || "과목명 미정";
+}
+
+function scoreValueText(value: CourseScoreValue | undefined): string {
+  if (!value) return "-";
+  if (value.rawValue && value.rawValue.trim()) return value.rawValue.trim();
+  if (typeof value.earned === "number" && typeof value.total === "number") return `${value.earned} / ${value.total}`;
+  if (typeof value.value === "number") return String(value.value);
+  return "-";
+}
+
+function courseScoreSummary(courses: CourseScoreCourse[]): CourseScoreSummary {
+  const enteredItems = courses.flatMap((course) => course.items ?? []).filter(isCourseScoreEntered);
+  const courseCount = courses.filter((course) => (course.items ?? []).some(isCourseScoreEntered)).length;
+  let aboveAverage = 0;
+  let equalAverage = 0;
+  let belowAverage = 0;
+
+  for (const item of enteredItems) {
+    const rawScore = scoreValueNumber(item.rawScore);
+    const averageScore = scoreValueNumber(item.averageScore);
+    if (rawScore == null || averageScore == null) continue;
+    if (rawScore > averageScore) aboveAverage += 1;
+    else if (rawScore < averageScore) belowAverage += 1;
+    else equalAverage += 1;
+  }
+
+  return { enteredItems, courseCount, aboveAverage, equalAverage, belowAverage };
+}
+
+function renderCourseScoreSummary(summary: CourseScoreSummary): string {
+  if (!summary.enteredItems.length) {
+    return `<section class="course-score-summary"><div class="course-score-summary-label">공개된 수강점수</div><div class="course-score-summary-main">아직 공개된 평가 항목이 없습니다.</div></section>`;
+  }
+
+  const chips = [
+    { label: "평균보다 높음", value: summary.aboveAverage },
+    { label: "평균 동일", value: summary.equalAverage },
+    { label: "평균보다 낮음", value: summary.belowAverage },
+  ];
+  return `<section class="course-score-summary"><div class="course-score-summary-label">공개된 수강점수</div><div class="course-score-summary-main">${summary.courseCount}과목에서 ${summary.enteredItems.length}개 평가 항목이 공개됐어요.</div><div class="course-score-summary-meta">${chips.map((chip) => `<div class="course-score-summary-stat"><strong>${chip.value}</strong><span>${esc(chip.label)}</span></div>`).join("")}</div></section>`;
+}
+
+function scoreValueNumber(value: CourseScoreValue | undefined): number | undefined {
+  if (!value) return undefined;
+  if (typeof value.earned === "number") return value.earned;
+  if (typeof value.value === "number") return value.value;
+  const raw = value.rawValue?.trim();
+  if (!raw) return undefined;
+  const match = raw.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return undefined;
+  return Number(match[0]);
+}
+
+function isCourseScoreEntered(item: CourseScoreItem): boolean {
+  const note = item.note?.trim().toLowerCase() || "";
+  const rawScore = scoreValueText(item.rawScore);
+  const statusText = `${note} ${rawScore}`.toLowerCase();
+  if (statusText.includes("미입력") || statusText.includes("not entered") || statusText.includes("pending")) return false;
+  return rawScore !== "-";
+}
+
+function renderCourseScoreMetric(label: string, value: string): string {
+  return `<div class="course-score-metric"><div class="course-score-metric-label">${esc(label)}</div><div class="course-score-metric-value">${esc(value)}</div></div>`;
+}
+
+function gradeTone(grade: string): "high" | "mid" | "watch" | "other" {
+  const normalized = grade.trim().toUpperCase();
+  if (normalized.startsWith("A")) return "high";
+  if (normalized.startsWith("B")) return "mid";
+  if (normalized.startsWith("C") || normalized.startsWith("D") || normalized.startsWith("F")) return "watch";
+  return "other";
+}
+
+function gpaBandRailPosition(gpa: number, maxGpa: number): number {
+  const cappedMax = Math.max(maxGpa, 4.5);
+  const bands = [
+    { from: 0, to: 3.0 },
+    { from: 3.0, to: 3.5 },
+    { from: 3.5, to: 4.0 },
+    { from: 4.0, to: cappedMax },
+  ];
+  const safeGpa = Math.max(0, Math.min(cappedMax, gpa));
+  for (let i = 0; i < bands.length; i++) {
+    const band = bands[i];
+    if (safeGpa <= band.to || i === bands.length - 1) {
+      const ratio = (safeGpa - band.from) / Math.max(0.01, band.to - band.from);
+      return Math.max(4, Math.min(96, i * 25 + ratio * 25));
+    }
+  }
+  return 96;
+}
+
+function gpaBandName(gpa: number): string {
+  if (gpa >= 4.0) return "A권역";
+  if (gpa >= 3.5) return "우수";
+  if (gpa >= 3.0) return "안정";
+  return "확인";
+}
+
+function gpaBandDescription(gpa: number): string {
+  if (gpa >= 4.0) return "4.0 이상 A권역에 있어요";
+  if (gpa >= 3.5) return "3.5 이상 우수 구간이에요";
+  if (gpa >= 3.0) return "3.0 이상 안정 구간이에요";
+  return "3.0 미만 확인 구간이에요";
 }
 
 // ── 학기별 성적 (grade-history) ──────────────────────
@@ -730,7 +2268,7 @@ function renderGrades(data: unknown): string {
 
 function renderGradeHistory(data: unknown): string {
   const d = data as {
-    overview?: Record<string, string>;
+    overview?: Record<string, string | number>;
     termRecords?: Array<{
       title?: string;
       year?: number;
@@ -748,24 +2286,14 @@ function renderGradeHistory(data: unknown): string {
       }>;
     }>;
   };
-  if (!d.termRecords?.length) return "";
+  const terms = (d.termRecords ?? []).filter((term) => term.courses?.length);
+  if (!terms.length) return "";
 
-  let html = "";
-
-  // Hero — 누적 평점/취득 학점 (있으면)
   const overview = d.overview ?? {};
-  const totalGpa =
-    overview["전체평점"] || overview["누적평점"] || overview["평점"] || "";
+  const totalGpa = overviewText(overview, ["전체평점", "누적평점", "평점"]);
   const totalCredits =
-    overview["전체취득학점"] || overview["취득학점"] || "";
-  if (totalGpa || totalCredits) {
-    html += `<section class="section"><div class="metric-hero">`;
-    html += `<div class="metric-label">누적 평점</div>`;
-    if (totalGpa) html += `<div class="metric-value">${esc(totalGpa)}</div>`;
-    if (totalCredits)
-      html += `<div class="metric-trend">전체 취득 ${esc(totalCredits)}학점</div>`;
-    html += `</div></section>`;
-  }
+    overviewText(overview, ["전체취득학점", "취득학점"]) ||
+    String(terms.reduce((sum, term) => sum + (term.earnedCredits ?? 0), 0) || "-");
 
   // 학기 정렬: year DESC, term DESC (2학기 > 1학기 > 계절)
   const termWeight = (label: string): number => {
@@ -775,35 +2303,98 @@ function renderGradeHistory(data: unknown): string {
     if (label.includes("하계")) return 1.5;
     return 0;
   };
-  const sorted = [...d.termRecords].sort((a, b) => {
+  const sorted = [...terms].sort((a, b) => {
     const ay = a.year ?? 0;
     const by = b.year ?? 0;
     if (ay !== by) return by - ay;
     return termWeight(b.termLabel) - termWeight(a.termLabel);
   });
+  const chronological = [...sorted].reverse();
+  const flowTerms = chronological.filter((term) => typeof term.gpa === "number");
 
-  // 학기별 섹션
-  for (const term of sorted) {
-    if (!term.courses?.length) continue;
-    const title = term.title || `${term.year ?? ""} ${term.termLabel}`.trim();
+  let html = "";
 
-    html += `<section class="section">`;
-    html += `<div class="section-title"><h2>${esc(title)}<span class="count">${term.courses.length}</span></h2></div>`;
+  html += `<section class="section history-section"><div class="history-overview">`;
+  html += `<div class="history-overview-item primary"><div class="history-overview-label">누적 평균 학점</div><div class="history-overview-value">${esc(totalGpa || "-")}</div></div>`;
+  html += `<div class="history-overview-item"><div class="history-overview-label">취득 학점</div><div class="history-overview-value">${esc(totalCredits)}</div></div>`;
+  html += `<div class="history-overview-item"><div class="history-overview-label">조회 학기</div><div class="history-overview-value">${terms.length}</div></div>`;
+  html += `</div></section>`;
 
-    const sub: string[] = [];
-    if (typeof term.gpa === "number") sub.push(`평점 ${term.gpa.toFixed(2)}`);
-    if (term.earnedCredits != null) sub.push(`${term.earnedCredits}학점`);
-    if (sub.length) html += `<div class="section-sub">${sub.join(" · ")}</div>`;
+  if (flowTerms.length) {
+    const chartPoints = flowTerms.map((term, index) => historyChartPoint(term.gpa ?? 0, index, flowTerms.length));
+    const linePoints = chartPoints.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+    const firstPoint = chartPoints[0];
+    const lastPoint = chartPoints[chartPoints.length - 1];
+    const areaPoints = chartPoints.length > 1
+      ? `${firstPoint.x.toFixed(2)},88 ${linePoints} ${lastPoint.x.toFixed(2)},88`
+      : "";
+    const plotMinWidth = Math.max(260, flowTerms.length * 68);
 
-    for (const c of term.courses) {
-      const top = c.grade === "A+";
-      const iconCls = top ? "accent" : "";
-      html += `<div class="row"><div class="row-icon ${iconCls}">${codeChip(c.courseTitle)}</div><div class="row-main"><div class="row-title">${esc(c.courseTitle)}</div><div class="row-sub">${joinMeta([c.credits != null ? `${c.credits}학점` : null, c.category])}</div></div><div class="row-value">${esc(c.grade || "-")}</div></div>`;
+    html += `<section class="section"><div class="history-flow"><div class="history-flow-head"><div class="history-flow-title">학기별 학점 흐름</div><div class="history-flow-scale">4.5 만점</div></div><div class="history-flow-chart"><div class="history-flow-plot" style="--plot-min-width:${plotMinWidth}px"><svg class="history-flow-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line class="history-flow-grid" x1="0" y1="32" x2="100" y2="32"></line><line class="history-flow-grid" x1="0" y1="56" x2="100" y2="56"></line><line class="history-flow-grid" x1="0" y1="80" x2="100" y2="80"></line>${areaPoints ? `<polygon class="history-flow-area" points="${areaPoints}"></polygon>` : ""}<polyline class="history-flow-line" points="${linePoints}"></polyline></svg>`;
+    for (let i = 0; i < flowTerms.length; i++) {
+      const term = flowTerms[i];
+      const point = chartPoints[i];
+      const latestClass = term === sorted[0] ? " latest" : "";
+      const pointStyle = `--point-x:${point.x.toFixed(2)}%;--point-y:${point.y.toFixed(2)}%`;
+      html += `<div class="history-flow-value" style="${pointStyle}">${(term.gpa ?? 0).toFixed(2)}</div><div class="history-flow-point${latestClass}" style="${pointStyle}"></div><div class="history-flow-term" style="${pointStyle}">${esc(historyTermShortLabel(term))}</div>`;
     }
-    html += `</section>`;
+    html += `</div></div></div></section>`;
   }
 
+  html += `<section class="section"><div class="section-title"><h2>학기별 성적<span class="count">${terms.length}</span></h2></div><div class="history-term-list">`;
+  for (const term of sorted) {
+    const title = term.title || `${term.year ?? ""} ${term.termLabel}`.trim();
+    const summaryParts = [
+      typeof term.gpa === "number"
+        ? `<span class="average">평균 ${term.gpa.toFixed(2)}</span>`
+        : "",
+      term.earnedCredits != null
+        ? `<span>${term.earnedCredits}학점</span>`
+        : "",
+    ].filter(Boolean);
+    const summaryHtml = summaryParts.join(`<span class="sep">·</span>`);
+
+    html += `<article class="history-term-card">`;
+    html += `<div class="history-term-head"><div class="history-term-title">${esc(title || "학기 미정")}</div>${summaryHtml ? `<div class="history-term-summary">${summaryHtml}</div>` : ""}</div>`;
+    html += `<div class="history-course-list">`;
+
+    for (const c of term.courses) {
+      const grade = c.grade || "-";
+      html += `<article class="grade-course-card history-course-card"><div class="grade-course-main"><div class="grade-course-title">${esc(c.courseTitle || "과목명 미정")}</div><div class="grade-course-meta">${joinMeta([c.credits != null ? `${c.credits}학점` : null, c.category])}</div></div><div class="grade-course-result"><div class="grade-pill history-grade-pill">${esc(grade)}</div></div></article>`;
+    }
+    html += `</div></article>`;
+  }
+  html += `</div></section>`;
+
   return html;
+}
+
+function overviewText(overview: Record<string, string | number>, keys: string[]): string {
+  for (const key of keys) {
+    const value = overview[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+function historyChartPoint(gpa: number, index: number, total: number): { x: number; y: number } {
+  const x = total <= 1 ? 50 : 8 + (index / (total - 1)) * 84;
+  const ratio = Math.max(0, Math.min(1, (gpa - 3.0) / 1.5));
+  const y = 80 - ratio * 58;
+  return { x, y };
+}
+
+function historyTermShortLabel(term: { title?: string; year?: number; termLabel?: string }): string {
+  const title = term.title || "";
+  const yearMatch = title.match(/(\d{4})/);
+  const year = yearMatch?.[1] || (term.year != null ? String(term.year) : "");
+  const termLabel = term.termLabel || "";
+  const termMatch = termLabel.match(/(\d)/) || title.match(/(\d)\s*학기/);
+  if (year && termMatch) return `${year.slice(2)}-${termMatch[1]}`;
+  if (year) return year.slice(2);
+  return termLabel || title || "-";
 }
 
 // ── 졸업요건 (동심원 ring) ────────────────────────────
@@ -819,6 +2410,7 @@ function renderGraduation(data: unknown): string {
   const totalReq = d.overall?.required ?? d.creditGaps.reduce((a, g) => a + (g.required ?? 0), 0);
   const pct = d.overall?.pct ?? (totalReq > 0 ? Math.round((totalEarned / totalReq) * 100) : 0);
   const doneCount = d.creditGaps.filter((g) => (g.gap ?? 0) === 0).length;
+  const shortageItems = d.creditGaps.filter((g) => graduationGap(g) > 0);
 
   // Hero ring
   const size = 128, stroke = 10;
@@ -830,6 +2422,17 @@ function renderGraduation(data: unknown): string {
   html += `<div class="ring" style="width:${size}px;height:${size}px"><svg width="${size}" height="${size}"><circle class="ring-track" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}"/><circle class="ring-fill" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}" stroke-dasharray="${dash} ${c - dash}"/></svg><div class="ring-text"><div class="ring-pct">${pct}<span class="u">%</span></div><div class="ring-cap">완료</div></div></div>`;
   html += `<div style="flex:1;min-width:0"><div class="metric-label">총 취득 학점</div><div class="metric-value" style="font-size:26px;margin-top:4px">${totalEarned}<span class="unit"> / ${totalReq}</span></div><div class="metric-trend" style="margin-top:8px">남은 <strong style="color:var(--ink);font-weight:600">${Math.max(0, totalReq - totalEarned)}학점</strong></div></div>`;
   html += `</div></section>`;
+
+  if (shortageItems.length) {
+    html += `<section class="section"><div class="section-title"><h2>부족한 요건<span class="count">${shortageItems.length}</span></h2></div><div class="section-sub">총 취득 학점 아래에서 먼저 확인할 항목이에요.</div><div class="grad-shortage-list">`;
+    for (const g of shortageItems) {
+      const earned = g.earned ?? 0;
+      const required = g.required ?? 0;
+      const gap = graduationGap(g);
+      html += `<article class="grad-shortage-row"><div><div class="grad-shortage-title">${esc(g.label)}</div><div class="grad-shortage-meta">${earned} / ${required} 학점</div></div><div class="grad-shortage-gap">${gap}학점 부족</div></article>`;
+    }
+    html += `</div></section>`;
+  }
 
   // Breakdown rings
   html += `<section class="section"><div class="section-title"><h2>영역별<span class="count">${d.creditGaps.length}</span></h2></div><div class="section-sub">완료 ${doneCount} · 진행 ${d.creditGaps.length - doneCount}</div><div class="ring-grid">`;
@@ -849,17 +2452,8 @@ function renderGraduation(data: unknown): string {
   return html;
 }
 
-// ── 수강과목 ──────────────────────────────────────────
-
-function renderCourses(data: unknown): string {
-  const d = data as { courses?: Array<{ title: string; professor?: string; code?: string }> };
-  if (!d.courses?.length) return "";
-
-  let html = `<section class="section"><div class="section-title"><h2>수강 과목<span class="count">${d.courses.length}</span></h2></div>`;
-  for (const c of d.courses) {
-    html += `<div class="row"><div class="row-icon">${codeChip(c.title)}</div><div class="row-main"><div class="row-title">${esc(c.title)}</div><div class="row-sub">${joinMeta([c.professor, c.code])}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">›</div></div>`;
-  }
-  return html + `</section>`;
+function graduationGap(item: { earned?: number; required?: number; gap?: number }): number {
+  return Math.max(0, item.gap ?? Math.max(0, (item.required ?? 0) - (item.earned ?? 0)));
 }
 
 // ── 할 일 (Today's briefing) ──────────────────────────
@@ -869,56 +2463,194 @@ function renderActionItems(data: unknown): string {
   const unsub = (d.unsubmittedAssignments as AssignmentItem[] | undefined) ?? [];
   const due = (d.dueAssignments as AssignmentItem[] | undefined) ?? [];
   const notices = (d.unreadNotices as NoticeItem[] | undefined) ?? [];
-  const online = (d.incompleteOnlineWeeks as Array<{ courseTitle?: string; weekLabel?: string; lectureTitle?: string }> | undefined) ?? [];
+  const online = (d.incompleteOnlineWeeks as OnlineActionItem[] | undefined) ?? [];
   const total = unsub.length + due.length + notices.length + online.length;
-  if (total === 0) return `<section class="section"><div class="section-title"><h2>Today's briefing</h2></div><div class="section-sub">지금 해야 할 일이 없어요. 훌륭해요.</div></section>`;
+  if (total === 0) {
+    return `<section class="section"><div class="section-title"><h2>우선 처리 항목</h2></div><div class="section-sub">처리할 항목이 없습니다.</div></section>`;
+  }
 
-  const urgent = unsub.find((a) => a.priority === "high" || !isAssignmentExpired(a));
-  const urgentCount = unsub.filter((a) => a.priority === "high").length;
+  const queue = buildActionQueue(unsub, due, online, notices);
+  const nextAction = queue.find((item) => item.source !== "notice");
+  const lanes = nextAction ? queue.filter((item) => item !== nextAction) : queue;
+  const urgentItems = lanes.filter((item) => item.lane === "urgent");
+  const todayItems = lanes.filter((item) => item.lane === "today");
+  const soonItems = lanes.filter((item) => item.lane === "soon");
+  const noticeItems = lanes.filter((item) => item.lane === "notice");
 
-  let html = `<section class="section"><div class="section-title"><h2>Today's briefing</h2></div><div class="section-sub">총 ${total}건${urgentCount ? ` · 오늘 마감 <span style="color:var(--red);font-weight:600">${urgentCount}건</span>` : ""}</div>`;
-
-  // Urgent hero
-  if (urgent) {
-    html += `<div class="urgent-card"><div class="urgent-head"><div class="row-icon red">${codeChip(urgent.courseTitle || "")}</div><div style="flex:1;min-width:0"><div class="urgent-badge">${urgent.priority === "high" ? "오늘 마감" : "진행중"}</div><div class="urgent-title">${esc(urgent.title || "")}</div></div><div class="row-value red">${esc(urgent.dueLabel || urgent.dueAt || "")}</div></div><div class="urgent-meta">${joinMeta([urgent.courseTitle, urgent.weekLabel])}</div></div>`;
+  let html = `<section class="section action-queue"><div class="section-title"><h2>우선 처리 항목</h2></div><div class="section-sub">총 ${total}건 중 가장 먼저 처리할 항목입니다.</div>`;
+  if (nextAction) {
+    html += renderActionNext(nextAction);
+  } else {
+    html += `<div class="section-sub">마감 항목은 없고 읽지 않은 공지만 있습니다.</div>`;
   }
   html += `</section>`;
 
-  if (unsub.length) {
-    html += `<section class="section"><div class="section-title"><h2>미제출 과제<span class="count">${unsub.length}</span></h2></div>`;
-    for (const a of unsub.slice(0, 5)) {
-      const exp = isAssignmentExpired(a);
-      const valCls = exp ? "red" : a.priority === "high" ? "red" : "";
-      html += `<div class="row"><div class="row-icon">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${esc(a.courseTitle || "")}</div></div><div class="row-value ${valCls}">${esc(a.dueLabel || a.dueAt || (exp ? "만료" : ""))}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
-  if (due.length) {
-    html += `<section class="section"><div class="section-title"><h2>마감 임박<span class="count">${due.length}</span></h2></div>`;
-    for (const a of due.slice(0, 5)) {
-      html += `<div class="row"><div class="row-icon">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${esc(a.courseTitle || "")}</div></div><div class="row-value">${esc(a.dueLabel || a.dueAt || a.statusText || "")}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
-  if (notices.length) {
-    html += `<section class="section"><div class="section-title"><h2>안 읽은 공지<span class="count">${notices.length}</span></h2></div>`;
-    for (const n of notices.slice(0, 5)) {
-      html += `<div class="row"><div class="row-icon accent">${codeChip(n.courseTitle || "")}</div><div class="row-main"><div class="row-title"><span class="dot"></span><span>${esc(n.title || "")}</span></div><div class="row-sub">${esc(n.courseTitle || "")}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">${esc(n.postedAt || "")}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
-  if (online.length) {
-    html += `<section class="section"><div class="section-title"><h2>미수강 온라인<span class="count">${online.length}</span></h2></div>`;
-    for (const o of online.slice(0, 5)) {
-      html += `<div class="row"><div class="row-icon">${codeChip(o.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(o.lectureTitle || o.weekLabel || "")}</div><div class="row-sub">${joinMeta([o.courseTitle, o.weekLabel])}</div></div><div class="row-value accent">시청</div></div>`;
-    }
-    html += `</section>`;
-  }
+  html += renderActionLane("기한 경과", urgentItems);
+  html += renderActionLane("오늘 마감", todayItems);
+  html += renderActionLane("마감 예정", soonItems);
+  html += renderActionLane("읽지 않은 공지", noticeItems);
 
   return html;
+}
+
+function buildActionQueue(
+  unsubmitted: AssignmentItem[],
+  dueAssignments: AssignmentItem[],
+  onlineItems: OnlineActionItem[],
+  notices: NoticeItem[],
+): ActionQueueItem[] {
+  const queue: ActionQueueItem[] = [];
+  let order = 0;
+
+  for (const item of unsubmitted) {
+    queue.push({
+      source: "assignment",
+      lane: actionLane(item),
+      title: item.title || "과제 제출",
+      courseTitle: item.courseTitle,
+      weekLabel: item.weekLabel,
+      dueLabel: item.dueLabel,
+      dueAt: item.dueAt,
+      statusText: item.statusText,
+      priority: item.priority,
+      order: order++,
+    });
+  }
+
+  for (const item of dueAssignments) {
+    queue.push({
+      source: "assignment",
+      lane: actionLane(item),
+      title: item.title || "마감 임박 과제",
+      courseTitle: item.courseTitle,
+      weekLabel: item.weekLabel,
+      dueLabel: item.dueLabel,
+      dueAt: item.dueAt,
+      statusText: item.statusText,
+      priority: item.priority,
+      order: order++,
+    });
+  }
+
+  for (const item of onlineItems) {
+    queue.push({
+      source: "online",
+      lane: actionLane(item),
+      title: item.lectureTitle || item.weekLabel || "온라인 강의 시청",
+      courseTitle: item.courseTitle,
+      weekLabel: item.weekLabel,
+      dueLabel: item.dueLabel,
+      dueAt: item.dueAt,
+      statusText: item.statusText,
+      priority: item.priority,
+      order: order++,
+    });
+  }
+
+  for (const item of notices) {
+    queue.push({
+      source: "notice",
+      lane: "notice",
+      title: item.title || "공지 확인",
+      courseTitle: item.courseTitle,
+      postedAt: item.postedAt,
+      order: order++,
+    });
+  }
+
+  return queue.sort((a, b) => actionLaneRank(a) - actionLaneRank(b) || actionPriorityRank(a) - actionPriorityRank(b) || actionDueRank(a) - actionDueRank(b) || a.order - b.order);
+}
+
+function renderActionNext(item: ActionQueueItem): string {
+  const urgentClass = item.lane === "urgent" || item.lane === "today" ? " is-urgent" : "";
+  return `<article class="action-next${urgentClass}"><div class="action-next-top"><span class="action-type">${actionTypeLabel(item)}</span><span></span><span class="action-due">${esc(actionDueText(item))}</span></div><div class="action-next-title">${esc(item.title)}</div><div class="action-next-meta">${joinMeta([item.courseTitle, item.weekLabel, actionReason(item)])}</div></article>`;
+}
+
+function renderActionLane(title: string, items: ActionQueueItem[]): string {
+  if (!items.length) return "";
+  let html = `<section class="section action-lane"><div class="section-title"><h2>${title}<span class="count">${items.length}</span></h2></div><div class="action-list">`;
+  for (const item of items.slice(0, 6)) {
+    html += renderActionRow(item);
+  }
+  html += `</div></section>`;
+  return html;
+}
+
+function renderActionRow(item: ActionQueueItem): string {
+  const rowClass = item.lane === "notice" ? " is-notice" : item.lane === "today" ? " is-today" : item.lane === "urgent" ? " is-urgent" : "";
+  return `<article class="action-row${rowClass}"><span class="action-type">${actionTypeLabel(item)}</span><div><div class="action-row-title">${esc(item.title)}</div><div class="action-row-meta">${joinMeta([item.courseTitle, item.weekLabel])}</div></div><span class="action-due">${esc(actionDueText(item))}</span></article>`;
+}
+
+function actionLane(item: AssignmentItem | OnlineActionItem): ActionQueueItem["lane"] {
+  if (isActionExpired(item)) return "urgent";
+  if (isActionToday(item)) return "today";
+  return "soon";
+}
+
+function isActionExpired(item: AssignmentItem | OnlineActionItem): boolean {
+  if (item.isExpired === true) return true;
+  return textIncludesAny([item.statusText, item.dueLabel], ["만료", "기한 지남", "overdue", "expired"]);
+}
+
+function isActionToday(item: AssignmentItem | OnlineActionItem): boolean {
+  return item.priority === "high" || textIncludesAny([item.dueLabel, item.statusText], ["오늘", "today"]);
+}
+
+function actionLaneRank(item: ActionQueueItem): number {
+  return { urgent: 0, today: 1, soon: 2, notice: 3 }[item.lane];
+}
+
+function actionPriorityRank(item: ActionQueueItem): number {
+  return item.priority === "high" ? 0 : 1;
+}
+
+function actionDueRank(item: ActionQueueItem): number {
+  if (item.source === "notice") return 9999 + item.order;
+
+  if (item.dueAt) {
+    const parsed = new Date(item.dueAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      return (parsed.getMonth() + 1) * 100 + parsed.getDate();
+    }
+  }
+
+  const label = (item.dueLabel || item.statusText || "").toLowerCase();
+  if (label.includes("오늘") || label.includes("today")) return 0;
+  if (label.includes("내일") || label.includes("tomorrow")) return 1;
+
+  const koreanDate = label.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (koreanDate) return Number(koreanDate[1]) * 100 + Number(koreanDate[2]);
+
+  const englishMayDate = label.match(/may\s+(\d{1,2})/);
+  if (englishMayDate) return 500 + Number(englishMayDate[1]);
+
+  const dDay = label.match(/d-(\d{1,2})/);
+  if (dDay) return Number(dDay[1]);
+
+  return 9999 + item.order;
+}
+
+function actionTypeLabel(item: ActionQueueItem): string {
+  if (item.source === "online") return "영상";
+  if (item.source === "notice") return "공지";
+  return "과제";
+}
+
+function actionDueText(item: ActionQueueItem): string {
+  if (item.source === "notice") return item.postedAt || "확인";
+  return item.dueLabel || item.dueAt || item.statusText || (item.source === "online" ? "기한 확인" : "");
+}
+
+function actionReason(item: ActionQueueItem): string {
+  if (item.lane === "urgent") return "기한 경과";
+  if (item.lane === "today") return "오늘 마감";
+  if (item.source === "online") return "영상 마감";
+  return "";
+}
+
+function textIncludesAny(values: Array<string | undefined>, needles: string[]): boolean {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+  return needles.some((needle) => text.includes(needle.toLowerCase()));
 }
 
 // ── 과제 리스트 ───────────────────────────────────────
@@ -929,25 +2661,193 @@ function isAssignmentExpired(a: AssignmentItem): boolean {
   return false;
 }
 
-function renderAssignmentList(data: unknown): string {
-  const items: AssignmentItem[] = Array.isArray(data)
+function assignmentItems(data: unknown): AssignmentItem[] {
+  return Array.isArray(data)
     ? (data as AssignmentItem[])
     : ((data as { assignments?: AssignmentItem[]; items?: AssignmentItem[] }).assignments
       || (data as { items?: AssignmentItem[] }).items
       || []);
+}
+
+function renderUnsubmittedAssignments(data: unknown): string {
+  const items = assignmentItems(data);
   if (!items.length) return "";
 
-  let html = `<section class="section"><div class="section-title"><h2>과제<span class="count">${items.length}</span></h2></div>`;
-  for (const a of items) {
-    const expired = isAssignmentExpired(a);
-    const valCls = expired ? "red" : a.priority === "high" ? "red" : "";
-    const val = a.dueLabel || a.dueAt || (expired ? "만료" : a.statusText || "");
-    html += `<div class="row"><div class="row-icon">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${joinMeta([a.courseTitle, a.weekLabel])}</div></div><div class="row-value ${valCls}">${esc(val)}</div></div>`;
+  const sortedItems = items
+    .map((item, order) => ({ item, order }))
+    .sort((a, b) => assignmentBucketRank(a.item) - assignmentBucketRank(b.item)
+      || assignmentPriorityRank(a.item) - assignmentPriorityRank(b.item)
+      || assignmentDueRank(a.item, a.order) - assignmentDueRank(b.item, b.order)
+      || a.order - b.order)
+    .map((entry) => entry.item);
+  const groups = groupAssignmentsByDeadline(sortedItems);
+  const nextAssignment = sortedItems[0];
+  const todayCount = groups.find((group) => group.key === "today")?.items.length ?? 0;
+  const expiredCount = groups.find((group) => group.key === "expired")?.items.length ?? 0;
+  const urgentStatValue = expiredCount > 0 ? `기한 지남 ${expiredCount}개` : `오늘 마감 ${todayCount}개`;
+  const nextDue = nextAssignment ? assignmentDueText(nextAssignment) || "기한 확인" : "기한 확인";
+
+  let html = `<section class="unsubmitted-summary unsubmitted-band"><div class="unsubmitted-band-top"><div><div class="unsubmitted-band-kicker">미제출 브리핑</div><div class="unsubmitted-band-main">미제출 ${items.length}개</div></div><div class="unsubmitted-band-urgent">${urgentStatValue}</div></div><div class="unsubmitted-band-bottom"><div class="unsubmitted-band-note">가까운 마감일부터 정리했어요</div><div class="unsubmitted-band-due">가장 임박 ${esc(nextDue)}</div></div></section>`;
+
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    html += `<section class="section unsubmitted-lane"><div class="section-title"><h2>${group.title}<span class="count">${group.items.length}</span></h2></div>`;
+    for (const item of group.items) {
+      html += renderAssignmentRow(item);
+    }
+    html += `</section>`;
   }
-  return html + `</section>`;
+
+  return html;
+}
+
+function groupAssignmentsByDeadline(items: AssignmentItem[]): AssignmentDeadlineGroup[] {
+  const groups: AssignmentDeadlineGroup[] = [
+    { key: "expired", title: "기한 지남", items: [] },
+    { key: "today", title: "오늘", items: [] },
+    { key: "tomorrow", title: "내일", items: [] },
+    { key: "week", title: "이번 주", items: [] },
+    { key: "later", title: "이후", items: [] },
+    { key: "unknown", title: "기한 확인", items: [] },
+  ];
+  const byKey = new Map(groups.map((group) => [group.key, group]));
+
+  for (const item of items) {
+    byKey.get(assignmentBucket(item))!.items.push(item);
+  }
+
+  return groups;
+}
+
+function renderAssignmentRow(a: AssignmentItem): string {
+  const expired = isAssignmentExpired(a);
+  const valCls = expired ? "red" : a.priority === "high" || assignmentBucket(a) === "today" ? "red" : "";
+  const iconCls = expired || a.priority === "high" ? " red" : "";
+  const val = assignmentDueText(a);
+  const urgentClass = valCls === "red" ? " is-urgent" : "";
+  return `<article class="row assignment-row${urgentClass}"><div class="row-icon${iconCls}">${codeChip(a.courseTitle || "")}</div><div class="row-main"><div class="row-title">${esc(a.title || "")}</div><div class="row-sub">${joinMeta([a.courseTitle, a.weekLabel])}</div></div><div class="row-value ${valCls}">${esc(val)}</div></article>`;
+}
+
+function assignmentBucketRank(item: AssignmentItem): number {
+  return { expired: 0, today: 1, tomorrow: 2, week: 3, later: 4, unknown: 5 }[assignmentBucket(item)];
+}
+
+function assignmentBucket(item: AssignmentItem): AssignmentDeadlineGroup["key"] {
+  if (isAssignmentExpired(item) || textIncludesAny([item.statusText, item.dueLabel], ["기한 지남", "만료", "overdue", "expired"])) return "expired";
+  if (textIncludesAny([item.dueLabel, item.statusText], ["오늘", "today"])) return "today";
+  if (textIncludesAny([item.dueLabel, item.statusText], ["내일", "tomorrow"])) return "tomorrow";
+
+  const offset = assignmentDueDayOffset(item);
+  if (offset === 0) return "today";
+  if (offset === 1) return "tomorrow";
+  if (offset !== null && offset > 1 && offset <= 6) return "week";
+  if (offset !== null && offset > 6) return "later";
+  if (item.dueLabel || item.dueAt) return "week";
+  return "unknown";
+}
+
+function assignmentDueDayOffset(item: AssignmentItem): number | null {
+  if (!item.dueAt) return null;
+  const due = new Date(item.dueAt);
+  if (Number.isNaN(due.getTime())) return null;
+  return dayNumberInKorea(due) - dayNumberInKorea(new Date());
+}
+
+function dayNumberInKorea(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? "1");
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+function assignmentPriorityRank(item: AssignmentItem): number {
+  return item.priority === "high" ? 0 : 1;
+}
+
+function assignmentDueRank(item: AssignmentItem, order: number): number {
+  if (item.dueAt) {
+    const parsed = new Date(item.dueAt);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+
+  const label = (item.dueLabel || item.statusText || "").toLowerCase();
+  if (label.includes("오늘") || label.includes("today")) return order;
+  if (label.includes("내일") || label.includes("tomorrow")) return 86400000 + order;
+
+  const koreanDate = label.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (koreanDate) return Number(koreanDate[1]) * 100000000 + Number(koreanDate[2]) * 1000000 + order;
+
+  const englishMayDate = label.match(/may\s+(\d{1,2})/);
+  if (englishMayDate) return 5 * 100000000 + Number(englishMayDate[1]) * 1000000 + order;
+
+  const dDay = label.match(/d-(\d{1,2})/);
+  if (dDay) return Number(dDay[1]) * 86400000 + order;
+
+  return Number.MAX_SAFE_INTEGER - 1000 + order;
+}
+
+function assignmentDueText(item: AssignmentItem): string {
+  return item.dueLabel || item.dueAt || (isAssignmentExpired(item) ? "만료" : item.statusText || "");
 }
 
 // ── 공지 리스트 (LMS) ──────────────────────────────────
+
+function renderUnreadNoticeList(data: unknown): string {
+  const items: NoticeItem[] = Array.isArray(data)
+    ? (data as NoticeItem[])
+    : ((data as { notices?: NoticeItem[]; items?: NoticeItem[] }).notices
+      || (data as { items?: NoticeItem[] }).items
+      || []);
+  if (!items.length) return "";
+
+  const todayCount = items.filter(isTodayNotice).length;
+  const recent = items.filter(isRecentNotice);
+  const past = items.filter((item) => !isRecentNotice(item));
+  const meta = todayCount > 0
+    ? `오늘 ${todayCount} · 이전 ${items.length - todayCount}`
+    : `최근 ${recent.length} · 지난 ${past.length}`;
+
+  let html = `<section class="unread-notice-overview"><div class="unread-overview-line"><div class="unread-overview-count">안 읽은 공지 <strong>${items.length}건</strong></div><div class="unread-overview-meta">${esc(meta)}</div></div><div class="unread-overview-note">과목과 날짜를 먼저 확인하고 필요한 공지만 바로 열어보세요.</div></section>`;
+  if (recent.length) html += renderUnreadNoticeSection("최근 공지", recent);
+  if (past.length) html += renderUnreadNoticeSection("지난 공지", past);
+  return html;
+}
+
+function renderUnreadNoticeSection(title: string, items: NoticeItem[]): string {
+  let html = `<section class="section unread-notice-section"><div class="section-title"><h2>${esc(title)}<span class="count">${items.length}</span></h2></div><div class="unread-notice-list">`;
+  for (const notice of items) {
+    html += renderUnreadNoticeRow(notice);
+  }
+  return html + `</div></section>`;
+}
+
+function renderUnreadNoticeRow(notice: NoticeItem): string {
+  const course = notice.courseTitle?.trim() || "LMS 공지";
+  const title = notice.title?.trim() || "제목 없음";
+  const posted = notice.postedAt?.trim() || "확인";
+  const unreadDot = notice.isUnread === false ? "" : `<span class="unread-dot" aria-hidden="true"></span>`;
+  const preview = notice.previewText?.trim()
+    ? `<div class="unread-notice-preview">${esc(notice.previewText.trim().slice(0, 220))}</div>`
+    : "";
+
+  return `<article class="unread-notice-row"><div class="unread-notice-head"><span class="notice-course-pill">${esc(course)}</span><span class="notice-posted">${esc(posted)}</span></div><div class="unread-notice-title">${unreadDot}<span>${esc(title)}</span></div>${preview}</article>`;
+}
+
+function isRecentNotice(notice: NoticeItem): boolean {
+  const label = notice.postedAt?.trim().toLowerCase() || "";
+  return isTodayNotice(notice) || label.includes("어제") || label.includes("yesterday");
+}
+
+function isTodayNotice(notice: NoticeItem): boolean {
+  const label = notice.postedAt?.trim().toLowerCase() || "";
+  return label.includes("오늘") || label.includes("today");
+}
 
 function renderNoticeList(data: unknown): string {
   const items: NoticeItem[] = Array.isArray(data)
@@ -980,14 +2880,14 @@ function renderNewsList(data: unknown): string {
   const d = data as { items?: Array<{ title: string; url: string; source: string; postedAt?: string; author?: string; publishedAt?: string; sourceName?: string }> };
   if (!d.items?.length) return "";
 
-  let html = `<section class="section"><div class="section-title"><h2>학교 공지<span class="count">${d.items.length}</span></h2></div>`;
+  let html = `<section class="section news-list-section"><div class="section-title"><h2>공지<span class="count">${d.items.length}</span></h2></div>`;
   for (const n of d.items) {
     const label = n.sourceName || NEWS_SOURCE_LABEL[n.source] || n.source;
     const dateRaw = n.publishedAt || n.postedAt;
     const dateLabel = dateRaw
       ? new Date(dateRaw).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" })
       : "";
-    html += `<div class="row"><div class="row-icon accent">${codeChip(label || "")}</div><div class="row-main"><div class="row-title"><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></div><div class="row-sub">${joinMeta([label, n.author])}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">${esc(dateLabel)}</div></div>`;
+    html += `<div class="row news-row"><div class="row-icon accent">${codeChip(label || "")}</div><div class="row-main"><div class="row-title"><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></div><div class="row-sub">${joinMeta([label, n.author])}</div></div><div class="row-value" style="color:var(--ink-3);font-weight:500">${esc(dateLabel)}</div></div>`;
   }
   return html + `</section>`;
 }
@@ -1000,62 +2900,71 @@ type NoticeDetailImage = {
   imageUrl?: string; altText?: string | null;
   ocr?: { status?: string; text?: string | null; confidence?: number | null; language?: string | null; error?: string | null } | null;
 };
+type NoticeDetailData = {
+  title?: string; source?: string; sourceName?: string; categoryLabel?: string | null;
+  author?: string | null; url?: string; publishedAt?: string;
+  bodyText?: string | null; attachments?: NoticeDetailAttachment[]; images?: NoticeDetailImage[];
+};
 
 function renderNewsDetail(data: unknown): string {
-  const d = data as {
-    title?: string; source?: string; sourceName?: string; categoryLabel?: string | null;
-    author?: string | null; url?: string; publishedAt?: string;
-    bodyText?: string | null; attachments?: NoticeDetailAttachment[]; images?: NoticeDetailImage[];
-  };
+  const d = data as NoticeDetailData;
 
   let html = "";
-  const source = d.sourceName || (d.source && NEWS_SOURCE_LABEL[d.source]) || d.source || "";
-  const dateLabel = d.publishedAt
-    ? new Date(d.publishedAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric" })
-    : "";
-  const meta = joinMeta([source, dateLabel, d.author, d.categoryLabel]);
 
-  html += `<section class="section"><div class="section-title"><h2>공지 정보</h2></div>`;
-  if (meta) html += `<div class="section-sub">${meta}</div>`;
-  if (d.url) html += `<div class="row" style="grid-template-columns:1fr"><div class="row-title"><a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--accent)">원문 페이지 열기 ↗</a></div></div>`;
-  html += `</section>`;
+  if (d.url) {
+    html += `<section class="notice-detail-source"><a class="notice-source-link" href="${esc(d.url)}" target="_blank" rel="noopener">원문 페이지 열기 ↗</a></section>`;
+  }
 
   if (d.bodyText && d.bodyText.trim()) {
-    html += `<section class="section"><div class="section-title"><h2>본문</h2></div><div class="briefing-body">${esc(d.bodyText).replace(/\n/g, "<br>")}</div></section>`;
+    html += `<section class="section notice-body-section"><div class="section-title"><h2>본문</h2></div><article class="notice-body">${esc(d.bodyText).replace(/\n/g, "<br>")}</article></section>`;
   }
 
   if (d.attachments && d.attachments.length > 0) {
-    html += `<section class="section"><div class="section-title"><h2>첨부<span class="count">${d.attachments.length}</span></h2></div>`;
+    html += `<section class="section notice-attachments-section"><div class="section-title"><h2>첨부파일<span class="count">${d.attachments.length}개</span></h2></div>`;
     for (const a of d.attachments) {
       const size = a.sizeBytes != null ? formatBytes(a.sizeBytes) : null;
-      const metaLine = joinMeta([a.contentType, size]);
+      const kind = attachmentKind(a);
+      const metaLine = joinMeta([kind, size]);
       const name = a.fileName || "파일";
-      html += `<div class="row"><div class="row-icon">📎</div><div class="row-main"><div class="row-title">${a.downloadUrl ? `<a href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">${esc(name)}</a>` : esc(name)}</div>${metaLine ? `<div class="row-sub">${metaLine}</div>` : ""}</div><div class="row-value" style="color:var(--ink-3);font-weight:500">↓</div>`;
+      const title = a.downloadUrl ? `<a href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">${esc(name)}</a>` : esc(name);
+      const action = a.downloadUrl
+        ? `<a class="notice-download" href="${esc(a.downloadUrl)}" target="_blank" rel="noopener">다운로드</a>`
+        : `<span class="notice-download muted">파일</span>`;
+      html += `<div class="row notice-attachment-row"><div class="row-icon accent">${esc(kind || "파일")}</div><div class="row-main"><div class="row-title">${title}</div>${metaLine ? `<div class="row-sub">${metaLine}</div>` : ""}</div><div class="row-value">${action}</div>`;
       const ex = a.extraction;
       if (ex?.status === "succeeded" && ex.text) {
-        const preview = ex.text.length > 400 ? ex.text.slice(0, 400) + " …" : ex.text;
-        html += `<div class="row-preview">${esc(preview)}</div>`;
+        const preview = previewText(ex.text);
+        html += `<div class="row-preview notice-preview">${esc(preview)}</div>`;
       } else if (ex?.status && ex.status !== "pending") {
-        const label = { failed: "추출 실패", unsupported: "추출 미지원" }[ex.status] || ex.status;
-        html += `<div class="row-preview" style="color:var(--ink-3)">[${esc(label)}]</div>`;
+        html += `<div class="row-preview notice-preview muted">${esc(extractionStatusLabel(ex.status))}</div>`;
       }
       html += `</div>`;
     }
     html += `</section>`;
   }
 
-  const ocrImages = (d.images || []).filter((im) => im.ocr?.status === "succeeded" && im.ocr.text);
-  if (ocrImages.length > 0) {
-    html += `<section class="section"><div class="section-title"><h2>본문 이미지 텍스트<span class="count">${ocrImages.length}</span></h2></div>`;
-    for (const im of ocrImages) {
-      const text = im.ocr?.text ?? "";
-      const preview = text.length > 400 ? text.slice(0, 400) + " …" : text;
-      html += `<div class="row" style="grid-template-columns:1fr"><div class="row-preview" style="grid-column:unset;margin-left:0">${esc(preview)}</div></div>`;
-    }
-    html += `</section>`;
-  }
-
   return html || renderGeneric(data);
+}
+
+function attachmentKind(a: NoticeDetailAttachment): string {
+  const fileName = a.fileName || "";
+  const ext = fileName.includes(".") ? fileName.split(".").pop()?.trim() : "";
+  if (ext) return ext.toUpperCase().slice(0, 5);
+
+  const contentType = a.contentType || "";
+  if (contentType.includes("pdf")) return "PDF";
+  if (contentType.includes("hwp")) return "HWP";
+  if (contentType.includes("image")) return "IMG";
+  return "";
+}
+
+function previewText(text: string): string {
+  const normalized = text.trim();
+  return normalized.length > 400 ? `${normalized.slice(0, 400)} …` : normalized;
+}
+
+function extractionStatusLabel(status: string): string {
+  return { failed: "미리보기 추출 실패", unsupported: "미리보기 미지원" }[status] || status;
 }
 
 function formatBytes(n: number): string {
@@ -1130,6 +3039,180 @@ function renderCafeteriaMenus(data: unknown): string {
 
 // ── 출석 ──────────────────────────────────────────────
 
+type CafeteriaSource = {
+  key: string;
+  label: string;
+  aliases: string[];
+};
+
+const CAFETERIA_SOURCES: CafeteriaSource[] = [
+  { key: "student-hall", label: "학생회관", aliases: ["student", "student-cafeteria", "학생회관"] },
+  { key: "myeongjindang", label: "명진당", aliases: ["myeongjin", "myeongjindang", "명진당"] },
+  { key: "faculty", label: "교직원", aliases: ["faculty", "faculty-cafeteria", "교직원"] },
+  { key: "welfare", label: "복지동", aliases: ["welfare", "welfare-building", "복지동"] },
+];
+
+function renderCafeteriaTable(data: unknown): string {
+  const d = data as { items?: CafeteriaEntry[] };
+  if (!d.items?.length) return "";
+
+  type CafeteriaMealGroup = {
+    date: string;
+    mealType: string;
+    entries: CafeteriaEntry[];
+  };
+
+  const groups = new Map<string, CafeteriaMealGroup>();
+  for (const entry of d.items) {
+    const date = entry.serviceDate || "";
+    const mealType = entry.mealType || "";
+    const key = `${date}::${mealType}`;
+    if (!groups.has(key)) {
+      groups.set(key, { date, mealType, entries: [] });
+    }
+    groups.get(key)!.entries.push(entry);
+  }
+
+  const mealOrder = ["breakfast", "lunch", "dinner"];
+  const dates = Array.from(new Set(d.items.map((entry) => entry.serviceDate || "")));
+  for (const date of dates) {
+    for (const mealType of mealOrder) {
+      const key = `${date}::${mealType}`;
+      if (!groups.has(key)) {
+        groups.set(key, { date, mealType, entries: [] });
+      }
+    }
+  }
+
+  const sortedGroups = Array.from(groups.values()).sort((a, b) => {
+    const dateOrder = a.date.localeCompare(b.date);
+    if (dateOrder !== 0) return dateOrder;
+    return mealOrder.indexOf(a.mealType) - mealOrder.indexOf(b.mealType);
+  });
+
+  let html = "";
+  for (const group of sortedGroups) {
+    const bySource = new Map<string, CafeteriaEntry[]>();
+    const sourceLabels = new Map<string, string>();
+
+    for (const entry of group.entries) {
+      const source = cafeteriaSourceFor(entry);
+      if (!bySource.has(source.key)) bySource.set(source.key, []);
+      bySource.get(source.key)!.push(entry);
+      sourceLabels.set(source.key, source.label);
+    }
+
+    const knownKeys = new Set(CAFETERIA_SOURCES.map((source) => source.key));
+    const extraKeys = Array.from(bySource.keys()).filter((key) => !knownKeys.has(key));
+    const orderedSources = [
+      ...CAFETERIA_SOURCES.map((source) => ({ key: source.key, label: source.label })),
+      ...extraKeys.map((key) => ({ key, label: sourceLabels.get(key) || key })),
+    ];
+
+    html += `<section class="section cafeteria-section"><div class="section-title"><h2>${esc(cafeteriaGroupTitle(group.date, group.mealType))}</h2></div><div class="cafeteria-table">`;
+
+    for (const source of orderedSources) {
+      const entries = bySource.get(source.key) || [];
+      const row = cafeteriaRowFor(source.key, group.mealType, entries);
+      html += `<article class="cafeteria-table-row ${row.className}"><div class="cafeteria-place">${esc(source.label)}</div><div class="cafeteria-menu"><div class="cafeteria-menu-text">${esc(row.menuText)}</div>${row.note ? `<div class="cafeteria-menu-note">${esc(row.note)}</div>` : ""}</div><div class="cafeteria-price">${esc(row.priceText)}</div></article>`;
+    }
+
+    html += `</div></section>`;
+  }
+
+  return html;
+}
+
+function cafeteriaSourceFor(entry: CafeteriaEntry): { key: string; label: string } {
+  const sourceId = normalizeCafeteriaText(entry.sourceId || "");
+  const sourceName = normalizeCafeteriaText(entry.sourceName || "");
+  const haystack = `${sourceId} ${sourceName}`;
+
+  for (const source of CAFETERIA_SOURCES) {
+    if (source.aliases.some((alias) => haystack.includes(normalizeCafeteriaText(alias)))) {
+      return { key: source.key, label: source.label };
+    }
+  }
+
+  const fallback = entry.sourceName || entry.sourceId || "기타";
+  return { key: `extra:${fallback}`, label: fallback };
+}
+
+function normalizeCafeteriaText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, "").replace(/식당/g, "");
+}
+
+function cafeteriaGroupTitle(date: string, mealType: string): string {
+  const parts: string[] = [];
+  if (date) parts.push(formatCafeteriaDate(date));
+  if (mealType) parts.push(MEAL_LABEL[mealType] || mealType);
+  return parts.length ? `${parts.join(" ")} 식단표` : "식단표";
+}
+
+function formatCafeteriaDate(date: string): string {
+  const parsed = new Date(`${date}T00:00:00+09:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
+}
+
+function cafeteriaRowFor(sourceKey: string, mealType: string, entries: CafeteriaEntry[]): {
+  className: string;
+  menuText: string;
+  note: string;
+  priceText: string;
+} {
+  if (!entries.length) {
+    return { className: "is-empty", menuText: "메뉴 없음", note: "해당 식당의 식단 정보가 없습니다.", priceText: "" };
+  }
+
+  if (entries.every((entry) => entry.isClosed)) {
+    return { className: "is-closed", menuText: "휴무", note: "", priceText: "휴무" };
+  }
+
+  const openEntries = entries.filter((entry) => !entry.isClosed);
+  const menuLines = openEntries
+    .map((entry) => cafeteriaMenuItems(entry).join(" · "))
+    .filter(Boolean);
+
+  return {
+    className: "",
+    menuText: menuLines.length ? menuLines.join(" / ") : "메뉴 없음",
+    note: menuLines.length ? "" : "등록된 메뉴명이 없습니다.",
+    priceText: cafeteriaFixedPriceFor(sourceKey, mealType),
+  };
+}
+
+function cafeteriaFixedPriceFor(sourceKey: string, mealType: string): string {
+  if (sourceKey === "student-hall" && mealType === "breakfast") return "5,000원";
+  return sourceKey === "student-hall" ? "6,000원" : "6,500원";
+}
+
+function cafeteriaMenuItems(entry: CafeteriaEntry): string[] {
+  if (Array.isArray(entry.menuItems)) {
+    return entry.menuItems.map(cafeteriaMenuItemText).filter(Boolean);
+  }
+
+  if (entry.menuText) {
+    return entry.menuText.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
+function cafeteriaMenuItemText(item: unknown): string {
+  if (typeof item === "string") return item.trim();
+  if (!item || typeof item !== "object" || Array.isArray(item)) return "";
+
+  const record = item as Record<string, unknown>;
+  const name = record.name ?? record.title ?? record.menuName ?? record.text;
+  return typeof name === "string" ? name.trim() : "";
+}
+
 function renderAttendanceText(data: unknown): string {
   if (typeof data === "string") {
     return `<section class="section"><div class="section-title"><h2>출석</h2></div><div class="briefing-body">${esc(data)}</div></section>`;
@@ -1147,10 +3230,23 @@ function renderAttendanceText(data: unknown): string {
 
   let html = "";
 
-  // Hero rate
-  if (d.summary && d.completedSessions) {
-    const rate = Math.round(((d.summary.attendedCount ?? 0) / d.completedSessions) * 100);
-    html += `<section class="section"><div class="metric-hero"><div class="metric-label">출석률</div><div class="metric-value">${rate}<span class="unit">%</span></div><div class="metric-trend"><span class="up">출석 ${d.summary.attendedCount ?? 0}</span> · 지각 ${d.summary.tardyCount ?? 0} · 결석 ${d.summary.absentCount ?? 0}</div></div></section>`;
+  // Absence-first briefing
+  if (d.summary) {
+    const attended = d.summary.attendedCount ?? 0;
+    const tardy = d.summary.tardyCount ?? 0;
+    const earlyLeave = d.summary.earlyLeaveCount ?? 0;
+    const absent = d.summary.absentCount ?? 0;
+    const completed = d.completedSessions ?? d.sessions?.filter((s) => s.isPast).length ?? 0;
+    const courseTitle = d.course?.courseTitle ? `${esc(d.course.courseTitle)} 출결` : "출결 요약";
+    const support = [`출석 ${attended}회`, completed ? `진행된 수업 ${completed}회` : "", earlyLeave ? `조퇴 ${earlyLeave}회` : ""].filter(Boolean).join(" · ");
+    html += `<section class="section attendance-summary"><div class="attendance-briefing">`;
+    html += `<div class="attendance-course">${courseTitle}</div>`;
+    html += `<div class="attendance-counts">`;
+    html += `<div class="attendance-count danger"><span>결석</span><strong>${absent}<span class="unit">회</span></strong></div>`;
+    html += `<div class="attendance-count warn"><span>지각</span><strong>${tardy}<span class="unit">회</span></strong></div>`;
+    html += `</div>`;
+    if (support) html += `<div class="attendance-support">${support}</div>`;
+    html += `</div></section>`;
   }
 
   // Dot grid
@@ -1219,10 +3315,9 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
   const countLine = (label: string, items: unknown[]): string => items.length ? `- **${label}**: ${items.length}건` : "";
 
   switch (dataType) {
-    case "unsubmitted":
-    case "due-assignments": {
+    case "unsubmitted": {
       const items = pickItems("assignments", "items");
-      if (!items.length) return "_미제출·마감 임박 과제가 없습니다._";
+      if (!items.length) return "_미제출 과제가 없습니다._";
       const expired = (items as AssignmentItem[]).filter(isAssignmentExpired).length;
       const pending = items.length - expired;
       return [`총 **${items.length}건**의 과제가 있어요.`,
@@ -1248,11 +3343,6 @@ function generateFallbackSummary(dataType: string, rawData: unknown): string {
       const entries = pickItems("entries");
       if (!entries.length) return "_등록된 시간표가 없습니다._";
       return `이번 학기 **${entries.length}개 수업**이 등록되어 있어요.`;
-    }
-    case "courses": {
-      const items = pickItems("courses", "items");
-      if (!items.length) return "_수강 과목이 없습니다._";
-      return `총 **${items.length}개 과목**을 수강 중입니다.`;
     }
     case "grades": {
       const items = pickItems("items", "grades");

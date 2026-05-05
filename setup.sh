@@ -17,6 +17,9 @@
 set -e
 cd "$(dirname "$0")"
 
+MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-msi-course-scores}"
+MJU_NEWS_BRANCH="${MJU_NEWS_BRANCH:-}"
+
 echo "┌─────────────────────────────────────────────┐"
 echo "│  MJUClaw Agent — 자동 셋업                  │"
 echo "└─────────────────────────────────────────────┘"
@@ -43,32 +46,51 @@ echo "[2/4] 도구 레포 준비..."
 clone_or_pull() {
   local DIR="$1"
   local REPO="$2"
+  local BRANCH="${3:-}"
   if [ -d "$DIR/.git" ]; then
-    echo "  → $DIR 이미 있음, pull 중..."
-    (cd "$DIR" && git pull --ff-only) || echo "  ⚠ $DIR pull 실패 (수동 해결 필요)"
+    if [ -n "$BRANCH" ]; then
+      echo "  → $DIR 이미 있음, origin/$BRANCH 동기화 중..."
+      (
+        cd "$DIR"
+        git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+        if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+          git checkout "$BRANCH"
+        else
+          git checkout -b "$BRANCH" "origin/$BRANCH"
+        fi
+        git pull --ff-only origin "$BRANCH"
+      )
+    else
+      echo "  → $DIR 이미 있음, pull 중..."
+      (cd "$DIR" && git pull --ff-only)
+    fi
   else
-    echo "  → $DIR clone 중..."
-    git clone "$REPO" "$DIR"
+    if [ -n "$BRANCH" ]; then
+      echo "  → $DIR clone 중... ($BRANCH)"
+      git clone --branch "$BRANCH" "$REPO" "$DIR"
+    else
+      echo "  → $DIR clone 중..."
+      git clone "$REPO" "$DIR"
+    fi
   fi
 }
 
-clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git
+clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git "$MJU_CLI_BRANCH"
 # mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
-# dev 브랜치에 변경이 진행 중이면 아래 한 줄을 `git checkout dev`로 교체.
-clone_or_pull mju-news https://github.com/university-claw/mju-news.git
+clone_or_pull mju-news https://github.com/university-claw/mju-news.git "$MJU_NEWS_BRANCH"
 # mjuclaw-router : Discord WS 입구 + 온보딩 게이트 + cron alert 우회 HTTP 서버.
 # OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
-clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git
+clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git "$MJUCLAW_ROUTER_BRANCH"
 # mju-public-data-worker : 공지/학식 정본 생성 worker (Postgres + tesseract.js OCR).
 # private 레포 — 다른 호스트에서 setup.sh 실행 시 GitHub 인증(gh auth login 또는 SSH)
 # 필요. compose에 worker service로 통합되어 호스트 launchd 의존이 제거된다.
-clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git
+clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git "$MJU_PUBLIC_DATA_WORKER_BRANCH"
 
 # intent-classifier : KcELECTRA-base 15-class 한국어 의도 분류 모델 + serving.
 # 모델 가중치(420MB)는 git이 아니라 HuggingFace Hub(kbsooo/mjuclaw-intent-classifier)에서
 # Dockerfile이 빌드 시 huggingface_hub.snapshot_download 로 자동 download. 따라서
 # 다른 sub-repo와 동일한 clone_or_pull 패턴으로 충분하다 (호스트에 model/ 없어도 빌드 가능).
-clone_or_pull intent-classifier https://github.com/university-claw/intent-classifier.git
+clone_or_pull intent-classifier https://github.com/university-claw/intent-classifier.git "$INTENT_CLASSIFIER_BRANCH"
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""

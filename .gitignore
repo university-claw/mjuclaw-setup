@@ -7,3 +7,5 @@ mju-news/
 mjuclaw-router/
 intent-classifier/
 mju-public-data-worker/
+.tmp/
+output/

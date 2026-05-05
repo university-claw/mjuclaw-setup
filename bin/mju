@@ -5,10 +5,10 @@
 # dataType은 서브커맨드를 보고 자동 매핑:
 #   lms +action-items  → action-items
 #   lms +unsubmitted   → unsubmitted
-#   lms +due-assignments → due-assignments
 #   lms +unread-notices → unread-notices
 #   msi timetable      → timetable
-#   msi grades         → grades
+#   msi course-scores  → course-scores
+#   msi grade-history  → grade-history
 #   msi graduation     → graduation
 #   ucheck ...         → attendance
 #   그 외              → generic
@@ -17,7 +17,9 @@
 
 set -euo pipefail
 
-REAL_MJU="/opt/mju-cli/dist/main.js"
+REAL_MJU="${MJU_REAL_BIN:-/opt/mju-cli/dist/main.js}"
+NODE_BIN="${MJU_NODE_BIN:-node}"
+CURL_BIN="${MJU_CURL_BIN:-curl}"
 VIEW_API="${VIEW_API_URL:-http://localhost:3001/api/view}"
 
 has_app_dir() {
@@ -56,43 +58,26 @@ detect_datatype() {
   case "$args" in
     *"lms +action-items"*) echo "action-items" ;;
     *"lms +unsubmitted"*) echo "unsubmitted" ;;
-    *"lms +due-assignments"*) echo "due-assignments" ;;
     *"lms +unread-notices"*) echo "unread-notices" ;;
     *"lms +digest"*) echo "action-items" ;;
     *"msi timetable"*) echo "timetable" ;;
+    *"msi course-scores"*) echo "course-scores" ;;
     *"msi grade-history"*) echo "grade-history" ;;
-    *"msi current-grades"*) echo "grades" ;;
-    *"msi grades"*) echo "grades" ;;
     *"msi graduation"*) echo "graduation" ;;
-    *"lms courses list"*) echo "courses" ;;
     *"ucheck"*) echo "attendance" ;;
-    *"ucheck attendance"*) echo "attendance" ;;
     *) echo "" ;;
-  esac
-}
-
-# 조회성 커맨드 (읽기 only)만 web view 생성 — auth/config 등은 제외
-should_view() {
-  local args="$*"
-  case "$args" in
-    *" +"*) return 0 ;;
-    *"timetable"*|*"grade-history"*|*"grades"*|*"graduation"*|*"courses list"*|*"attendance"*) return 0 ;;
-    *"auth "*|*"config "*|*"doctor"*|*"skills"*) return 1 ;;
-    *) return 1 ;;
   esac
 }
 
 title_for_datatype() {
   case "$1" in
-    "action-items") echo "남은 일" ;;
+    "action-items") echo "우선 처리 항목" ;;
     "unsubmitted") echo "미제출 과제" ;;
-    "due-assignments") echo "마감 임박 과제" ;;
     "unread-notices") echo "안 읽은 공지" ;;
     "timetable") echo "시간표" ;;
-    "grades") echo "성적" ;;
+    "course-scores") echo "수강점수" ;;
     "grade-history") echo "학기별 성적" ;;
     "graduation") echo "졸업요건" ;;
-    "courses") echo "수강과목" ;;
     "attendance") echo "출석" ;;
     *) echo "학사 데이터" ;;
   esac
@@ -107,7 +92,7 @@ STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-stderr.XXXXXX")
 trap 'rm -f "$STDERR_FILE"' EXIT
 
 set +e
-STDOUT=$(node "$REAL_MJU" "$@" 2>"$STDERR_FILE")
+STDOUT=$("$NODE_BIN" "$REAL_MJU" "$@" 2>"$STDERR_FILE")
 EXIT=$?
 set -e
 
@@ -117,8 +102,14 @@ if [[ -n "$STDERR" ]]; then
   printf '%s\n' "$STDERR" >&2
 fi
 
-# exit 실패이거나 view 대상 아니면 그냥 pass-through
-if [[ $EXIT -ne 0 ]] || ! should_view "$@"; then
+# exit 실패이면 그냥 pass-through
+if [[ $EXIT -ne 0 ]]; then
+  printf '%s\n' "$STDOUT"
+  exit "$EXIT"
+fi
+
+DATA_TYPE=$(detect_datatype "$@")
+if [[ -z "$DATA_TYPE" ]]; then
   printf '%s\n' "$STDOUT"
   exit "$EXIT"
 fi
@@ -131,13 +122,6 @@ case "$*" in
     exit "$EXIT"
     ;;
 esac
-
-DATA_TYPE=$(detect_datatype "$@")
-if [[ -z "$DATA_TYPE" ]]; then
-  printf '%s\n' "$STDOUT"
-  exit "$EXIT"
-fi
-
 TITLE=$(title_for_datatype "$DATA_TYPE")
 
 REQUEST_BODY=$(RAW_STDOUT="$STDOUT" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" python3 - <<'PY'
@@ -161,7 +145,7 @@ PY
 )
 
 set +e
-VIEW_RESP=$(curl -s --max-time 3 -X POST "$VIEW_API" \
+VIEW_RESP=$("$CURL_BIN" -s --max-time 3 -X POST "$VIEW_API" \
   -H "Content-Type: application/json" \
   -d "$REQUEST_BODY" 2>/dev/null)
 CURL_EXIT=$?
