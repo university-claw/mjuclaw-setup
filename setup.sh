@@ -77,8 +77,20 @@ clone_or_pull() {
 
 clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git "$MJU_CLI_BRANCH"
 # mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
-# dev 브랜치에 변경이 진행 중이면 아래 한 줄을 `git checkout dev`로 교체.
 clone_or_pull mju-news https://github.com/university-claw/mju-news.git "$MJU_NEWS_BRANCH"
+# mjuclaw-router : Discord WS 입구 + 온보딩 게이트 + cron alert 우회 HTTP 서버.
+# OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
+clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git "$MJUCLAW_ROUTER_BRANCH"
+# mju-public-data-worker : 공지/학식 정본 생성 worker (Postgres + tesseract.js OCR).
+# private 레포 — 다른 호스트에서 setup.sh 실행 시 GitHub 인증(gh auth login 또는 SSH)
+# 필요. compose에 worker service로 통합되어 호스트 launchd 의존이 제거된다.
+clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git "$MJU_PUBLIC_DATA_WORKER_BRANCH"
+
+# intent-classifier : KcELECTRA-base 15-class 한국어 의도 분류 모델 + serving.
+# 모델 가중치(420MB)는 git이 아니라 HuggingFace Hub(kbsooo/mjuclaw-intent-classifier)에서
+# Dockerfile이 빌드 시 huggingface_hub.snapshot_download 로 자동 download. 따라서
+# 다른 sub-repo와 동일한 clone_or_pull 패턴으로 충분하다 (호스트에 model/ 없어도 빌드 가능).
+clone_or_pull intent-classifier https://github.com/university-claw/intent-classifier.git "$INTENT_CLASSIFIER_BRANCH"
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""
@@ -99,9 +111,9 @@ echo "  ✓ .env 존재"
 
 # 필수값 체크
 missing=()
-for key in DISCORD_BOT_TOKEN GEMINI_API_KEY PGPASSWORD STORAGE_LOCAL_ROOT; do
+for key in DISCORD_BOT_TOKEN GEMINI_API_KEY PGPASSWORD STORAGE_LOCAL_ROOT MJUCLAW_ROUTER_TOKEN; do
   val=$(grep "^$key=" .env | cut -d= -f2-)
-  if [ -z "$val" ] || [[ "$val" == your_* ]] || [[ "$val" == "change-me" ]] || [[ "$val" == /absolute/* ]]; then
+  if [ -z "$val" ] || [[ "$val" == your_* ]] || [[ "$val" == "change-me" ]] || [[ "$val" == /absolute/* ]] || [[ "$val" == replace-me-* ]]; then
     missing+=("$key")
   fi
 done
@@ -120,7 +132,8 @@ echo ""
 echo "┌─────────────────────────────────────────────┐"
 echo "│  ✅ 셋업 완료                                │"
 echo "│                                             │"
-echo "│  로그 확인:   docker logs -f mjuclaw-agent   │"
+echo "│  로그 확인:   docker logs -f mjuclaw-agent  │"
+echo "│              docker logs -f mjuclaw-router  │"
 echo "│  컨테이너 진입: docker exec -it mjuclaw-agent bash │"
 echo "│  정지:       docker compose down            │"
 echo "└─────────────────────────────────────────────┘"

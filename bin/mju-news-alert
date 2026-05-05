@@ -48,6 +48,65 @@ user_dir() { printf '/data/users/%s\n' "$1"; }
 subs_file() { printf '%s/news-subscription.json\n' "$(user_dir "$1")"; }
 job_name() { printf 'news-%s\n' "$1"; }
 
+# subscribe/preset/unsubscribe를 user 단위로 직렬화. 같은 사용자에 대해 두 호출이
+# 동시에 진입하면 둘 다 cron list에서 0개를 보고 둘 다 add → 같은 name cron 2개 등록.
+# 운영 중 실측됨 (news-415349075274104832 schedule "0 8 * * *" 가 2개 동시 존재).
+# 30초 대기 후 못 잡으면 abort — 누적 등록보다 명시적 실패가 낫다.
+acquire_user_lock() {
+  local lock_dir lock_file
+  lock_dir=$(user_dir "$1")
+  mkdir -p "$lock_dir"
+  lock_file="$lock_dir/.news-alert.lock"
+  exec 201>"$lock_file"
+  if ! flock -w 30 201; then
+    echo "ERR: news-alert lock 획득 실패 ($lock_file)" >&2
+    exit 1
+  fi
+}
+
+# cron add 후 같은 name cron이 1개 초과면 가장 최근 1개만 keep하고 모두 rm.
+# lock으로 막지 못한 매우 좁은 race나 과거 누적된 stale을 수렴 정리.
+verify_unique_cron() {
+  local job="$1"
+  local jobs_json=""
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if jobs_json=$(openclaw cron list --json 2>/dev/null) && [[ -n "$jobs_json" ]]; then
+      break
+    fi
+    jobs_json=""
+    sleep 1
+  done
+  if [[ -z "$jobs_json" ]]; then
+    echo "WARN verify_unique_cron: cron list 실패 — dedupe 검증 건너뜀" >&2
+    return 0
+  fi
+
+  JOB_NAME="$job" JOBS_JSON="$jobs_json" python3 - <<'PY'
+import json, os, subprocess, sys
+job = os.environ["JOB_NAME"]
+try:
+    data = json.loads(os.environ["JOBS_JSON"])
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except Exception as exc:
+    print(f"WARN verify_unique_cron: invalid JSON: {exc}", file=sys.stderr)
+    sys.exit(0)
+matches = [j for j in jobs if j.get("name") == job]
+if len(matches) <= 1:
+    sys.exit(0)
+matches.sort(key=lambda j: j.get("createdAt") or j.get("created_at") or "")
+keep = matches[-1]
+for j in matches:
+    if j is keep:
+        continue
+    subprocess.run(
+        ["openclaw", "cron", "rm", j.get("id") or j.get("name")],
+        check=False, capture_output=True, text=True,
+    )
+    print(f"verify_unique_cron: removed duplicate {job} id={j.get('id')}", file=sys.stderr)
+PY
+}
+
 write_subscription_file() {
   local discord_id="$1"
   local cron_expr="$2"
@@ -124,8 +183,49 @@ case "$CMD" in
     UDIR=$(user_dir "$DISCORD_ID")
     mkdir -p "$UDIR"
 
-    if ! openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1; then
+    acquire_user_lock "$DISCORD_ID"
+
+    # 같은 name으로 cron이 누적되는 문제(#duplicate-attendance-alerts)를 막기 위해
+    # add 전에 같은 name의 cron을 확실히 제거한다. cron list로 존재 여부를 보고 있을
+    # 때만 rm을 시도(없으면 정상). list/rm이 실패하면 add를 막아 누적을 방지한다.
+    JOB="$(job_name "$DISCORD_ID")"
+    JOBS_JSON=""
+    for attempt in 1 2 3 4 5; do
+      if JOBS_JSON=$(openclaw cron list --json 2>/dev/null) && [[ -n "$JOBS_JSON" ]]; then
+        break
+      fi
+      JOBS_JSON=""
+      sleep 1
+    done
+    if [[ -z "$JOBS_JSON" ]]; then
+      echo "ERR: openclaw cron list 실패. cron 누적 위험으로 subscribe 중단." >&2
+      exit 1
+    fi
+
+    if JOB_NAME="$JOB" JOBS_JSON="$JOBS_JSON" python3 - <<'PY'
+import json, os, subprocess, sys
+job = os.environ["JOB_NAME"]
+try:
+    data = json.loads(os.environ["JOBS_JSON"])
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except Exception as exc:
+    print(f"ERR news subscribe: invalid cron list JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
+targets = [j for j in jobs if j.get("name") == job]
+for t in targets:
+    result = subprocess.run(
+        ["openclaw", "cron", "rm", t.get("id") or t.get("name")],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"ERR news subscribe: failed to rm {t.get('id') or t.get('name')}: {(result.stderr or result.stdout).strip()}", file=sys.stderr)
+        sys.exit(1)
+PY
+    then
       :
+    else
+      echo "ERR: 기존 news cron 제거 실패. 누적 방지를 위해 subscribe 중단." >&2
+      exit 1
     fi
 
     printf -v deliver_cmd 'mju-news-alert deliver %q' "$DISCORD_ID"
@@ -150,6 +250,8 @@ case "$CMD" in
       exit 1
     fi
 
+    verify_unique_cron "$JOB"
+
     echo "OK: subscribed $DISCORD_ID to $CRON_EXPR"
     ;;
 
@@ -166,6 +268,7 @@ case "$CMD" in
 
     if [[ "$PRESET_ID" == "skip" ]]; then
       # skip 프리셋: 기존 구독만 제거하고 subscription 파일은 남기지 않는다.
+      acquire_user_lock "$DISCORD_ID"
       openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
       rm -f "$(subs_file "$DISCORD_ID")"
       echo "OK: preset skip applied for $DISCORD_ID (no subscription)"
@@ -178,7 +281,35 @@ case "$CMD" in
   unsubscribe)
     DISCORD_ID="${1-}"
     [[ -z "$DISCORD_ID" ]] && { usage; exit 1; }
-    openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
+    acquire_user_lock "$DISCORD_ID"
+    # 같은 name으로 누적된 cron이 있을 수 있으므로 list 기반 전수 제거.
+    JOB="$(job_name "$DISCORD_ID")"
+    JOBS_JSON=""
+    for attempt in 1 2 3 4 5; do
+      if JOBS_JSON=$(openclaw cron list --json 2>/dev/null) && [[ -n "$JOBS_JSON" ]]; then
+        break
+      fi
+      JOBS_JSON=""
+      sleep 1
+    done
+    if [[ -n "$JOBS_JSON" ]]; then
+      JOB_NAME="$JOB" JOBS_JSON="$JOBS_JSON" python3 - <<'PY' || true
+import json, os, subprocess, sys
+job = os.environ["JOB_NAME"]
+try:
+    data = json.loads(os.environ["JOBS_JSON"])
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except Exception:
+    sys.exit(0)
+for j in [x for x in jobs if x.get("name") == job]:
+    subprocess.run(
+        ["openclaw", "cron", "rm", j.get("id") or j.get("name")],
+        check=False, capture_output=True, text=True,
+    )
+PY
+    else
+      openclaw cron rm "$(job_name "$DISCORD_ID")" >/dev/null 2>&1 || true
+    fi
     rm -f "$(subs_file "$DISCORD_ID")"
     echo "OK: unsubscribed $DISCORD_ID"
     ;;
@@ -199,6 +330,39 @@ case "$CMD" in
     [[ -z "$DISCORD_ID" ]] && { usage; exit 1; }
     F=$(subs_file "$DISCORD_ID")
     [[ ! -f "$F" ]] && { echo "신규 공지 없음"; exit 0; }
+
+    # 같은 사용자에 대한 deliver 동시 실행 방지. cron이 어떤 이유(중복 등록, retry)로
+    # 짧은 시간 안에 두 번 발사되어도, 두 번째는 lock을 못 얻고 바로 exit 한다.
+    UDIR=$(user_dir "$DISCORD_ID")
+    mkdir -p "$UDIR"
+    LOCK_FILE="$UDIR/.news-deliver.lock"
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+      exit 0
+    fi
+
+    # lastSentAt 기반 쿨다운 — flock을 통과해도 5분 안에 이미 발송한 흔적이 있으면 skip.
+    # cron이 같은 시각에 N번 발사되더라도 첫 번째만 발송되도록 하는 안전망.
+    if FILE_PATH="$F" python3 - <<'PY'
+import json, os, sys
+from datetime import datetime, timezone
+try:
+    with open(os.environ["FILE_PATH"], encoding="utf-8") as f:
+        last = json.load(f).get("lastSentAt")
+except Exception:
+    sys.exit(1)
+if not last:
+    sys.exit(1)
+try:
+    dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+except Exception:
+    sys.exit(1)
+delta = (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
+sys.exit(0 if delta < 300 else 1)
+PY
+    then
+      exit 0
+    fi
 
     SINCE=$(FILE_PATH="$F" python3 - <<'PY'
 import json
@@ -327,10 +491,35 @@ PY
       exit 0
     fi
 
-    if ! openclaw message send --channel discord --target "user:$DISCORD_ID" --message "$CONTENT"; then
-      echo "ERR: failed to deliver news alert to $DISCORD_ID" >&2
+    # OpenClaw discord 채널은 비활성화되어 있고 봇 토큰은 mjuclaw-router가 단독
+    # 소유한다. 따라서 outbound DM은 router HTTP `POST /discord/send`로 위임한다.
+    ROUTER_URL="${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}"
+    ROUTER_TOKEN="${MJUCLAW_ROUTER_TOKEN-}"
+    if [[ -z "$ROUTER_TOKEN" ]]; then
+      echo "ERR: MJUCLAW_ROUTER_TOKEN env가 비어있어 router로 DM을 보낼 수 없습니다." >&2
       exit 1
     fi
+
+    SEND_BODY=$(DISCORD_ID="$DISCORD_ID" CONTENT="$CONTENT" python3 - <<'PY'
+import json, os
+print(json.dumps({"discordUserId": os.environ["DISCORD_ID"], "content": os.environ["CONTENT"]}))
+PY
+)
+
+    HTTP_OUT=$(mktemp "${TMPDIR:-/tmp}/router-send.XXXXXX")
+    HTTP_CODE=$(curl -sS -o "$HTTP_OUT" -w "%{http_code}" \
+      -X POST "$ROUTER_URL/discord/send" \
+      -H "Authorization: Bearer $ROUTER_TOKEN" \
+      -H "Content-Type: application/json" \
+      --max-time 30 \
+      --data-raw "$SEND_BODY" || echo "000")
+    if [[ "$HTTP_CODE" != "200" ]]; then
+      RESP_BODY=$(cat "$HTTP_OUT" 2>/dev/null || true)
+      rm -f "$HTTP_OUT"
+      echo "ERR: router /discord/send → HTTP $HTTP_CODE: ${RESP_BODY:-<no body>}" >&2
+      exit 1
+    fi
+    rm -f "$HTTP_OUT"
 
     if ! update_last_sent_at "$F"; then
       echo "ERR: delivered news alert but failed to update lastSentAt" >&2

@@ -22,6 +22,21 @@ user_dir() { printf '/data/users/%s\n' "$1"; }
 config_file() { printf '%s/attendance-alert.json\n' "$(user_dir "$1")"; }
 job_prefix() { printf 'attend-%s-\n' "$1"; }
 
+# subscribe/refresh/unsubscribe를 user 단위로 직렬화. 같은 사용자에 대해 두 호출이
+# 동시에 진입하면 둘 다 cron list 시점에 stale을 못 보고 양쪽 모두 새 generation을
+# add → 같은 schedule cron이 N개 누적. 30초 대기 후 못 잡으면 abort.
+acquire_user_lock() {
+  local lock_dir lock_file
+  lock_dir=$(user_dir "$1")
+  mkdir -p "$lock_dir"
+  lock_file="$lock_dir/.attendance-alert.lock"
+  exec 202>"$lock_file"
+  if ! flock -w 30 202; then
+    echo "ERR: attendance-alert lock 획득 실패 ($lock_file)" >&2
+    exit 1
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage:
@@ -34,18 +49,38 @@ Usage:
 EOF
 }
 
-# 유저의 모든 attendance-<id>-* cron 제거
+# 유저의 모든 attendance-<id>-* cron 제거 (config의 cronJobName에 없는 것만).
+# 실패 시 return 1. 호출자가 cron 누적 위험을 인지할 수 있도록.
+#
+# 과거 결함: cron list 실패를 silent(`2>/dev/null || true`)로 흘렸기 때문에 gateway
+# 미준비 시점에 호출되면 jobs를 빈 list로 보고 stale을 못 지우고, 새 generation cron만
+# 누적되었다 (#duplicate-attendance-alerts).
 remove_stale_crons() {
   local id="$1"
   local config_path="${2-}"
   local prefix
   prefix=$(job_prefix "$id")
-  local jobs_json
-  jobs_json=$(openclaw cron list --json 2>/dev/null || true)
-  PREFIX="$prefix" CONFIG_PATH="$config_path" CRON_LIST_JSON="$jobs_json" python3 - <<'PY' 2>/dev/null || true
+
+  local jobs_json=""
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if jobs_json=$(openclaw cron list --json 2>/dev/null) && [[ -n "$jobs_json" ]]; then
+      break
+    fi
+    jobs_json=""
+    sleep 1
+  done
+
+  if [[ -z "$jobs_json" ]]; then
+    echo "ERR remove_stale_crons: openclaw cron list failed for $id after 5 retries; skipping cleanup to avoid masking failure" >&2
+    return 1
+  fi
+
+  PREFIX="$prefix" CONFIG_PATH="$config_path" CRON_LIST_JSON="$jobs_json" python3 - <<'PY'
 import json
 import os
 import subprocess
+import sys
 
 prefix = os.environ["PREFIX"]
 config_path = os.environ.get("CONFIG_PATH", "")
@@ -61,18 +96,35 @@ if config_path:
             if course.get("cronJobName")
         }
     except Exception:
-        keep = set()
+        # config 읽기 실패는 keep을 빈 set으로 두면 모든 attend-<id>- cron이 정리 대상이 된다.
+        # subscribe 직후엔 절대 일어나선 안 되는 상태이므로 명확히 abort.
+        print(f"ERR remove_stale_crons: failed to read config {config_path}", file=sys.stderr)
+        sys.exit(1)
 
 try:
-    data = json.loads(os.environ["CRON_LIST_JSON"] or "[]")
+    data = json.loads(os.environ["CRON_LIST_JSON"])
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except Exception:
-    raise SystemExit(0)
+except Exception as exc:
+    print(f"ERR remove_stale_crons: invalid cron list JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
 
+failures = []
 for job in jobs:
     name = job.get("name", "")
     if name.startswith(prefix) and name not in keep:
-        subprocess.run(["openclaw", "cron", "rm", job.get("id") or name], check=False, capture_output=True)
+        result = subprocess.run(
+            ["openclaw", "cron", "rm", job.get("id") or name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            failures.append((name, (result.stderr or result.stdout or "").strip()))
+
+if failures:
+    for name, msg in failures:
+        print(f"ERR remove_stale_crons: failed to remove {name}: {msg}", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 
@@ -88,6 +140,8 @@ case "$CMD" in
 
     UDIR=$(user_dir "$ID")
     mkdir -p "$UDIR"
+
+    acquire_user_lock "$ID"
 
     if ! PLAN=$(mju ucheck alert-plan --lead-minutes "$LEAD" --app-dir "$UDIR" --format json 2>&1); then
       echo "ERR: 출석 알림 계획 조회 실패. 먼저 로그인이 필요합니다." >&2
@@ -233,13 +287,22 @@ PY
     fi
 
     mv "$CONFIG_TMP" "$CONFIG_PATH"
-    remove_stale_crons "$ID" "$CONFIG_PATH"
+    # config는 swap 됐고 새 cron도 등록 완료. 그래도 stale 정리 실패를 성공으로
+    # 숨기면 옛 cron 누적을 놓치므로 non-zero로 노출한다.
+    if ! remove_stale_crons "$ID" "$CONFIG_PATH"; then
+      echo "ERR: stale cron 정리 실패. subscribe/refresh 재시도 필요." >&2
+      exit 1
+    fi
     ;;
 
   unsubscribe)
     ID="${1-}"
     [[ -z "$ID" ]] && { usage; exit 1; }
-    remove_all_crons "$ID"
+    acquire_user_lock "$ID"
+    if ! remove_all_crons "$ID"; then
+      echo "ERR: cron 제거 실패. 재시도 필요." >&2
+      exit 1
+    fi
     rm -f "$(config_file "$ID")"
     echo "OK: unsubscribed $ID"
     ;;
@@ -283,17 +346,52 @@ PY
     [[ -z "$ID" || ( -z "$COURSE" && -z "$LECTURE_NO" ) ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$ID")
+
+    # Pre-check: marker가 이미 존재하면 (오늘 이 수업으로 이미 발송 완료) UCheck 호출
+    # 자체를 건너뛴다. stale cron 6개가 같은 분에 발사되어도 UCheck API를 6×3=18회
+    # 호출하지 않기 위함. lock 아닌 단순 존재 검사여서 첫 발사~marker create 사이의
+    # race window는 atomic create 단계가 잡는다 (#28 의 marker semantic 유지).
+    TODAY=$(TZ=Asia/Seoul date +%F)
     if [[ -n "$LECTURE_NO" ]]; then
-      if ! RES=$(mju ucheck attendance --lecture-no "$LECTURE_NO" --app-dir "$UDIR" --format json 2>&1); then
-        exit 0
-      fi
+      MARKER_KEY="$LECTURE_NO"
     else
-      if ! RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1); then
-        exit 0
-      fi
+      MARKER_KEY=$(printf '%s' "$COURSE" | tr -c '[:alnum:]가-힣' '_' | cut -c1-60)
+      [[ -z "$MARKER_KEY" ]] && MARKER_KEY="course"
+    fi
+    MARKER_DIR="$UDIR/.alert-sent"
+    MARKER_FILE="$MARKER_DIR/attendance-$TODAY-$MARKER_KEY.flag"
+    if [[ -e "$MARKER_FILE" ]]; then
+      exit 0
     fi
 
-    CONTENT=$(ATTENDANCE_JSON="$RES" COURSE_NAME="$COURSE" python3 - <<'PY'
+    QUERY_OK=0
+    QUERY_ERR=""
+    for attempt in 1 2 3; do
+      if [[ -n "$LECTURE_NO" ]]; then
+        if RES=$(mju ucheck attendance --lecture-no "$LECTURE_NO" --app-dir "$UDIR" --format json 2>&1); then
+          QUERY_OK=1
+          break
+        fi
+      else
+        if RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1); then
+          QUERY_OK=1
+          break
+        fi
+      fi
+      QUERY_ERR="$RES"
+      [[ "$attempt" -lt 3 ]] && sleep 2
+    done
+
+    if [[ "$QUERY_OK" != "1" ]]; then
+      if [[ -n "$LECTURE_NO" ]]; then
+        echo "ERR: UCheck attendance query failed for $ID lecture_no=$LECTURE_NO after 3 attempts: ${QUERY_ERR:-<no output>}" >&2
+      else
+        echo "ERR: UCheck attendance query failed for $ID course=$COURSE after 3 attempts: ${QUERY_ERR:-<no output>}" >&2
+      fi
+      exit 1
+    fi
+
+    if ! CONTENT=$(TZ=Asia/Seoul ATTENDANCE_JSON="$RES" COURSE_NAME="$COURSE" python3 - <<'PY'
 import json
 import os
 import sys
@@ -301,8 +399,9 @@ from datetime import datetime
 
 try:
     data = json.loads(os.environ["ATTENDANCE_JSON"])
-except Exception:
-    sys.exit(0)
+except Exception as exc:
+    print(f"ERR: invalid UCheck attendance JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 today = datetime.now().astimezone().strftime("%Y-%m-%d")
 sessions = data.get("sessions", [])
@@ -333,15 +432,59 @@ lines.extend([
 ])
 print("\n".join(lines))
 PY
-)
-
-    [[ -z "$CONTENT" ]] && exit 0
-
-    if ! openclaw message send --channel discord --target "user:$ID" --message "$CONTENT"; then
-      echo "ERR: failed to deliver attendance alert to $ID" >&2
+    ); then
       exit 1
     fi
 
+    if [[ -z "$CONTENT" ]]; then
+      exit 0
+    fi
+
+    # 멱등 marker atomic lock — 실제 발송 대상임을 확인한 뒤 송신 직전에 잠근다.
+    # MARKER_FILE 경로는 위 pre-check에서 이미 계산됨 (중복 계산 제거).
+    # UCheck 조회 실패나 JSON 파싱 실패가 "오늘 발송 완료"로 굳지 않도록 marker는
+    # 조회 앞이 아니라 여기(CONTENT 확정 이후)에서 잡는다 — #28 의 marker semantic.
+    mkdir -p "$MARKER_DIR"
+    if ! (set -o noclobber; : > "$MARKER_FILE") 2>/dev/null; then
+      # 이미 다른 프로세스가 marker를 잡은 상태 — 중복 발송 방지를 위해 즉시 종료.
+      exit 0
+    fi
+
+    # OpenClaw discord 채널은 비활성화되어 있고 봇 토큰은 mjuclaw-router가 단독
+    # 소유한다. 따라서 outbound DM은 router HTTP `POST /discord/send`로 위임한다.
+    ROUTER_URL="${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}"
+    ROUTER_TOKEN="${MJUCLAW_ROUTER_TOKEN-}"
+    if [[ -z "$ROUTER_TOKEN" ]]; then
+      # send 불가 — marker 롤백해 다음 cron 발사가 재시도할 수 있도록.
+      rm -f "$MARKER_FILE"
+      echo "ERR: MJUCLAW_ROUTER_TOKEN env가 비어있어 router로 DM을 보낼 수 없습니다." >&2
+      exit 1
+    fi
+
+    SEND_BODY=$(DISCORD_ID="$ID" CONTENT="$CONTENT" python3 - <<'PY'
+import json, os
+print(json.dumps({"discordUserId": os.environ["DISCORD_ID"], "content": os.environ["CONTENT"]}))
+PY
+)
+
+    HTTP_OUT=$(mktemp "${TMPDIR:-/tmp}/router-send.XXXXXX")
+    HTTP_CODE=$(curl -sS -o "$HTTP_OUT" -w "%{http_code}" \
+      -X POST "$ROUTER_URL/discord/send" \
+      -H "Authorization: Bearer $ROUTER_TOKEN" \
+      -H "Content-Type: application/json" \
+      --max-time 30 \
+      --data-raw "$SEND_BODY" || echo "000")
+    if [[ "$HTTP_CODE" != "200" ]]; then
+      RESP_BODY=$(cat "$HTTP_OUT" 2>/dev/null || true)
+      rm -f "$HTTP_OUT"
+      # send 실패는 marker 롤백 — 다음 cron 발사가 재시도할 수 있어야 한다.
+      rm -f "$MARKER_FILE"
+      echo "ERR: router /discord/send → HTTP $HTTP_CODE: ${RESP_BODY:-<no body>}" >&2
+      exit 1
+    fi
+    rm -f "$HTTP_OUT"
+
+    # 발송 성공 — marker는 이미 atomic create로 만들어진 상태이므로 그대로 유지.
     printf '%s\n' "$CONTENT"
     ;;
 

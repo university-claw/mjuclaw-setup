@@ -2,8 +2,13 @@
 set -euo pipefail
 
 # ── 환경변수 검증 ────────────────────────────────────────────────
-if [ -z "${DISCORD_BOT_TOKEN:-}" ]; then
-  echo "ERR: DISCORD_BOT_TOKEN is required" >&2
+# DISCORD_BOT_TOKEN은 mjuclaw-router 단독 소유. agent는 빈 값으로 받아야 한다.
+# (값이 들어오면 openclaw의 channels.discord 가 enabled=False여도 sidecar 또는
+# adapter가 어떤 경로로든 connect를 시도해 router와 토큰 충돌 + 사용자 컨텍스트
+# 격리 깨짐 → 데이터 누출. 2026-05-03 운영 사고로 검증됨.)
+if [ -n "${DISCORD_BOT_TOKEN:-}" ]; then
+  echo "ERR: DISCORD_BOT_TOKEN must NOT be set in agent container (router 전담)." >&2
+  echo "    docker-compose의 agent service에서 이 env 라인을 제거하세요." >&2
   exit 1
 fi
 
@@ -12,12 +17,32 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exit 1
 fi
 
+if [ -z "${MJUCLAW_ROUTER_URL:-}" ]; then
+  echo "ERR: MJUCLAW_ROUTER_URL is required (router service URL, 보통 http://mjuclaw-router:3100)" >&2
+  exit 1
+fi
+
+if [ -z "${MJUCLAW_ROUTER_TOKEN:-}" ]; then
+  echo "ERR: MJUCLAW_ROUTER_TOKEN is required (router HTTP_AUTH_TOKEN과 동일 값)" >&2
+  exit 1
+fi
+
+if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+  echo "ERR: OPENCLAW_GATEWAY_TOKEN is required (router가 agent의 OpenClaw gateway에" >&2
+  echo "    forward할 때 사용하는 인증 토큰. agent와 router 양쪽 env에 동일 값으로 둠. " >&2
+  echo "    예: openssl rand -hex 32)" >&2
+  exit 1
+fi
+
 MODEL="${OPENCLAW_MODEL:-gemini-2.5-flash}"
 DISCORD_SERVER_ID="${DISCORD_SERVER_ID:-1492100109997969499}"
 DISCORD_USER_ID="${DISCORD_USER_ID:-415349075274104832}"
 
 # Config 스키마 버전. 변경되면 기존 config를 백업하고 재생성한다.
-CONFIG_SCHEMA_VERSION="3"
+# v4: channels.discord.enabled=False — Discord WS 단독 소유는 mjuclaw-router로 이전.
+# v5: channels.discord 항목 자체 제거 (enabled=False만으로는 sidecar가 어떤 경로로
+#     connect 시도해 데이터 누출 가능. agent는 토큰 자체를 받지 않는다).
+CONFIG_SCHEMA_VERSION="5"
 CONFIG_PATH="/home/agent/.openclaw/openclaw.json"
 VERSION_MARKER="/home/agent/.openclaw/.mjuclaw-schema-version"
 CONFIG_INPUTS_MARKER="/home/agent/.openclaw/.mjuclaw-config-inputs.json"
@@ -70,8 +95,9 @@ print(
                 "DISCORD_SERVER_ID",
                 "1492100109997969499",
             ),
-            "discordBotTokenSha256": sha256(os.environ["DISCORD_BOT_TOKEN"]),
+            "discordBotTokenSha256": "absent-by-design",
             "geminiApiKeySha256": sha256(os.environ["GEMINI_API_KEY"]),
+            "gatewayTokenSha256": sha256(os.environ["OPENCLAW_GATEWAY_TOKEN"]),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -142,23 +168,15 @@ config = {
     'session': {
         'dmScope': 'per-channel-peer',
     },
+    # channels: discord 항목 자체를 제거.
+    # 과거에는 channels.discord = {enabled: False, token: <real>} 로 두었지만,
+    # openclaw가 enabled=False여도 health-monitor / sidecar 경로에서 connect를
+    # 시도해 router와 토큰 충돌이 일어나고 일부 사용자 메시지가 agent로 직접
+    # 들어가서 LLM이 잘못된 사용자 컨텍스트로 응답 → 데이터 누출이 일어났다
+    # (2026-05-03 운영 사고). agent는 Discord에 절대 connect 하면 안 된다.
+    # cron alert helper들은 router의 HTTP /discord/send 만 사용한다.
     'channels': {
         'defaults': {},
-        'discord': {
-            'enabled': True,
-            'token': os.environ['DISCORD_BOT_TOKEN'],
-            # DM open — 누구나 DM 가능 (온보딩이 실질적 방어선)
-            'dmPolicy': 'open',
-            'allowFrom': ['*'],
-            # 길드는 allowlist — MJU 서버 멤버만 사용 가능
-            'groupPolicy': 'allowlist',
-            'guilds': {
-                os.environ.get('DISCORD_SERVER_ID', '1492100109997969499'): {
-                    'requireMention': True,
-                    'users': [],  # 빈 배열 = 길드 멤버 전체 허용
-                }
-            }
-        }
     },
     'gateway': {
         'mode': 'local',
@@ -167,7 +185,9 @@ config = {
             'allowInsecureAuth': True,
             'dangerouslyDisableDeviceAuth': True,
         },
-        'auth': {'token': secrets.token_hex(32)},
+        # router가 cross-container로 forward할 때 사용. env로 고정해야 양쪽이
+        # 같은 값을 알 수 있다. env 미설정은 위에서 fail-fast로 차단됨.
+        'auth': {'token': os.environ['OPENCLAW_GATEWAY_TOKEN']},
         'trustedProxies': ['127.0.0.1', '::1'],
     },
     'meta': {
@@ -256,7 +276,26 @@ fi
 # 이미 구독 중이면 refresh로 시간표 재스냅, 아니면 subscribe로 신규 등록.
 # 각 유저당 timetable 조회 + cron 등록이 5~7초 들 수 있어 gateway 기동을 막지 않도록
 # 백그라운드로 돌린다. 실패(시간표 미제공, SSO 만료 등)는 stderr로만 남김.
+#
+# IMPORTANT: 반드시 gateway가 ws 포트(18789)에서 응답을 시작한 뒤에 helper를 호출한다.
+# helper의 `openclaw cron list` 호출이 gateway 준비 전이면 1006으로 끊겨 silent
+# failure로 흘러가고, 그 결과 stale cron 정리가 누락되어 같은 알림 cron이 매 backfill
+# 마다 누적되는 버그가 있었다 (#duplicate-attendance-alerts).
 attendance_backfill() {
+  # gateway healthz가 200을 줄 때까지 polling. 각 iteration이 curl --max-time 1 +
+  # sleep 1 = ~2s 들고 최대 30회 시도하므로 상한은 ~60s. 그 안에 못 받으면 경고만 남
+  # 기고 그래도 진행 (학기 동안 한 번도 동작 안 하는 것보단 helper의 retry 안전망에
+  # 맡기는 게 낫다).
+  local waited=0
+  until curl -sf -o /dev/null --max-time 1 http://127.0.0.1:18789/healthz; do
+    if (( waited >= 30 )); then
+      echo "WARN entrypoint: gateway not ready after ~60s, attendance backfill proceeding anyway" >&2
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
   shopt -s nullglob 2>/dev/null || true
   for user_dir in /data/users/*/; do
     discord_id=$(basename "$user_dir")
@@ -277,6 +316,62 @@ attendance_backfill() {
 }
 attendance_backfill &
 echo "Started attendance alert backfill in background (PID $!)"
+
+# ── mjuclaw-router pairing 자동 승인 (백그라운드) ───────────────
+# router는 docker-compose 내부 네트워크에서만 접근 가능한 신뢰 클라이언트지만,
+# OpenClaw gateway는 모든 새 client에게 device pairing을 요구한다. 첫 부팅 시
+# router가 pairing 요청을 보내면 자동 승인하고, 이후엔 router의 router-data
+# volume에 device key가 영속되어 재요청이 발생하지 않는다.
+auto_approve_router_pairings() {
+  # gateway readiness 대기 (최대 60초)
+  local waited=0
+  until curl -sf -o /dev/null --max-time 1 http://127.0.0.1:18789/healthz; do
+    if (( waited >= 60 )); then
+      echo "WARN entrypoint: gateway not ready after 60s, skip pairing auto-approve" >&2
+      return
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  # 5분 동안 5초 간격으로 pending 확인 → 승인. CLI가 gateway에 붙기까지 healthz보다
+  # 더 오래 걸리는 경우가 있어 윈도우를 넉넉히 둔다. 일단 device가 paired되면
+  # router 측 router-data 볼륨에 key가 영속되어 재요청이 발생하지 않는다.
+  local rounds=0
+  while (( rounds < 60 )); do
+    local pending_json
+    pending_json=$(openclaw devices list --json 2>/dev/null || echo '{}')
+    local request_ids
+    request_ids=$(PENDING_JSON="$pending_json" python3 - <<'PY'
+import json, os
+try:
+    data = json.loads(os.environ["PENDING_JSON"])
+except Exception:
+    raise SystemExit(0)
+for entry in data.get("pending", []) or []:
+    rid = entry.get("requestId")
+    ip = entry.get("remoteIp", "")
+    # docker-compose 내부 네트워크 (172.x / 10.x 사설 대역)만 자동 승인
+    if rid and (ip.startswith("172.") or ip.startswith("10.") or ip.startswith("192.168.")):
+        print(rid)
+PY
+)
+    if [[ -n "$request_ids" ]]; then
+      while IFS= read -r rid; do
+        [[ -z "$rid" ]] && continue
+        if openclaw devices approve "$rid" --json >/dev/null 2>&1; then
+          echo "Auto-approved router pairing $rid"
+        else
+          echo "WARN entrypoint: failed to auto-approve $rid" >&2
+        fi
+      done <<< "$request_ids"
+    fi
+    sleep 5
+    rounds=$((rounds + 1))
+  done
+}
+auto_approve_router_pairings &
+echo "Started router pairing auto-approver in background (PID $!)"
 
 echo ""
 echo "  ┌─────────────────────────────────────────────┐"
