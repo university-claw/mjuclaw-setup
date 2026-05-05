@@ -1,8 +1,8 @@
 #!/bin/bash
-# mju-attendance-alert: 수업 시작 N분 후에 출석 체크 안돼있으면 DM 알림
+# mju-attendance-alert: 출석 인정 종료 5분 전에 출석 체크 안돼있으면 DM 알림
 #
 # 동작:
-#   subscribe  — mju msi timetable로 시간표 가져와서 각 수업마다 (시작+grace)분 cron 등록
+#   subscribe  — mju ucheck alert-plan으로 수업별 출석 인정 시간을 읽고 cron 등록
 #   unsubscribe — 유저 관련 모든 attendance cron 제거
 #   check      — cron이 호출. 특정 과목 오늘 출석 상태 확인, 미체크면 직접 DM 전송
 #   refresh    — 시간표 변경 시 cron 재생성 (unsubscribe + subscribe)
@@ -20,32 +20,48 @@ fi
 
 user_dir() { printf '/data/users/%s\n' "$1"; }
 config_file() { printf '%s/attendance-alert.json\n' "$(user_dir "$1")"; }
-job_prefix() { printf 'attend-%s\n' "$1"; }
+job_prefix() { printf 'attend-%s-\n' "$1"; }
 
 usage() {
   cat <<EOF
 Usage:
-  mju-attendance-alert subscribe <discord_id> [grace_min=10]
+  mju-attendance-alert subscribe <discord_id> [lead_min=5]
   mju-attendance-alert unsubscribe <discord_id>
   mju-attendance-alert refresh <discord_id>
   mju-attendance-alert status <discord_id>
-  mju-attendance-alert check <discord_id> "<course_title>"
+  mju-attendance-alert check <discord_id> "<course_title>" [lecture_no]
+  mju-attendance-alert check <discord_id> --lecture-no <lecture_no>
 EOF
 }
 
 # 유저의 모든 attendance-<id>-* cron 제거
-remove_all_crons() {
+remove_stale_crons() {
   local id="$1"
+  local config_path="${2-}"
   local prefix
   prefix=$(job_prefix "$id")
   local jobs_json
   jobs_json=$(openclaw cron list --json 2>/dev/null || true)
-  PREFIX="$prefix" CRON_LIST_JSON="$jobs_json" python3 - <<'PY' 2>/dev/null || true
+  PREFIX="$prefix" CONFIG_PATH="$config_path" CRON_LIST_JSON="$jobs_json" python3 - <<'PY' 2>/dev/null || true
 import json
 import os
 import subprocess
 
 prefix = os.environ["PREFIX"]
+config_path = os.environ.get("CONFIG_PATH", "")
+keep = set()
+
+if config_path:
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config = json.load(f)
+        keep = {
+            course.get("cronJobName")
+            for course in config.get("courses", [])
+            if course.get("cronJobName")
+        }
+    except Exception:
+        keep = set()
 
 try:
     data = json.loads(os.environ["CRON_LIST_JSON"] or "[]")
@@ -55,24 +71,26 @@ except Exception:
 
 for job in jobs:
     name = job.get("name", "")
-    if name.startswith(prefix):
+    if name.startswith(prefix) and name not in keep:
         subprocess.run(["openclaw", "cron", "rm", job.get("id") or name], check=False, capture_output=True)
 PY
+}
+
+remove_all_crons() {
+  remove_stale_crons "$1"
 }
 
 case "$CMD" in
   subscribe)
     ID="${1-}"
-    GRACE="${2-10}"
+    LEAD="${2-5}"
     [[ -z "$ID" ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$ID")
     mkdir -p "$UDIR"
 
-    remove_all_crons "$ID"
-
-    if ! TT=$(mju msi timetable --app-dir "$UDIR" --format json 2>&1); then
-      echo "ERR: 시간표 조회 실패. 먼저 로그인이 필요합니다." >&2
+    if ! PLAN=$(mju ucheck alert-plan --lead-minutes "$LEAD" --app-dir "$UDIR" --format json 2>&1); then
+      echo "ERR: 출석 알림 계획 조회 실패. 먼저 로그인이 필요합니다." >&2
       exit 1
     fi
 
@@ -81,55 +99,60 @@ case "$CMD" in
     mkdir -p "$CONFIG_DIR"
     CONFIG_TMP=$(mktemp "$CONFIG_DIR/.attendance-alert.XXXXXX")
 
-    if ! TIMETABLE_JSON="$TT" GRACE_MIN="$GRACE" USER_ID="$ID" CONFIG_TMP="$CONFIG_TMP" python3 - <<'PY'
+    if ! ALERT_PLAN_JSON="$PLAN" LEAD_MIN="$LEAD" USER_ID="$ID" CONFIG_TMP="$CONFIG_TMP" python3 - <<'PY'
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 
 def cleanup(names):
     for name in names:
         subprocess.run(["openclaw", "cron", "rm", name], check=False, capture_output=True, text=True)
 
-data = json.loads(os.environ["TIMETABLE_JSON"])
-entries = data.get("entries", [])
-grace = int(os.environ["GRACE_MIN"])
+data = json.loads(os.environ["ALERT_PLAN_JSON"])
+schedules = data.get("schedules", [])
+lead = int(os.environ["LEAD_MIN"])
 user_id = os.environ["USER_ID"]
 config_tmp = os.environ["CONFIG_TMP"]
 
 seen = set()
 registered = []
 registered_names = []
+generation = f"{datetime.now(timezone.utc):%Y%m%d%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 try:
-    for entry in entries:
-        dow = entry.get("dayOfWeek")
-        if not dow or dow > 5:
+    for schedule in schedules:
+        dow = schedule.get("cronDayOfWeek", schedule.get("dayOfWeek"))
+        if dow is None or dow < 0 or dow > 6:
             continue
 
-        time_range = entry.get("timeRange", "")
-        match = re.match(r"(\\d{1,2}):(\\d{2})", time_range)
+        alert_time = schedule.get("alertTime", "")
+        match = re.match(r"^(\d{1,2}):(\d{2})$", alert_time)
         if not match:
             continue
 
-        hour, minute = int(match.group(1)), int(match.group(2))
-        total = hour * 60 + minute + grace
-        alert_h = (total // 60) % 24
-        alert_m = total % 60
+        alert_h, alert_m = int(match.group(1)), int(match.group(2))
 
-        title = entry.get("courseTitle", "")
-        key = f"{dow}-{alert_h:02d}{alert_m:02d}-{title}"
+        title = schedule.get("courseTitle", "")
+        lecture_no = schedule.get("lectureNo")
+        key = f"{dow}-{alert_h:02d}{alert_m:02d}-{lecture_no or title}"
         if key in seen:
             continue
         seen.add(key)
 
         cron_expr = f"{alert_m} {alert_h} * * {dow}"
         slug = re.sub(r"[^가-힣a-zA-Z0-9]", "", title)[:20] or "course"
-        job_name = f"attend-{user_id}-{dow}-{alert_h:02d}{alert_m:02d}-{slug}"
-        check_cmd = f"mju-attendance-alert check {shlex.quote(user_id)} {shlex.quote(title)}"
+        suffix = str(lecture_no) if lecture_no else slug
+        job_name = f"attend-{user_id}-{generation}-{dow}-{alert_h:02d}{alert_m:02d}-{suffix}"
+        if lecture_no:
+            check_parts = ["mju-attendance-alert", "check", user_id, "--lecture-no", str(lecture_no)]
+        else:
+            check_parts = ["mju-attendance-alert", "check", user_id, title]
+        check_cmd = " ".join(shlex.quote(part) for part in check_parts)
         message = f"다음을 정확히 실행: exec로 {check_cmd} 를 실행하고, 추가 명령 없이 <final></final>로 종료."
 
         result = subprocess.run(
@@ -161,22 +184,40 @@ try:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"failed to add cron {job_name}")
 
         registered_names.append(job_name)
-        registered.append({"day": dow, "time": f"{alert_h:02d}:{alert_m:02d}", "course": title})
+        registered.append({
+            "cronJobName": job_name,
+            "day": dow,
+            "dayLabel": schedule.get("dayLabel", ""),
+            "time": f"{alert_h:02d}:{alert_m:02d}",
+            "course": title,
+            "lectureNo": lecture_no,
+            "startTime": schedule.get("startTime", ""),
+            "endTime": schedule.get("endTime", ""),
+            "timeRange": schedule.get("timeRange", ""),
+            "attendEndMinute": schedule.get("attendEndMinute"),
+            "lateEndMinute": schedule.get("lateEndMinute"),
+            "alertAfterStartMinute": schedule.get("alertAfterStartMinute"),
+            "sessionCount": schedule.get("sessionCount", 0),
+        })
 
     config = {
         "enabled": True,
-        "graceMin": grace,
+        "leadMinutes": lead,
         "timezone": "Asia/Seoul",
         "subscribedAt": datetime.now(timezone.utc).isoformat(),
+        "planYear": data.get("year"),
+        "planTerm": data.get("term"),
+        "warnings": data.get("warnings", []),
         "courses": registered,
     }
     with open(config_tmp, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
     print(f"OK: {len(registered)}개 수업 알림 등록됨")
-    days = ["", "월", "화", "수", "목", "금"]
+    days = ["일", "월", "화", "수", "목", "금", "토"]
     for item in registered:
-        print(f"  - {days[item['day']]} {item['time']} : {item['course']}")
+        day_label = item.get("dayLabel") or days[item["day"]]
+        print(f"  - {day_label} {item['time']} : {item['course']}")
 except Exception as exc:
     cleanup(registered_names)
     try:
@@ -192,6 +233,7 @@ PY
     fi
 
     mv "$CONFIG_TMP" "$CONFIG_PATH"
+    remove_stale_crons "$ID" "$CONFIG_PATH"
     ;;
 
   unsubscribe)
@@ -207,15 +249,16 @@ PY
     [[ -z "$ID" ]] && { usage; exit 1; }
     F=$(config_file "$ID")
     [[ ! -f "$F" ]] && { echo "ERR: 구독 정보 없음. subscribe 먼저 실행." >&2; exit 1; }
-    GRACE=$(FILE_PATH="$F" python3 - <<'PY'
+    LEAD=$(FILE_PATH="$F" python3 - <<'PY'
 import json
 import os
 
 with open(os.environ["FILE_PATH"], encoding="utf-8") as f:
-    print(json.load(f).get("graceMin", 10))
+    payload = json.load(f)
+    print(payload.get("leadMinutes", 5))
 PY
 )
-    exec "$0" subscribe "$ID" "$GRACE"
+    exec "$0" subscribe "$ID" "$LEAD"
     ;;
 
   status)
@@ -232,11 +275,22 @@ PY
   check)
     ID="${1-}"
     COURSE="${2-}"
-    [[ -z "$ID" || -z "$COURSE" ]] && { usage; exit 1; }
+    LECTURE_NO="${3-}"
+    if [[ "$COURSE" == "--lecture-no" ]]; then
+      LECTURE_NO="${3-}"
+      COURSE=""
+    fi
+    [[ -z "$ID" || ( -z "$COURSE" && -z "$LECTURE_NO" ) ]] && { usage; exit 1; }
 
     UDIR=$(user_dir "$ID")
-    if ! RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1); then
-      exit 0
+    if [[ -n "$LECTURE_NO" ]]; then
+      if ! RES=$(mju ucheck attendance --lecture-no "$LECTURE_NO" --app-dir "$UDIR" --format json 2>&1); then
+        exit 0
+      fi
+    else
+      if ! RES=$(mju ucheck attendance --course "$COURSE" --app-dir "$UDIR" --format json 2>&1); then
+        exit 0
+      fi
     fi
 
     CONTENT=$(ATTENDANCE_JSON="$RES" COURSE_NAME="$COURSE" python3 - <<'PY'

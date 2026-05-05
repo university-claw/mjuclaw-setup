@@ -55,7 +55,7 @@ cd mjuclaw-setup
 
 ```bash
 # 도구 레포 clone (gitignore 됨)
-git clone https://github.com/university-claw/mju-cli.git
+git clone --branch msi-course-scores https://github.com/university-claw/mju-cli.git
 git clone https://github.com/university-claw/mju-news.git
 
 # 환경변수 설정
@@ -182,7 +182,7 @@ Docker volume으로 컨테이너를 재생성해도 유지됩니다.
 | `mju-shared` | 공통 인증/출력 규칙 (Discord User ID 기반 app-dir) |
 | `mju-onboarding` | 로그인 흐름 |
 | `mju-lms` / `mju-lms-action-items` | LMS 강의/공지/과제 |
-| `mju-msi` | 시간표/성적/졸업요건 |
+| `mju-msi` | 시간표/성적/수강점수/졸업요건 |
 | `mju-ucheck` | 출석 조회 |
 | `mju-library` / `mju-library-seat-*` / `mju-library-my-*` | 도서관 |
 | `recipe-mju-*` | 복합 레시피 (일일 요약 등) |

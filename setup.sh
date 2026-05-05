@@ -5,12 +5,20 @@
 #   ./setup.sh
 #
 # 동작:
-#   1. mju-cli, mju-news를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
+#   1. mju-cli, mju-news, mju-public-data-worker를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
 #   2. .env 파일이 없으면 .env.example을 복사하고 유저에게 편집 안내
 #   3. docker compose build + up
+#
+# 주의: 토폴로지 A(하이브리드) 전제.
+#   - Postgres는 호스트에 직접 설치되어 있어야 한다 (Homebrew / apt 등).
+#   - mju-public-data-worker는 public-data compose profile에서 사용한다.
+#     profile을 켜지 않으면 worker 컨테이너는 실행하지 않는다.
 
 set -e
 cd "$(dirname "$0")"
+
+MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-msi-course-scores}"
+MJU_NEWS_BRANCH="${MJU_NEWS_BRANCH:-}"
 
 echo "┌─────────────────────────────────────────────┐"
 echo "│  MJUClaw Agent — 자동 셋업                  │"
@@ -38,17 +46,39 @@ echo "[2/4] 도구 레포 준비..."
 clone_or_pull() {
   local DIR="$1"
   local REPO="$2"
+  local BRANCH="${3:-}"
   if [ -d "$DIR/.git" ]; then
-    echo "  → $DIR 이미 있음, pull 중..."
-    (cd "$DIR" && git pull --ff-only) || echo "  ⚠ $DIR pull 실패 (수동 해결 필요)"
+    if [ -n "$BRANCH" ]; then
+      echo "  → $DIR 이미 있음, origin/$BRANCH 동기화 중..."
+      (
+        cd "$DIR"
+        git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+        if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+          git checkout "$BRANCH"
+        else
+          git checkout -b "$BRANCH" "origin/$BRANCH"
+        fi
+        git pull --ff-only origin "$BRANCH"
+      )
+    else
+      echo "  → $DIR 이미 있음, pull 중..."
+      (cd "$DIR" && git pull --ff-only)
+    fi
   else
-    echo "  → $DIR clone 중..."
-    git clone "$REPO" "$DIR"
+    if [ -n "$BRANCH" ]; then
+      echo "  → $DIR clone 중... ($BRANCH)"
+      git clone --branch "$BRANCH" "$REPO" "$DIR"
+    else
+      echo "  → $DIR clone 중..."
+      git clone "$REPO" "$DIR"
+    fi
   fi
 }
 
-clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git
-clone_or_pull mju-news https://github.com/university-claw/mju-news.git
+clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git "$MJU_CLI_BRANCH"
+# mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
+# dev 브랜치에 변경이 진행 중이면 아래 한 줄을 `git checkout dev`로 교체.
+clone_or_pull mju-news https://github.com/university-claw/mju-news.git "$MJU_NEWS_BRANCH"
 clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
@@ -70,9 +100,9 @@ echo "  ✓ .env 존재"
 
 # 필수값 체크
 missing=()
-for key in DISCORD_BOT_TOKEN GEMINI_API_KEY; do
+for key in DISCORD_BOT_TOKEN GEMINI_API_KEY PGPASSWORD STORAGE_LOCAL_ROOT; do
   val=$(grep "^$key=" .env | cut -d= -f2-)
-  if [ -z "$val" ] || [[ "$val" == your_* ]]; then
+  if [ -z "$val" ] || [[ "$val" == your_* ]] || [[ "$val" == "change-me" ]] || [[ "$val" == /absolute/* ]]; then
     missing+=("$key")
   fi
 done

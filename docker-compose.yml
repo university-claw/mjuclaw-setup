@@ -8,6 +8,10 @@ services:
     ports:
       - "18789:18789"
       - "${VIEW_PORT:-3001}:${VIEW_PORT:-3001}"
+    # Linux 호스트에서 host.docker.internal을 쓰려면 host-gateway로 매핑.
+    # macOS/Windows Docker Desktop은 기본 동작이라 이 설정이 있어도 무해하다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -16,13 +20,32 @@ services:
       - DISCORD_USER_ID=${DISCORD_USER_ID:-415349075274104832}
       - VIEW_PORT=${VIEW_PORT:-3001}
       - VIEW_BASE_URL=${VIEW_BASE_URL:-http://localhost:3001}
+      # ── 호스트 Postgres (mju-public-data-worker 공유 DB) ────────────
+      - PGHOST=${PGHOST:-host.docker.internal}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-mjuclaw}
+      - PGUSER=${PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSCHEMA=${PGSCHEMA:-public_data}
+      # ── user_data 스키마 접속 (mju-cli 전용 ROLE) ───────────────────
+      # worker 의 PG* 와 분리된 ROLE 이어야 한다. 공개/개인 경계 원칙.
+      - MJU_STORAGE=${MJU_STORAGE:-postgres}
+      - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
+      - MJU_PGPORT=${MJU_PGPORT:-${PGPORT:-5432}}
+      - MJU_PGDATABASE=${MJU_PGDATABASE:-${PGDATABASE:-mjuclaw}}
+      - MJU_PGUSER=${MJU_PGUSER:-mjuclaw_user_app}
+      - MJU_PGPASSWORD=${MJU_PGPASSWORD}
+      - MJU_PGSCHEMA=${MJU_PGSCHEMA:-user_data}
+      # envelope encryption 키 (openssl rand -hex 32). 분실 시 복호화 불가.
+      - MJU_VAULT_KEY=${MJU_VAULT_KEY}
     volumes:
       # 에이전트 세션/데이터 영속화 (컨테이너 재생성해도 유지)
       - agent-data:/home/agent/.openclaw
-      # mju-news 스크래핑 데이터 영속화
-      - news-data:/opt/mju-news/data
       # 유저별 크리덴셜 영속화 (온보딩 데이터)
       - user-data:/data/users
+      # worker가 쓴 공지 첨부/본문 이미지 원본을 on-demand로 읽기 위한 read-only 마운트.
+      # STORAGE_LOCAL_ROOT가 설정되지 않으면 docker compose가 에러를 낸다.
+      - ${STORAGE_LOCAL_ROOT}:/data/assets:ro
 
   public-data-db:
     image: postgres:16-alpine
@@ -74,7 +97,6 @@ services:
 
 volumes:
   agent-data:
-  news-data:
   user-data:
   public-data-db:
   public-data-assets:

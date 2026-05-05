@@ -1,4 +1,5 @@
 import express from "express";
+import path from "node:path";
 import { getView, storeView, startViewCleanup, updateViewSummary } from "./view-store";
 import { renderViewHtml, renderExpiredHtml } from "./view-renderer";
 import type { ViewEntry } from "./types";
@@ -6,17 +7,30 @@ import type { ViewEntry } from "./types";
 const app = express();
 app.use(express.json({ limit: "500kb" }));
 
+// 정적 자산 (마스코트 로고 등). Dockerfile이 public/ 를 /opt/view-server/public/ 로 복사.
+const STATIC_DIR = process.env.VIEW_STATIC_DIR || path.join(__dirname, "..", "public");
+app.use(
+  "/static",
+  express.static(STATIC_DIR, {
+    maxAge: "30d",
+    immutable: true,
+    fallthrough: false,
+  }),
+);
+
 const ALLOWED_DATA_TYPES = new Set<ViewEntry["dataType"]>([
   "timetable",
+  "course-scores",
   "grades",
+  "grade-history",
   "graduation",
-  "courses",
   "action-items",
   "unsubmitted",
-  "due-assignments",
   "unread-notices",
   "attendance",
   "news",
+  "news-detail",
+  "cafeteria",
 ]);
 
 // ── 웹 뷰 엔드포인트 ───────────────────────────────────────────
