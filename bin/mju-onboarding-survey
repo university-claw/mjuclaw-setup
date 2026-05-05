@@ -44,14 +44,9 @@ Usage:
 EOF
 }
 
-TIME_QUESTION='🔔 학교 공지 알림을 언제 받을까요? (1시간 안에 투표 안 하면 매일 아침 8시로 자동 설정)'
-TIME_OPTIONS=(
-  '아침 8시 매일'
-  '평일 아침 8시'
-  '저녁 9시 매일'
-  '월요일 9시 주1회'
-  '알림 안 받기'
-)
+# 공지 알림 시간은 매일 아침 8시(morning-daily)로 고정. 사용자에게 묻지 않는다
+# (운영 결정 — 사용자 요청). 카테고리만 Poll로 받는다 (취향 차이가 큼).
+FIXED_TIME_PRESET='morning-daily'
 
 CAT_QUESTION='📂 어떤 공지 받을래요? (여러 개 선택 가능 / 아무것도 안 고르면 전체)'
 CAT_OPTIONS=(
@@ -61,7 +56,7 @@ CAT_OPTIONS=(
   '진로/취업'
 )
 
-# Poll answer index(1-based) → preset/source id 매핑은 collect의 python 안에서.
+# Poll answer index(1-based) → source id 매핑은 collect의 python 안에서.
 
 # --- router HTTP 헬퍼 -------------------------------------------------
 router_url()   { printf '%s' "${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}"; }
@@ -185,7 +180,8 @@ cmd_start() {
     exit 0
   fi
 
-  # 웰컴 카드 (기능 요약 + 투표 안내). 출석 알림은 이미 자동 등록됐다는 점 강조.
+  # 웰컴 카드 (기능 요약 + 투표 안내). 출석 + 공지(매일 아침 8시) 알림은
+  # 자동 등록됐고, 카테고리만 Poll로 묻는다는 점 명시.
   local welcome_body
   welcome_body=$(cat <<'EOF'
 🦁 **환영합니다!** 이제 학사 서비스를 바로 쓸 수 있어요.
@@ -198,10 +194,11 @@ cmd_start() {
 
 **이미 켜진 알림**
 • 수업 시작 후 출석 체크 누락 시 DM (자동)
+• **매일 아침 8시 학교 공지 DM (자동)**
 
-**선택 알림 — 아래 2개 투표로 결정해주세요**
-학교 공지 선제 알림을 어떻게 받을지 골라주시면 바로 등록해요.
-(1시간 안에 답 없으면 기본값 "매일 아침 8시 · 전체"로 자동 설정됩니다.)
+**카테고리만 골라 주세요 — 아래 투표 1건**
+어떤 공지를 받을지 골라주시면 바로 등록해요.
+(1시간 안에 답 없으면 "전체"로 자동 설정됩니다.)
 EOF
 )
 
@@ -216,24 +213,16 @@ EOF
     exit 1
   fi
 
-  # Poll 1: time (single-select, 1시간 만료)
-  local poll1_resp time_msg_id
-  if ! poll1_resp=$(router_poll "$discord_id" "$TIME_QUESTION" 1 false "${TIME_OPTIONS[@]}"); then
-    echo '{"state":"error","reason":"poll_time_send_failed"}'
-    exit 1
-  fi
-  time_msg_id=$(json_field "$poll1_resp" messageId)
-
-  # Poll 2: categories (multi-select, 1시간 만료)
-  local poll2_resp cat_msg_id
-  if ! poll2_resp=$(router_poll "$discord_id" "$CAT_QUESTION" 1 true "${CAT_OPTIONS[@]}"); then
+  # 카테고리 Poll (multi-select, 1시간 만료). 시간은 묻지 않음 — morning-daily 고정.
+  local poll_resp cat_msg_id
+  if ! poll_resp=$(router_poll "$discord_id" "$CAT_QUESTION" 1 true "${CAT_OPTIONS[@]}"); then
     echo '{"state":"error","reason":"poll_category_send_failed"}'
     exit 1
   fi
-  cat_msg_id=$(json_field "$poll2_resp" messageId)
+  cat_msg_id=$(json_field "$poll_resp" messageId)
 
   # 세션 파일 저장
-  CHANNEL_ID="$channel_id" TIME_MSG="$time_msg_id" CAT_MSG="$cat_msg_id" SESSION_FILE="$sf" python3 - <<'PY'
+  CHANNEL_ID="$channel_id" CAT_MSG="$cat_msg_id" SESSION_FILE="$sf" python3 - <<'PY'
 import json, os
 from datetime import datetime, timezone, timedelta
 now = datetime.now(timezone.utc)
@@ -243,7 +232,6 @@ state = {
     "expiryAt": (now + timedelta(hours=1, minutes=1)).isoformat(),
     "channelId": os.environ["CHANNEL_ID"],
     "polls": {
-        "time":       {"messageId": os.environ.get("TIME_MSG") or None, "choice": None},
         "categories": {"messageId": os.environ.get("CAT_MSG") or None, "choices": []},
     },
     "preset": None,
@@ -323,7 +311,7 @@ cmd_collect() {
   fi
 
   RESP_JSON="$resp" SESSION_FILE="$sf" PROMPT_FILE="$pf" DISCORD_ID="$discord_id" \
-    TIME_Q="$TIME_QUESTION" CAT_Q="$CAT_QUESTION" python3 - <<'PY'
+    CAT_Q="$CAT_QUESTION" FIXED_PRESET="$FIXED_TIME_PRESET" python3 - <<'PY'
 import json, os, subprocess, sys
 from datetime import datetime, timezone
 
@@ -342,8 +330,7 @@ def find_poll(question_text):
             return m, poll
     return None, None
 
-_, time_poll = find_poll(os.environ["TIME_Q"])
-_, cat_poll  = find_poll(os.environ["CAT_Q"])
+_, cat_poll = find_poll(os.environ["CAT_Q"])
 
 def voted_indices_1based(poll):
     """voteCount >= 1 인 answer를 1-based 순서로 반환.
@@ -358,8 +345,7 @@ def voted_indices_1based(poll):
     chosen = [i + 1 for i, a in enumerate(answers) if (a.get("voteCount") or 0) >= 1]
     return chosen, finalized
 
-time_choices, time_final = voted_indices_1based(time_poll)
-cat_choices,  cat_final  = voted_indices_1based(cat_poll)
+cat_choices, cat_final = voted_indices_1based(cat_poll)
 
 # 만료 체크 (서버 시계 기준)
 expiry = state.get("expiryAt")
@@ -371,38 +357,25 @@ if expiry:
     except Exception:
         expired = False
 
-# 종결 조건:
-#  - time poll에 표가 있으면 즉시 종결 (그 선택 적용)
-#  - 둘 다 finalized 이거나 전체 만료면 종결
+# 종결 조건 (시간은 morning-daily 고정이라 카테고리 Poll만 본다):
+#  - cat poll에 표가 있으면 즉시 종결 (선택한 카테고리 적용)
+#  - cat poll이 finalized 이거나 전체 만료면 종결 (카테고리 = 전체로 default)
 decision = None
-if time_choices:
+if cat_choices:
     decision = "voted"
-elif time_final and cat_final:
+elif cat_final:
     decision = "finalized"
 elif expired:
     decision = "timeout"
 
 if decision is None:
     # 여전히 대기중. 아무것도 안 함.
-    print(json.dumps({"state":"awaiting","pollsSeen": bool(time_poll and cat_poll)}, ensure_ascii=False))
+    print(json.dumps({"state":"awaiting","pollSeen": bool(cat_poll)}, ensure_ascii=False))
     sys.exit(0)
 
-# preset 결정
-TIME_PRESETS = {
-    1: "morning-daily",
-    2: "weekday-morning",
-    3: "evening-daily",
-    4: "weekly-monday",
-    5: "skip",
-}
+# preset: 시간은 운영 정책으로 morning-daily 고정 (기본 원칙 — 사용자에게 묻지 않음).
 CAT_SOURCES = {1: "general", 2: "scholarship", 3: "event", 4: "career"}
-
-if time_choices:
-    preset = TIME_PRESETS.get(time_choices[0], "morning-daily")
-else:
-    # 만료/finalized 후 표가 없으면 기본값.
-    preset = "morning-daily"
-
+preset = os.environ["FIXED_PRESET"]
 sources = [CAT_SOURCES[i] for i in cat_choices if i in CAT_SOURCES]
 sources_csv = ",".join(sources)
 
@@ -414,15 +387,12 @@ r = subprocess.run(
 apply_ok = r.returncode == 0
 apply_msg = (r.stdout or r.stderr or "").strip()
 
-# 상태 전이
+# 상태 전이 (시간 고정이라 skip 분기 없음)
 if decision == "timeout":
     state["state"] = "timeout-applied"
-elif preset == "skip":
-    state["state"] = "skipped"
 else:
     state["state"] = "applied"
 
-state["polls"]["time"]["choice"] = time_choices[0] if time_choices else None
 state["polls"]["categories"]["choices"] = cat_choices
 state["preset"] = {"id": preset, "sources": sources, "applyOk": apply_ok, "applyMsg": apply_msg}
 state["closedAt"] = datetime.now(timezone.utc).isoformat()
@@ -440,19 +410,11 @@ with open(pf, "w", encoding="utf-8") as f:
         "sources": sources,
     }, f, ensure_ascii=False, indent=2)
 
-# 유저에게 확인 DM (router HTTP 위임)
-if preset == "skip":
-    confirm = "🔕 알림을 받지 않기로 하셨어요. 나중에 바꾸고 싶으면 '알림 설정 다시'라고 말씀해주세요."
-else:
-    pretty_time = {
-        "morning-daily": "매일 아침 8시",
-        "weekday-morning": "평일 아침 8시",
-        "evening-daily": "매일 저녁 9시",
-        "weekly-monday": "매주 월요일 아침 9시",
-    }.get(preset, preset)
-    pretty_cats = ", ".join(sources) if sources else "전체"
-    prefix = "⏰ 기본값으로" if decision == "timeout" else "✅"
-    confirm = f"{prefix} 공지 알림이 등록됐어요: **{pretty_time}** · 카테고리: **{pretty_cats}** 🦁"
+# 유저에게 확인 DM (router HTTP 위임). 시간은 매일 아침 8시 고정이라
+# 별도 안내 없이 카테고리만 보고.
+pretty_cats = ", ".join(sources) if sources else "전체"
+prefix = "⏰ 기본값으로" if decision == "timeout" else "✅"
+confirm = f"{prefix} 매일 아침 8시 공지 알림이 등록됐어요 · 카테고리: **{pretty_cats}** 🦁"
 
 # router /discord/send 로 위임. 실패는 non-blocking.
 import urllib.request, urllib.error

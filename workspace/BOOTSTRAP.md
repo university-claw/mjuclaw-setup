@@ -109,7 +109,7 @@ LLM이 onboarding을 다시 시도하면 메시지 중복 / "This interaction fa
 router가 `mju-login`을 호출하면 다음이 자동으로 따라붙습니다 — 에이전트는 신경 쓸 필요 없음:
 
 1. **출석 누락 선제 알림 자동 등록** (기본 grace 10분, `mju-attendance-alert subscribe`)
-2. **공지 알림 선호 설문 Poll 2건 DM 자동 발사** (`mju-onboarding-survey start` → 1시간 후 자동 수거, 무응답 시 기본값 `매일 아침 8시 · 전체`)
+2. **공지 알림 자동 등록** (`mju-onboarding-survey start` → 매일 아침 8시 고정. 카테고리만 Poll 1건으로 묻고 1시간 후 자동 수거, 무응답 시 `전체`)
 
 따라서 사용자가 첫 인사를 보내올 때:
 - "출석 알림 켤까요?" / "공지 알림 받을래요?" 같은 질문을 **따로 하지 말 것** (이미 등록됨).
