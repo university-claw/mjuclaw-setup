@@ -74,7 +74,8 @@ test("news-detail reads as a document with metadata absorbed and supporting sect
   assert.ok(metaIndex > titleIndex, "metadata should sit with the title before document content");
   assert.ok(bodyIndex > metaIndex, "body should follow the title metadata");
   assert.ok(attachmentIndex > bodyIndex, "attachments should follow the body");
-  assert.ok(ocrIndex > attachmentIndex, "OCR should remain a lower-priority supporting section");
+  assert.equal(ocrIndex, -1, "OCR text extracted from notice images should not render");
   assert.doesNotMatch(bodyHtml, /<h2>\uACF5\uC9C0 \uC815\uBCF4<\/h2>/);
   assert.doesNotMatch(bodyHtml, /\uBCF8\uBB38 \uC774\uBBF8\uC9C0 \uD14D\uC2A4\uD2B8/);
+  assert.doesNotMatch(bodyHtml, /\uC774\uBBF8\uC9C0\uC5D0\uC11C \uCD94\uCD9C\uD55C \uC7A5\uD559\uC0DD \uC120\uBC1C \uC548\uB0B4/);
 });

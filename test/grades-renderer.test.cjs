@@ -44,8 +44,14 @@ test("grades renders a banded GPA rail before course evidence without a distribu
   assert.match(html, /3\.0 미만/);
   assert.match(html, /4\.0\+/);
   assert.match(html, /class="grades-stat"/);
+  assert.equal((bodyHtml.match(/class="grades-stat"/g) || []).length, 2);
   assert.match(html, /class="grade-course-card/);
   assert.match(html, /class="grade-pill/);
+  assert.doesNotMatch(bodyHtml, /평균 학점/);
+  assert.doesNotMatch(bodyHtml, /평균 점수/);
+  assert.doesNotMatch(bodyHtml, /97점/);
+  assert.doesNotMatch(bodyHtml, /92점/);
+  assert.doesNotMatch(bodyHtml, /class="grade-score"/);
   assert.doesNotMatch(bodyHtml, /grades-gpa-axis/);
   assert.doesNotMatch(bodyHtml, /grade-band-strip/);
   assert.doesNotMatch(bodyHtml, /성적 분포/);

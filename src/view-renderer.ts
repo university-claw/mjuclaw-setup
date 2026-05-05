@@ -895,23 +895,25 @@ body {
   white-space: nowrap;
 }
 .grades-stats {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px; margin-top: 14px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; margin-top: 12px;
 }
 .grades-stat {
-  min-width: 0; padding: 10px 8px;
+  min-width: 0; min-height: 38px; padding: 8px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
   border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   background: var(--bg);
 }
 .grades-stat strong {
   display: block; color: var(--ink);
-  font-size: 15px; line-height: 1.1; font-weight: 700;
+  font-size: 14px; line-height: 1.1; font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .grades-stat span {
-  display: block; margin-top: 5px;
-  color: var(--ink-3); font-size: 11px; font-weight: 600;
+  display: block; margin-top: 0;
+  color: var(--ink-3); font-size: 10.5px; font-weight: 650;
   white-space: nowrap;
 }
 .grade-course-list {
@@ -1710,12 +1712,6 @@ function renderGrades(data: unknown): string {
   const maxGpa = typeof d.maxGpa === "number" ? d.maxGpa : 4.5;
   const gpaText = typeof d.gpa === "number" ? d.gpa.toFixed(2) : "-";
   const markerPercent = typeof d.gpa === "number" ? gpaBandRailPosition(d.gpa, maxGpa) : 0;
-  const scores = items
-    .map((item) => item.score)
-    .filter((score): score is number => typeof score === "number");
-  const averageScore = scores.length
-    ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
-    : null;
   const levelText = typeof d.gpa === "number" ? gpaBandName(d.gpa) : "GPA";
   const scaleText = typeof d.gpa === "number" ? gpaBandDescription(d.gpa) : "GPA 구간 기준";
 
@@ -1726,7 +1722,6 @@ function renderGrades(data: unknown): string {
   html += `<div class="grades-stats">`;
   html += `<div class="grades-stat"><strong>${totalCredits || "-"}</strong><span>이수 학점</span></div>`;
   html += `<div class="grades-stat"><strong>${courseCount}</strong><span>과목</span></div>`;
-  html += `<div class="grades-stat"><strong>${averageScore ?? "-"}</strong><span>평균 점수</span></div>`;
   html += `</div></div>`;
   html += `</section>`;
 
@@ -1735,7 +1730,7 @@ function renderGrades(data: unknown): string {
     const grade = item.grade || item.statusMessage || "-";
     const tone = gradeTone(grade);
     const topClass = tone === "high" ? " top" : "";
-    html += `<article class="grade-course-card${topClass}"><div class="grade-course-main"><div class="grade-course-title">${esc(item.courseTitle || "과목명 미정")}</div><div class="grade-course-meta">${joinMeta([item.credits != null ? `${item.credits}학점` : null])}</div></div><div class="grade-course-result"><div class="grade-pill ${tone}">${esc(grade)}</div><div class="grade-score">${item.score != null ? `${esc(String(item.score))}점` : "상태"}</div></div></article>`;
+    html += `<article class="grade-course-card${topClass}"><div class="grade-course-main"><div class="grade-course-title">${esc(item.courseTitle || "과목명 미정")}</div><div class="grade-course-meta">${joinMeta([item.credits != null ? `${item.credits}학점` : null])}</div></div><div class="grade-course-result"><div class="grade-pill ${tone}">${esc(grade)}</div></div></article>`;
   }
   html += `</div></section>`;
 
@@ -1948,7 +1943,7 @@ function renderActionItems(data: unknown): string {
   const online = (d.incompleteOnlineWeeks as OnlineActionItem[] | undefined) ?? [];
   const total = unsub.length + due.length + notices.length + online.length;
   if (total === 0) {
-    return `<section class="section"><div class="section-title"><h2>다음에 할 일</h2></div><div class="section-sub">지금 해야 할 일이 없어요. 훌륭해요.</div></section>`;
+    return `<section class="section"><div class="section-title"><h2>우선 처리 항목</h2></div><div class="section-sub">처리할 항목이 없습니다.</div></section>`;
   }
 
   const queue = buildActionQueue(unsub, due, online, notices);
@@ -1959,18 +1954,18 @@ function renderActionItems(data: unknown): string {
   const soonItems = lanes.filter((item) => item.lane === "soon");
   const noticeItems = lanes.filter((item) => item.lane === "notice");
 
-  let html = `<section class="section action-queue"><div class="section-title"><h2>다음에 할 일</h2></div><div class="section-sub">총 ${total}건 중 가장 먼저 처리할 항목이에요.</div>`;
+  let html = `<section class="section action-queue"><div class="section-title"><h2>우선 처리 항목</h2></div><div class="section-sub">총 ${total}건 중 가장 먼저 처리할 항목입니다.</div>`;
   if (nextAction) {
     html += renderActionNext(nextAction);
   } else {
-    html += `<div class="section-sub">마감이 있는 항목은 없고 확인할 공지만 있어요.</div>`;
+    html += `<div class="section-sub">마감 항목은 없고 읽지 않은 공지만 있습니다.</div>`;
   }
   html += `</section>`;
 
-  html += renderActionLane("지금 위험함", urgentItems);
-  html += renderActionLane("오늘 해야 함", todayItems);
-  html += renderActionLane("곧 해야 함", soonItems);
-  html += renderActionLane("확인만 하면 됨", noticeItems);
+  html += renderActionLane("기한 경과", urgentItems);
+  html += renderActionLane("오늘 마감", todayItems);
+  html += renderActionLane("마감 예정", soonItems);
+  html += renderActionLane("읽지 않은 공지", noticeItems);
 
   return html;
 }
@@ -2124,9 +2119,9 @@ function actionDueText(item: ActionQueueItem): string {
 }
 
 function actionReason(item: ActionQueueItem): string {
-  if (item.lane === "urgent") return "기한 확인 필요";
-  if (item.lane === "today") return "오늘 처리";
-  if (item.source === "online") return "시청 필요";
+  if (item.lane === "urgent") return "기한 경과";
+  if (item.lane === "today") return "오늘 마감";
+  if (item.source === "online") return "영상 마감";
   return "";
 }
 
@@ -2421,17 +2416,6 @@ function renderNewsDetail(data: unknown): string {
         html += `<div class="row-preview notice-preview muted">${esc(extractionStatusLabel(ex.status))}</div>`;
       }
       html += `</div>`;
-    }
-    html += `</section>`;
-  }
-
-  const ocrImages = (d.images || []).filter((im) => im.ocr?.status === "succeeded" && im.ocr.text);
-  if (ocrImages.length > 0) {
-    html += `<section class="section notice-ocr-section"><div class="section-title"><h2>이미지에서 추출한 텍스트<span class="count">${ocrImages.length}개</span></h2></div>`;
-    for (const im of ocrImages) {
-      const text = im.ocr?.text ?? "";
-      const preview = previewText(text);
-      html += `<div class="notice-ocr-text">${esc(preview)}</div>`;
     }
     html += `</section>`;
   }

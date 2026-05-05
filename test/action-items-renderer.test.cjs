@@ -75,15 +75,16 @@ test("action-items renders a next action followed by urgency lanes", () => {
   const bodyHtml = html.slice(html.indexOf("</style>"));
 
   const nextIndex = bodyHtml.indexOf('class="action-next');
-  const todayIndex = bodyHtml.indexOf("오늘 해야 함");
-  const soonIndex = bodyHtml.indexOf("곧 해야 함");
-  const confirmIndex = bodyHtml.indexOf("확인만 하면 됨");
+  const todayIndex = bodyHtml.indexOf("오늘 마감");
+  const soonIndex = bodyHtml.indexOf("마감 예정");
+  const confirmIndex = bodyHtml.indexOf("읽지 않은 공지");
   const onlineTodayIndex = bodyHtml.indexOf("Contract liability lecture");
   const caseReviewIndex = bodyHtml.indexOf("Case review note");
   const discussionIndex = bodyHtml.indexOf("Discussion post");
   const labIndex = bodyHtml.indexOf("Lab report revision");
   const tortIndex = bodyHtml.indexOf("Tort summary");
 
+  assert.match(bodyHtml, /우선 처리 항목/);
   assert.ok(nextIndex >= 0, "next best action card should render first");
   assert.ok(todayIndex > nextIndex, "today lane should follow the next action");
   assert.ok(soonIndex > todayIndex, "soon lane should follow today's work");
@@ -97,6 +98,11 @@ test("action-items renders a next action followed by urgency lanes", () => {
   assert.doesNotMatch(bodyHtml, /마감 임박/);
   assert.doesNotMatch(bodyHtml, /안 읽은 공지/);
   assert.doesNotMatch(bodyHtml, /미수강 온라인/);
+  assert.doesNotMatch(bodyHtml, /다음에 할 일/);
+  assert.doesNotMatch(bodyHtml, /오늘 해야 함/);
+  assert.doesNotMatch(bodyHtml, /곧 해야 함/);
+  assert.doesNotMatch(bodyHtml, /확인만 하면 됨/);
+  assert.doesNotMatch(bodyHtml, /시청 필요/);
 });
 
 test("action-items omits the generic AI summary even when an AI response exists", () => {
