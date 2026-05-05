@@ -126,6 +126,37 @@ services:
       - PORT=3200
     # host port 매핑 없음 — router → classifier 내부 네트워크 전용
 
+  # ── mju-public-data-worker (공지/학식 정본 생성) ─────────────────
+  # 이전엔 호스트 launchd(`com.mjuclaw.worker.plist`)가 매 15분 schedule:tick을
+  # 실행했지만 다른 호스트(Linux server, 다른 Mac)로 옮길 때 launchd 의존이
+  # portability 막힘 → compose service로 통합. 컨테이너 entrypoint가 시작 시
+  # migrate 1회 + 매 900초 schedule:tick 무한 loop. 호스트 launchd는 운영자가
+  # 수동으로 unload 권장 (`launchctl unload ~/Library/LaunchAgents/com.mjuclaw.worker.plist`).
+  worker:
+    build:
+      context: ./mju-public-data-worker
+      dockerfile: Dockerfile
+    container_name: mjuclaw-worker
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # 공개 데이터 스키마(public_data)는 worker가 단독 write — agent와 같은 PG.
+      - PGHOST=${PGHOST:-host.docker.internal}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-mjuclaw}
+      - PGUSER=${PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSCHEMA=${PGSCHEMA:-public_data}
+      - LOG_LEVEL=${WORKER_LOG_LEVEL:-info}
+      # 자산 디렉토리 — agent는 read-only로 같은 경로 mount.
+      - STORAGE_LOCAL_ROOT=/data/assets
+    volumes:
+      # 호스트 path 사용 (.env의 STORAGE_LOCAL_ROOT) — agent와 공유.
+      # 다른 호스트로 옮길 때 호스트 path만 다시 지정하면 됨.
+      - ${STORAGE_LOCAL_ROOT}:/data/assets
+    # host port 매핑 없음 — schedule worker는 outbound HTTP만 사용
+
 volumes:
   agent-data:
   user-data:

@@ -59,22 +59,16 @@ clone_or_pull mju-news https://github.com/university-claw/mju-news.git
 # mjuclaw-router : Discord WS 입구 + 온보딩 게이트 + cron alert 우회 HTTP 서버.
 # OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
 clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git
+# mju-public-data-worker : 공지/학식 정본 생성 worker (Postgres + tesseract.js OCR).
+# private 레포 — 다른 호스트에서 setup.sh 실행 시 GitHub 인증(gh auth login 또는 SSH)
+# 필요. compose에 worker service로 통합되어 호스트 launchd 의존이 제거된다.
+clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git
 
 # intent-classifier : KcELECTRA-base 15-class 한국어 의도 분류 모델 + serving.
-# 현재 git 레포가 아니라 워크스페이스 로컬 디렉토리이므로 sibling(`../intent-classifier`)
-# 에서 복사한다. 향후 별도 레포로 분리되면 위 clone_or_pull 패턴으로 대체.
-if [ ! -d intent-classifier/model ]; then
-  if [ -d ../intent-classifier/model ]; then
-    echo "  → intent-classifier 복사 (sibling → setup/)..."
-    cp -r ../intent-classifier ./intent-classifier
-  else
-    echo "  ⚠ intent-classifier 디렉토리를 찾지 못함." >&2
-    echo "    워크스페이스 루트(../intent-classifier)에 model/serving이 있어야 합니다." >&2
-    echo "    classifier 서비스 없이 진행하려면 .env의 CLASSIFIER_ENABLED=false." >&2
-  fi
-else
-  echo "  ✓ intent-classifier 이미 있음"
-fi
+# 모델 가중치(420MB)는 git이 아니라 HuggingFace Hub(kbsooo/mjuclaw-intent-classifier)에서
+# Dockerfile이 빌드 시 huggingface_hub.snapshot_download 로 자동 download. 따라서
+# 다른 sub-repo와 동일한 clone_or_pull 패턴으로 충분하다 (호스트에 model/ 없어도 빌드 가능).
+clone_or_pull intent-classifier https://github.com/university-claw/intent-classifier.git
 
 # ── 3. .env 확인 ────────────────────────────────────────────────
 echo ""
