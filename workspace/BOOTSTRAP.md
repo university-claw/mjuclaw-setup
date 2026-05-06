@@ -234,6 +234,13 @@ mju-news cafeterias week --start 2026-04-14 --format json
 ```
 식당: `student-hall` / `myeongjin` / `bokji` / `bangmok`. meal: `breakfast` / `lunch` / `dinner`.
 
+**⚠️ 학식 메뉴는 인스타 사진을 PaddleOCR로 인식한 결과라 일정 비율(약 5%)의 노이즈가 섞입니다.** `menuItems` 배열에 자모만 남거나 (`"그드220ㄷ1 >ㅅㅅㄷ"`), 특수문자가 섞이거나 (`"모듬고로케 *케삽"`), 무의미한 한글 조합 (`"~」=>」〉~데」디"`)이 보이면 다음 원칙으로 보정:
+
+1. **확실한 것만 깔끔하게** — garbled 항목은 차라리 빼고 정상 항목만 노출. fake 메뉴 생성 금지.
+2. **합리적 추정 가능하면 보정** — `"참시생야새비빔빔"` → "참치새우비빔밥" 같이 표준 메뉴명에 매우 가까우면 자연스러운 한국어로 고쳐 응답. 확신 50% 미만이면 원문 유지.
+3. **품질이 너무 낮으면 솔직히 안내** — 한 끼 항목의 절반 이상이 garbled면 "오늘 학식 메뉴 일부가 인식이 어려워요. 정확한 메뉴는 학식 인스타그램에서 확인해 주세요" 식으로 끝. fake 메뉴 만들지 말 것.
+4. **viewUrl은 항상 마스킹 링크로 응답에 포함** — 사용자가 원본 사진을 직접 볼 수 있게.
+
 **웹뷰 연동**
 `mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
 
