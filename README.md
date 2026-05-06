@@ -268,7 +268,105 @@ docker exec mjuclaw-agent rm -f /home/agent/.openclaw/agents/main/sessions/disco
 
 ---
 
-## 5. 업데이트 (이미 설치된 호스트)
+## 5. 환경 이전 (Migration) — 같은 secrets/계정 그대로 새 호스트로
+
+본인이 호스트만 옮길 때 (Discord bot token, Gemini API key, ngrok reserved domain 모두 그대로). 다른 사용자에게 넘기는 게 아니라 본인 운영 환경 이전.
+
+### 옮길 데이터 7가지
+
+| # | 항목 | 보관 위치 | 비고 |
+|---|---|---|---|
+| 1 | `.env` | mjuclaw-setup 루트 | 모든 secrets — `MJU_VAULT_KEY` 동일해야 vault 복호화 |
+| 2 | Docker volume `user-data` | `/data/users` | 사용자 vault + state (옵션 A `MJU_STORAGE=postgres`이면 PG에 저장 — 이 항목 skip) |
+| 3 | Docker volume `agent-data` | `/home/agent/.openclaw` | OpenClaw config / cron jobs / view-store / 세션 |
+| 4 | Docker volume `router-data` | `/home/router/.openclaw` | router의 device pairing key (없어도 자동 재페어링되지만 startup 지연 회피) |
+| 5 | `STORAGE_LOCAL_ROOT` 호스트 path | 호스트 절대경로 | worker가 저장한 공지 첨부/이미지 (큰 사이즈 가능) |
+| 6 | 호스트 Postgres `mjuclaw` DB (옵션 A) | 호스트 PG | `public_data` + `user_data` 스키마 모두. `pg_dump -Fc` |
+| 7 | bundled PG volume `public-data-db` (옵션 B) | Docker volume | `pg_dump` 또는 volume tar export |
+
+### Export — 본인 호스트 (이전 출발지)
+
+```bash
+cd ~/Codes/projects/mjuclaw/mjuclaw-setup
+docker compose down                                       # 일관성을 위해 잠시 stop
+
+# .env + STORAGE_LOCAL_ROOT 자산 + Docker volume 3개 + PG 덤프
+EXPORT=/tmp/mjuclaw-export && mkdir -p $EXPORT
+cp .env $EXPORT/
+rsync -a "$(grep ^STORAGE_LOCAL_ROOT .env | cut -d= -f2)/" $EXPORT/assets/
+for v in mjuclaw-setup_user-data mjuclaw-setup_agent-data mjuclaw-setup_router-data; do
+  docker run --rm -v "$v:/data" -v $EXPORT:/backup alpine \
+    tar czf /backup/$v.tar.gz -C /data .
+done
+# 호스트 Postgres 옵션 A
+pg_dump -h localhost -U mjuclaw_app -Fc mjuclaw > $EXPORT/mjuclaw.dump
+
+# 묶어서 새 호스트로 전송
+tar czf ~/mjuclaw-export.tar.gz -C $EXPORT .
+scp ~/mjuclaw-export.tar.gz NEW_HOST:~/
+
+docker compose up -d                                      # 본인 호스트 다시 켜기 (이전 후엔 stop 권장)
+```
+
+### Import — 새 호스트 (이전 도착지)
+
+```bash
+# 1. 사전 준비: Docker Desktop / docker-compose / Postgres(옵션 A) / ngrok 설치
+# (호스트 OS별 설치는 README의 "사전 준비물" 섹션 참고)
+
+# 2. export 풀기
+mkdir -p ~/mjuclaw-import && tar xzf ~/mjuclaw-export.tar.gz -C ~/mjuclaw-import
+
+# 3. setup clone + .env 복사
+git clone -b v1.1.0 https://github.com/university-claw/mjuclaw-setup.git
+cd mjuclaw-setup
+cp ~/mjuclaw-import/.env .env
+
+# 4. STORAGE_LOCAL_ROOT 새 호스트 path로 변경 + 자산 복사
+NEW_STORAGE=$HOME/mjuclaw-data/assets
+mkdir -p $NEW_STORAGE
+rsync -a ~/mjuclaw-import/assets/ $NEW_STORAGE/
+sed -i.bak "s|^STORAGE_LOCAL_ROOT=.*|STORAGE_LOCAL_ROOT=$NEW_STORAGE|" .env
+
+# 5. (옵션 A) 호스트 Postgres 새로 설치 + restore
+brew install postgresql@17 && brew services start postgresql@17     # 또는 apt-get install postgresql-17
+psql postgres <<'SQL'
+CREATE DATABASE mjuclaw;
+CREATE ROLE mjuclaw_app LOGIN PASSWORD 'change-me';
+CREATE ROLE mjuclaw_user_app LOGIN PASSWORD 'change-me';
+SQL
+pg_restore -h localhost -U mjuclaw_app -d mjuclaw ~/mjuclaw-import/mjuclaw.dump
+
+# 6. 컨테이너 build (sub-repo 자동 clone + 4 image build)
+./setup.sh    # 마지막에 docker compose up -d 자동 실행
+
+# 7. Docker volume 복원 (반드시 위 setup.sh 후, 컨테이너 stop 상태에서)
+docker compose down
+for v in mjuclaw-setup_user-data mjuclaw-setup_agent-data mjuclaw-setup_router-data; do
+  docker run --rm -v "$v:/data" -v ~/mjuclaw-import:/backup alpine \
+    sh -c "cd /data && tar xzf /backup/$v.tar.gz"
+done
+docker compose up -d
+
+# 8. ngrok 다시 시작 (같은 reserved domain → VIEW_BASE_URL 그대로 작동)
+NGROK_DOMAIN=$(grep ^VIEW_BASE_URL .env | sed 's|.*//||; s|/.*||')
+ngrok http --domain=$NGROK_DOMAIN 3001
+```
+
+### 주의사항
+
+- **`MJU_VAULT_KEY` 절대 새로 생성 금지** — `.env`에 있는 그 값과 동일해야 기존 사용자 vault 복호화 가능. 잃으면 모든 사용자 재 onboarding 필요.
+- **PG 비밀번호** 도 `.env`와 새 호스트 PG의 ROLE password가 같아야 (위 SQL의 `change-me` 부분을 `.env`의 `PGPASSWORD` 값으로).
+- **Discord bot은 한 번에 한 토큰만 connect** — 이전 중에는 본인 호스트 컨테이너를 반드시 `docker compose down` (위에 포함됨).
+- **호스트 launchd worker** (com.mjuclaw.worker.plist)도 본인 호스트에서 unload — 새 호스트에선 컨테이너 worker가 대체:
+  ```bash
+  launchctl unload ~/Library/LaunchAgents/com.mjuclaw.worker.plist
+  ```
+- **ngrok reserved domain**은 ngrok account 자체에 묶여있어 새 호스트에서 같은 account로 ngrok 띄우면 그대로 사용 가능. account 정보는 `~/.config/ngrok/ngrok.yml` 또는 ngrok dashboard에서.
+
+---
+
+## 6. 업데이트 (이미 설치된 호스트)
 
 ```bash
 cd mjuclaw-setup
@@ -285,7 +383,7 @@ git fetch --tags && git checkout v1.1.1   # 새 release 나오면
 
 ---
 
-## 6. 트러블슈팅
+## 7. 트러블슈팅
 
 | 증상 | 원인 / 조치 |
 |---|---|
@@ -298,7 +396,7 @@ git fetch --tags && git checkout v1.1.1   # 새 release 나오면
 
 ---
 
-## 7. 관련 레포
+## 8. 관련 레포
 
 - [mju-cli](https://github.com/university-claw/mju-cli) — 명지대 서비스 CLI (LMS/MSI/UCheck/Library, SSO 기반)
 - [mju-news](https://github.com/university-claw/mju-news) — Reader CLI (worker DB → JSON)
@@ -308,6 +406,6 @@ git fetch --tags && git checkout v1.1.1   # 새 release 나오면
 
 ---
 
-## 8. 라이선스 / 기여
+## 9. 라이선스 / 기여
 
 내부 프로젝트. 외부 contribution은 별도 계약 후. 보안 취약점 발견 시 GitHub Security Advisory.
