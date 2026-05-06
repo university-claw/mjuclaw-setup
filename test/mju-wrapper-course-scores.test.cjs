@@ -1,8 +1,15 @@
 const assert = require("node:assert/strict");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
+
+const bashProbe = spawnSync("bash", ["-lc", "command -v node"], {
+  encoding: "utf8",
+  windowsHide: true,
+});
+const bashTest = bashProbe.status === 0 ? test : test.skip;
+const bashNodePath = bashProbe.stdout.trim();
 
 function toBashPath(filePath) {
   const normalized = path.resolve(filePath).replace(/\\/g, "/");
@@ -29,15 +36,8 @@ function run(command, args, options) {
   });
 }
 
-async function bashCommand(command, cwd) {
-  const result = await run("bash", ["-lc", command], { cwd });
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout.trim();
-}
-
 async function createWrapperFixture(t, cliOutput) {
   const root = path.resolve(__dirname, "..");
-  const bashNode = await bashCommand("command -v node", root);
   const testDir = path.join(root, ".tmp", `mju-wrapper-${process.pid}-${Math.random().toString(16).slice(2)}`);
   await fs.rm(testDir, { recursive: true, force: true });
   await fs.mkdir(testDir, { recursive: true });
@@ -70,7 +70,7 @@ printf '%s\\n' '{"url":"http://view.local/course-scores-test"}'
 console.log(${JSON.stringify(JSON.stringify(cliOutput))});
 `, "utf8");
 
-  return { root, realMju, curlStub, bashNode, testDir, curlCapture };
+  return { root, realMju, curlStub, bashNode: bashNodePath, testDir, curlCapture };
 }
 
 function wrapperCommand(fixture, args) {
@@ -85,7 +85,7 @@ function wrapperCommand(fixture, args) {
   ].join(" ");
 }
 
-test("mju wrapper routes course-scores to the view API and injects viewUrl", async (t) => {
+bashTest("mju wrapper routes course-scores to the view API and injects viewUrl", async (t) => {
   const fixture = await createWrapperFixture(t, {
     year: 2026,
     termLabel: "1학기",
@@ -124,7 +124,7 @@ test("mju wrapper routes course-scores to the view API and injects viewUrl", asy
 });
 
 for (const legacyCommand of ["current-grades", "grades"]) {
-  test(`mju wrapper leaves msi ${legacyCommand} output unviewed`, async (t) => {
+  bashTest(`mju wrapper leaves msi ${legacyCommand} output unviewed`, async (t) => {
     const fixture = await createWrapperFixture(t, {
       items: [{ courseTitle: "시스템클라우드보안", grade: "A+" }],
     });

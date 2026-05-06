@@ -5,14 +5,14 @@
 #   ./setup.sh
 #
 # 동작:
-#   1. mju-cli, mju-news를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
+#   1. mju-cli, mju-news, mju-public-data-worker를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
 #   2. .env 파일이 없으면 .env.example을 복사하고 유저에게 편집 안내
 #   3. docker compose build + up
 #
 # 주의: 토폴로지 A(하이브리드) 전제.
 #   - Postgres는 호스트에 직접 설치되어 있어야 한다 (Homebrew / apt 등).
-#   - mju-public-data-worker는 별도 레포를 호스트에서 직접 돌린다
-#     (이 setup은 clone 하지 않는다). 참고: ../mju-public-data-worker
+#   - mju-public-data-worker는 public-data compose profile에서 사용한다.
+#     profile을 켜지 않으면 worker 컨테이너는 실행하지 않는다.
 
 set -e
 cd "$(dirname "$0")"
@@ -81,9 +81,10 @@ clone_or_pull mju-news https://github.com/university-claw/mju-news.git "$MJU_NEW
 # mjuclaw-router : Discord WS 입구 + 온보딩 게이트 + cron alert 우회 HTTP 서버.
 # OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
 clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git "$MJUCLAW_ROUTER_BRANCH"
-# mju-public-data-worker : 공지/학식 정본 생성 worker (Postgres + tesseract.js OCR).
+# mju-public-data-worker : 공지/학식 정본 생성 worker (Postgres + PaddleOCR).
 # private 레포 — 다른 호스트에서 setup.sh 실행 시 GitHub 인증(gh auth login 또는 SSH)
 # 필요. compose에 worker service로 통합되어 호스트 launchd 의존이 제거된다.
+# OCR은 PaddleOCR 기본 (PR #10/#12 머지 결과). public-data profile로 별도 분리 빌드도 가능.
 clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git "$MJU_PUBLIC_DATA_WORKER_BRANCH"
 
 # intent-classifier : KcELECTRA-base 15-class 한국어 의도 분류 모델 + serving.
