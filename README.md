@@ -183,6 +183,12 @@ view-server :3001 을 사용자가 브라우저로 열려면 외부 URL 필요. 
 ngrok http --domain=<your-reserved-domain>.ngrok-free.dev 3001
 ```
 
+ngrok도 Docker Compose로 관리하려면 자동 로드되는 로컬 override 대신 명시 파일을 같이 지정한다:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ngrok.yml --profile ngrok up -d ngrok
+```
+
 `.env`의 `VIEW_BASE_URL=https://<your-reserved-domain>.ngrok-free.dev` 일치시킬 것. ngrok 외에 Cloudflare Tunnel/Caddy/Nginx + 도메인도 OK.
 
 ---
