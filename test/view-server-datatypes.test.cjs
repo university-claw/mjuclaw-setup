@@ -28,6 +28,14 @@ async function waitForHealth(port) {
   throw new Error(`view server did not start on port ${port}`);
 }
 
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const closed = once(child, "close");
+  child.kill();
+  await closed;
+}
+
 async function withViewServer(t, fn) {
   const port = await freePort();
   const root = path.resolve(__dirname, "..");
@@ -42,7 +50,7 @@ async function withViewServer(t, fn) {
     stdio: "ignore",
     windowsHide: true,
   });
-  t.after(() => child.kill());
+  t.after(() => stopChild(child));
 
   await waitForHealth(port);
   await fn(port);
