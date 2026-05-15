@@ -209,6 +209,12 @@ docker compose -f docker-compose.yml -f docker-compose.ngrok.yml --profile ngrok
 | Sub-repo branch (release 고정용) | `MJU_CLI_BRANCH`, `MJU_NEWS_BRANCH`, `MJUCLAW_ROUTER_BRANCH`, `MJU_PUBLIC_DATA_WORKER_BRANCH`, `INTENT_CLASSIFIER_BRANCH` |
 | 외부 터널 | `NGROK_DOMAIN` |
 
+`setup.sh`는 현재 `mju-cli`를 course-scores 지원 branch로 고정한다. 수동 준비 시 동일한 기준은 다음과 같다:
+
+```bash
+git clone --branch msi-course-scores https://github.com/university-claw/mju-cli.git
+```
+
 ---
 
 ## 4. 운영

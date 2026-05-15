@@ -103,7 +103,7 @@ WORKDIR /home/agent
 RUN mkdir -p /home/agent/.openclaw/workspace/skills
 
 # ── SKILL.md 설치 ───────────────────────────────────────────────
-# mju-cli 기본 skills → 에이전트 전용 skills로 오버라이드 (mju-shared, mju-onboarding)
+# mju-cli 기본 skills → 에이전트 전용 skills로 오버라이드 (mju-shared, mju-msi)
 COPY --chown=agent:agent mju-cli/skills/ /home/agent/.openclaw/workspace/skills/
 COPY --chown=agent:agent mju-news/skills/ /home/agent/.openclaw/workspace/skills/
 COPY --chown=agent:agent skills/ /home/agent/.openclaw/workspace/skills/

@@ -17,8 +17,21 @@
 set -e
 cd "$(dirname "$0")"
 
+read_dotenv_value() {
+  local KEY="$1"
+  local LINE=""
+  if [ -f .env ]; then
+    LINE=$(grep -E "^${KEY}=" .env | tail -n 1 || true)
+  fi
+  printf "%s" "${LINE#*=}" | tr -d '\r'
+}
+
+MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-$(read_dotenv_value MJU_CLI_BRANCH)}"
 MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-msi-course-scores}"
-MJU_NEWS_BRANCH="${MJU_NEWS_BRANCH:-}"
+MJU_NEWS_BRANCH="${MJU_NEWS_BRANCH:-$(read_dotenv_value MJU_NEWS_BRANCH)}"
+MJUCLAW_ROUTER_BRANCH="${MJUCLAW_ROUTER_BRANCH:-$(read_dotenv_value MJUCLAW_ROUTER_BRANCH)}"
+MJU_PUBLIC_DATA_WORKER_BRANCH="${MJU_PUBLIC_DATA_WORKER_BRANCH:-$(read_dotenv_value MJU_PUBLIC_DATA_WORKER_BRANCH)}"
+INTENT_CLASSIFIER_BRANCH="${INTENT_CLASSIFIER_BRANCH:-$(read_dotenv_value INTENT_CLASSIFIER_BRANCH)}"
 
 echo "┌─────────────────────────────────────────────┐"
 echo "│  MJUClaw Agent — 자동 셋업                  │"

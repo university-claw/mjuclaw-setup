@@ -18,8 +18,11 @@ test("local mju-msi skill overrides current-term grades to course-scores", () =>
 test("runtime instructions avoid removed current-grade commands", () => {
   const runtimeInstructionFiles = [
     path.join(root, "workspace", "BOOTSTRAP.md"),
-    path.join(root, "skills", "mju-msi", "SKILL.md"),
-    path.join(root, "skills", "mju-onboarding", "SKILL.md"),
+    ...fs
+      .readdirSync(path.join(root, "skills"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(root, "skills", entry.name, "SKILL.md"))
+      .filter((filePath) => fs.existsSync(filePath)),
   ];
 
   for (const filePath of runtimeInstructionFiles) {
@@ -50,6 +53,8 @@ test("setup pins mju-cli to the course-scores capable branch", () => {
   const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
 
+  assert.match(setup, /read_dotenv_value\(\)/);
+  assert.match(setup, /MJU_CLI_BRANCH="\$\{MJU_CLI_BRANCH:-\$\(read_dotenv_value MJU_CLI_BRANCH\)\}"/);
   assert.match(setup, /MJU_CLI_BRANCH="\$\{MJU_CLI_BRANCH:-msi-course-scores\}"/);
   assert.match(setup, /git clone --branch "\$BRANCH" "\$REPO" "\$DIR"/);
   assert.match(setup, /clone_or_pull mju-cli https:\/\/github\.com\/university-claw\/mju-cli\.git "\$MJU_CLI_BRANCH"/);
