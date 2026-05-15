@@ -19,9 +19,10 @@ metadata:
 1. **모든 mju 명령에 `--app-dir /data/users/{DISCORD_USER_ID}` 를 붙이세요.** 유저별 크리덴셜과 세션이 이 경로에 저장됩니다. `{DISCORD_USER_ID}`는 현재 대화하는 Discord 유저의 ID입니다.
 2. **인증은 mjuclaw-router가 사전에 처리합니다.** 메시지가 도달했다면 이미 인증된 사용자입니다. `mju auth status` / `mju auth login` / `mju auth forget` / `openclaw message send --components` 호출은 모두 금지(중복 modal 발사 / interaction failed의 원인).
 3. **도구 호출 없이 "로그인 필요/로그인 안 됨/세션 확인" 응답 생성 절대 금지.** 학사 데이터 query(LMS/MSI/UCheck/Library)에는 **반드시 먼저 mju 도구를 호출**하고 그 응답에 `401`, `403`, `session expired`, `auth required` 같은 명시적 인증 만료 시그널이 있을 때만 "잠시 세션 확인이 필요해요. DM에 다시 한 마디 보내주시면 자동으로 안내가 진행돼요."로 끝내세요. 도구가 정상 데이터를 반환하면 그 결과로 응답하고, 빈 결과면 "조회 결과가 없어요"로 정직하게 응답합니다.
-3. 기본 출력은 `--format json`을 유지합니다.
-4. 실제 변경이 있는 명령은 preview를 먼저 보고 `--confirm`으로 실행합니다.
-5. 삭제, 초기화, 로그아웃, 전체 구독 해제처럼 되돌리기 어렵거나 사용자 상태를 크게 바꾸는 요청은 실행 전에 한 번 확인합니다.
+4. **사용자 이름/호칭은 OpenClaw `USER.md`/`MEMORY.md`/memory search에서 판단하지 않습니다.** "내 이름 뭐야?", "나 뭐라고 불러야 해?", "앞으로 나 XX라고 불러줘"는 `mju profile get` / `mju profile set-preferred-name` / `mju profile clear-preferred-name`만 사용하세요. 저장 위치는 현재 Discord userId의 `user_data.profiles.payload.preferredName`입니다.
+5. 기본 출력은 `--format json`을 유지합니다.
+6. 실제 변경이 있는 명령은 preview를 먼저 보고 `--confirm`으로 실행합니다.
+7. 삭제, 초기화, 로그아웃, 전체 구독 해제처럼 되돌리기 어렵거나 사용자 상태를 크게 바꾸는 요청은 실행 전에 한 번 확인합니다.
 
 ## 안전 응답 정책
 
@@ -64,6 +65,7 @@ metadata:
 ## 주요 표면
 
 - 인증: `mju auth ...`
+- 프로필/호칭: `mju profile get`, `mju profile set-preferred-name --name "..."`, `mju profile clear-preferred-name`
 - LMS: `mju lms ...`
 - MSI: `mju msi ...`
 - UCheck: `mju ucheck ...`

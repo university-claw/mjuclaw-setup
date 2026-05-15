@@ -205,7 +205,7 @@ docker compose -f docker-compose.yml -f docker-compose.ngrok.yml --profile ngrok
 | 자산 저장 | `STORAGE_LOCAL_ROOT` |
 | Router/Gateway | `MJUCLAW_ROUTER_TOKEN`, `MJUCLAW_ROUTER_URL`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GATEWAY_TOKEN`, `ROUTER_LOG_LEVEL` |
 | Classifier | `CLASSIFIER_ENABLED`, `CLASSIFIER_URL`, `CLASSIFIER_AUTH_TOKEN`, `CLASSIFIER_TIMEOUT_MS`, `CLASSIFIER_ABUSE_THRESHOLD`, `CLASSIFIER_LOG_LEVEL` |
-| Worker | `WORKER_LOG_LEVEL`, `PUBLIC_DATA_*`, `CAFETERIA_OCR_COMMAND`, `PADDLE_OCR_REC_MODEL_NAME`, `PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS` |
+| Worker | `WORKER_LOG_LEVEL`, `PUBLIC_DATA_*`, `CAFETERIA_OCR_COMMAND`, `PADDLE_OCR_REC_MODEL_NAME`, `PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS`, `OPENAI_API_KEY`, `NOTICE_NORMALIZATION_*` |
 | Sub-repo branch (release 고정용) | `MJU_CLI_BRANCH`, `MJU_NEWS_BRANCH`, `MJUCLAW_ROUTER_BRANCH`, `MJU_PUBLIC_DATA_WORKER_BRANCH`, `INTENT_CLASSIFIER_BRANCH` |
 | 외부 터널 | `NGROK_DOMAIN` |
 
@@ -398,7 +398,7 @@ git fetch --tags && git checkout v1.1.1   # 새 release 나오면
 | 학식/공지가 비어있음 | worker 로그에서 `schedule:tick` 결과 확인. PaddleOCR 첫 호출 시 모델 download(~30s) 필요. PG 연결 OK인지 `docker exec mjuclaw-worker node dist/main.js doctor`. |
 | 같은 schedule cron이 여러 개 | `mju-news-alert` / `mju-attendance-alert` 가 user-level flock + post-add dedupe로 자동 정리. 그래도 남으면 `openclaw cron remove <id>` 수동. |
 | onboarding modal 누르면 "This interaction failed" | router/agent 두 봇이 동시에 같은 토큰으로 connect 됐는지 확인. agent 컨테이너 안에 `DISCORD_BOT_TOKEN` env 없어야 함. |
-| 다른 사용자 데이터가 본인 응답에 섞임 | router의 `--session-id discord-<id>` + 메시지 prefix `[사용자ID: <id>]` 가 정상 적용됐는지 검증. agent 안 sessions 디렉토리에 사용자별 jsonl이 있어야 함. |
+| 다른 사용자 데이터가 본인 응답에 섞임 | router가 `--session-id discord-<id>`를 넘기고 `--to`를 넘기지 않는지, 메시지에 `[현재 사용자 컨텍스트]`의 `discordUserId`가 붙는지 검증. agent sessions는 `agent:main:explicit:discord-<id>` 형태로 사용자별 분리되어야 함. |
 
 ---
 
