@@ -8,6 +8,11 @@ on:
 
 permissions:
   contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: university-claw/mjuclaw-agent
 
 jobs:
   test:
@@ -52,7 +57,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ngrok.yml config --quiet
 
   docker-build:
-    name: Agent Docker build
+    name: Agent Docker build and publish
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -79,5 +84,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
-        run: docker buildx build --load -t mjuclaw-agent:test .
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=main,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and optionally publish Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
