@@ -48,16 +48,16 @@ test("Dockerfile copies repo-local skills after upstream mju-cli skills", () => 
   assert.ok(homeOverride > homeUpstream, "repo-local home skills should override upstream skills");
 });
 
-test("setup pins mju-cli to the course-scores capable branch", () => {
+test("setup pins mju-cli to the deployment branch", () => {
   const setup = fs.readFileSync(path.join(root, "setup.sh"), "utf8");
   const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
 
   assert.match(setup, /read_dotenv_value\(\)/);
   assert.match(setup, /MJU_CLI_BRANCH="\$\{MJU_CLI_BRANCH:-\$\(read_dotenv_value MJU_CLI_BRANCH\)\}"/);
-  assert.match(setup, /MJU_CLI_BRANCH="\$\{MJU_CLI_BRANCH:-msi-course-scores\}"/);
+  assert.match(setup, /MJU_CLI_BRANCH="\$\{MJU_CLI_BRANCH:-main\}"/);
   assert.match(setup, /git clone --branch "\$BRANCH" "\$REPO" "\$DIR"/);
   assert.match(setup, /clone_or_pull mju-cli https:\/\/github\.com\/university-claw\/mju-cli\.git "\$MJU_CLI_BRANCH"/);
-  assert.match(dockerfile, /git clone --branch msi-course-scores https:\/\/github\.com\/university-claw\/mju-cli\.git/);
-  assert.match(readme, /git clone --branch msi-course-scores https:\/\/github\.com\/university-claw\/mju-cli\.git/);
+  assert.match(dockerfile, /git clone --branch main https:\/\/github\.com\/university-claw\/mju-cli\.git/);
+  assert.match(readme, /git clone --branch main https:\/\/github\.com\/university-claw\/mju-cli\.git/);
 });
