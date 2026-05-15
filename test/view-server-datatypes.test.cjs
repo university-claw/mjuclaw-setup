@@ -7,18 +7,35 @@ const { spawn } = require("node:child_process");
 
 async function freePort() {
   const server = net.createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address();
-  server.close();
-  await once(server, "close");
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const { port } = address;
+  await new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
   return port;
 }
 
-async function waitForHealth(port) {
+function fetchWithTimeout(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(2_000),
+  });
+}
+
+async function waitForHealth(port, child) {
   for (let i = 0; i < 40; i++) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `view server exited before health check passed (exit=${child.exitCode}, signal=${child.signalCode})`,
+      );
+    }
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      const res = await fetchWithTimeout(`http://127.0.0.1:${port}/health`);
       if (res.ok) return;
     } catch {
       // Server is still booting.
@@ -52,14 +69,14 @@ async function withViewServer(t, fn) {
   });
   t.after(() => stopChild(child));
 
-  await waitForHealth(port);
+  await waitForHealth(port, child);
   await fn(port);
 }
 
 test("view API rejects removed webview data types", async (t) => {
   await withViewServer(t, async (port) => {
     for (const dataType of ["courses", "due-assignments"]) {
-      const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+      const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -78,7 +95,7 @@ test("view API rejects removed webview data types", async (t) => {
 
 test("view API accepts the grade-history data type", async (t) => {
   await withViewServer(t, async (port) => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+    const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -99,7 +116,7 @@ test("view API accepts the grade-history data type", async (t) => {
 
 test("view API accepts and renders the course-scores data type", async (t) => {
   await withViewServer(t, async (port) => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+    const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -131,7 +148,7 @@ test("view API accepts and renders the course-scores data type", async (t) => {
     assert.equal(res.status, 200);
     assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
 
-    const viewRes = await fetch(body.url);
+    const viewRes = await fetchWithTimeout(body.url);
     const html = await viewRes.text();
 
     assert.equal(viewRes.status, 200);
