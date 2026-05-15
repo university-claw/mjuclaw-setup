@@ -1,0 +1,162 @@
+services:
+  agent:
+    image: ${AGENT_IMAGE:-ghcr.io/university-claw/mjuclaw-agent}:${AGENT_TAG:-main}
+    container_name: mjuclaw-agent
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+      - "${VIEW_PORT:-3001}:${VIEW_PORT:-3001}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-3.1-flash-lite-preview}
+      - DISCORD_SERVER_ID=${DISCORD_SERVER_ID:-1492100109997969499}
+      - DISCORD_USER_ID=${DISCORD_USER_ID:-415349075274104832}
+      - VIEW_PORT=${VIEW_PORT:-3001}
+      - VIEW_BASE_URL=${VIEW_BASE_URL:-http://localhost:3001}
+      - MJUCLAW_ROUTER_URL=${MJUCLAW_ROUTER_URL:-http://mjuclaw-router:3100}
+      - MJUCLAW_ROUTER_TOKEN=${MJUCLAW_ROUTER_TOKEN}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - PGHOST=${PGHOST:-host.docker.internal}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-mjuclaw}
+      - PGUSER=${PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSCHEMA=${PGSCHEMA:-public_data}
+      - MJU_STORAGE=${MJU_STORAGE:-postgres}
+      - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
+      - MJU_PGPORT=${MJU_PGPORT:-${PGPORT:-5432}}
+      - MJU_PGDATABASE=${MJU_PGDATABASE:-${PGDATABASE:-mjuclaw}}
+      - MJU_PGUSER=${MJU_PGUSER:-mjuclaw_user_app}
+      - MJU_PGPASSWORD=${MJU_PGPASSWORD}
+      - MJU_PGSCHEMA=${MJU_PGSCHEMA:-user_data}
+      - MJU_VAULT_KEY=${MJU_VAULT_KEY}
+    volumes:
+      - agent-data:/home/agent/.openclaw
+      - user-data:/data/users
+      - ${STORAGE_LOCAL_ROOT}:/data/assets:ro
+    depends_on:
+      router:
+        condition: service_started
+
+  router:
+    image: ${ROUTER_IMAGE:-ghcr.io/university-claw/mjuclaw-router}:${ROUTER_TAG:-main}
+    container_name: mjuclaw-router
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID=${DISCORD_SERVER_ID:-1492100109997969499}
+      - USER_DATA_ROOT=/data/users
+      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://mjuclaw-agent:18789}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
+      - HTTP_PORT=3100
+      - HTTP_BIND_HOST=0.0.0.0
+      - HTTP_AUTH_TOKEN=${MJUCLAW_ROUTER_TOKEN}
+      - LOG_LEVEL=${ROUTER_LOG_LEVEL:-info}
+      - NODE_ENV=production
+      - CLASSIFIER_ENABLED=${CLASSIFIER_ENABLED:-true}
+      - CLASSIFIER_URL=${CLASSIFIER_URL:-http://mjuclaw-classifier:3200}
+      - CLASSIFIER_AUTH_TOKEN=${CLASSIFIER_AUTH_TOKEN}
+      - CLASSIFIER_TIMEOUT_MS=${CLASSIFIER_TIMEOUT_MS:-2500}
+      - MJU_STORAGE=${MJU_STORAGE:-postgres}
+      - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
+      - MJU_PGPORT=${MJU_PGPORT:-${PGPORT:-5432}}
+      - MJU_PGDATABASE=${MJU_PGDATABASE:-${PGDATABASE:-mjuclaw}}
+      - MJU_PGUSER=${MJU_PGUSER:-mjuclaw_user_app}
+      - MJU_PGPASSWORD=${MJU_PGPASSWORD}
+      - MJU_PGSCHEMA=${MJU_PGSCHEMA:-user_data}
+      - MJU_VAULT_KEY=${MJU_VAULT_KEY}
+    volumes:
+      - user-data:/data/users
+      - router-data:/home/router/.openclaw
+
+  classifier:
+    image: ${CLASSIFIER_IMAGE:-ghcr.io/university-claw/intent-classifier}:${CLASSIFIER_TAG:-main}
+    container_name: mjuclaw-classifier
+    restart: unless-stopped
+    environment:
+      - MODEL_DIR=/opt/intent-classifier/model
+      - ABUSE_THRESHOLD=${CLASSIFIER_ABUSE_THRESHOLD:-0.25}
+      - CLASSIFIER_AUTH_TOKEN=${CLASSIFIER_AUTH_TOKEN}
+      - LOG_LEVEL=${CLASSIFIER_LOG_LEVEL:-INFO}
+      - PORT=3200
+
+  worker:
+    image: ${WORKER_IMAGE:-ghcr.io/university-claw/mju-public-data-worker}:${WORKER_TAG:-main}
+    container_name: mjuclaw-worker
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - PGHOST=${PGHOST:-host.docker.internal}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-mjuclaw}
+      - PGUSER=${PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSCHEMA=${PGSCHEMA:-public_data}
+      - LOG_LEVEL=${WORKER_LOG_LEVEL:-info}
+      - STORAGE_LOCAL_ROOT=/data/assets
+    volumes:
+      - ${STORAGE_LOCAL_ROOT}:/data/assets
+
+  public-data-db:
+    image: postgres:16-alpine
+    container_name: mjuclaw-public-data-db
+    profiles:
+      - public-data
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${PUBLIC_DATA_PGDATABASE:-mjuclaw}
+      - POSTGRES_USER=${PUBLIC_DATA_PGUSER:-mjuclaw_app}
+      - POSTGRES_PASSWORD=${PUBLIC_DATA_PGPASSWORD:-change-me}
+    volumes:
+      - public-data-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  public-data-worker:
+    image: ${WORKER_IMAGE:-ghcr.io/university-claw/mju-public-data-worker}:${WORKER_TAG:-main}
+    container_name: mjuclaw-public-data-worker
+    profiles:
+      - public-data
+    restart: unless-stopped
+    depends_on:
+      public-data-db:
+        condition: service_healthy
+    environment:
+      - PGHOST=public-data-db
+      - PGPORT=5432
+      - PGDATABASE=${PUBLIC_DATA_PGDATABASE:-mjuclaw}
+      - PGUSER=${PUBLIC_DATA_PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PUBLIC_DATA_PGPASSWORD:-change-me}
+      - PGSCHEMA=${PUBLIC_DATA_PGSCHEMA:-public_data}
+      - STORAGE_PROVIDER=local
+      - STORAGE_LOCAL_ROOT=/data/public-assets
+      - OCR_LANGUAGES=${PUBLIC_DATA_OCR_LANGUAGES:-kor+eng}
+      - CAFETERIA_OCR_COMMAND=${CAFETERIA_OCR_COMMAND:-python scripts/cafeteria_paddleocr_candidate.py {image}}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - NOTICE_NORMALIZATION_ENABLED=${NOTICE_NORMALIZATION_ENABLED:-}
+      - NOTICE_NORMALIZATION_MODEL=${NOTICE_NORMALIZATION_MODEL:-gpt-5.4-mini}
+      - NOTICE_NORMALIZATION_MAX_OUTPUT_TOKENS=${NOTICE_NORMALIZATION_MAX_OUTPUT_TOKENS:-4000}
+      - PADDLE_OCR_DET_MODEL_NAME=${PADDLE_OCR_DET_MODEL_NAME:-}
+      - PADDLE_OCR_REC_MODEL_NAME=${PADDLE_OCR_REC_MODEL_NAME:-korean_PP-OCRv5_mobile_rec}
+      - PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS=${PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS:-600}
+      - PUBLIC_DATA_WORKER_RUN_MIGRATIONS=${PUBLIC_DATA_WORKER_RUN_MIGRATIONS:-1}
+    volumes:
+      - public-data-assets:/data/public-assets
+      - public-data-paddle-models:/root/.paddlex
+
+volumes:
+  agent-data:
+  user-data:
+  router-data:
+  public-data-db:
+  public-data-assets:
+  public-data-paddle-models:
