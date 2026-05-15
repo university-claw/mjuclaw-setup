@@ -7,30 +7,70 @@ const { spawn } = require("node:child_process");
 
 async function freePort() {
   const server = net.createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address();
-  server.close();
-  await once(server, "close");
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const { port } = address;
+  await new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
   return port;
 }
 
-async function waitForHealth(port) {
+function fetchWithTimeout(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(2_000),
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForHealth(port, child, childOutput) {
   for (let i = 0; i < 40; i++) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `view server exited before health check passed (exit=${child.exitCode}, signal=${child.signalCode})\n${childOutput()}`,
+      );
+    }
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      const res = await fetchWithTimeout(`http://127.0.0.1:${port}/health`);
       if (res.ok) return;
     } catch {
       // Server is still booting.
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`view server did not start on port ${port}`);
+  throw new Error(`view server did not start on port ${port}\n${childOutput()}`);
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const closed = once(child, "close");
+  child.kill("SIGTERM");
+
+  const closedAfterSigterm = await Promise.race([
+    closed.then(() => true),
+    delay(1_000).then(() => false),
+  ]);
+  if (closedAfterSigterm) return;
+
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
+  await closed;
 }
 
 async function withViewServer(t, fn) {
   const port = await freePort();
   const root = path.resolve(__dirname, "..");
+  let childOutput = "";
   const child = spawn(process.execPath, [path.join(root, "dist", "view-server.js")], {
     cwd: root,
     env: {
@@ -39,19 +79,25 @@ async function withViewServer(t, fn) {
       VIEW_BASE_URL: `http://127.0.0.1:${port}`,
       VIEW_STORE_DIR: path.join(root, ".tmp", `view-server-test-${port}`),
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  t.after(() => child.kill());
+  child.stdout.on("data", (chunk) => {
+    childOutput += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    childOutput += chunk.toString();
+  });
+  t.after(() => stopChild(child));
 
-  await waitForHealth(port);
+  await waitForHealth(port, child, () => childOutput.slice(-4000));
   await fn(port);
 }
 
 test("view API rejects removed webview data types", async (t) => {
   await withViewServer(t, async (port) => {
     for (const dataType of ["courses", "due-assignments"]) {
-      const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+      const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -70,7 +116,7 @@ test("view API rejects removed webview data types", async (t) => {
 
 test("view API accepts the grade-history data type", async (t) => {
   await withViewServer(t, async (port) => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+    const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -91,7 +137,7 @@ test("view API accepts the grade-history data type", async (t) => {
 
 test("view API accepts and renders the course-scores data type", async (t) => {
   await withViewServer(t, async (port) => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/view`, {
+    const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -123,7 +169,7 @@ test("view API accepts and renders the course-scores data type", async (t) => {
     assert.equal(res.status, 200);
     assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
 
-    const viewRes = await fetch(body.url);
+    const viewRes = await fetchWithTimeout(body.url);
     const html = await viewRes.text();
 
     assert.equal(viewRes.status, 200);
