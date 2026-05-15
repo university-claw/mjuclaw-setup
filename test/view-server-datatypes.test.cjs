@@ -27,11 +27,15 @@ function fetchWithTimeout(url, options = {}) {
   });
 }
 
-async function waitForHealth(port, child) {
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForHealth(port, child, childOutput) {
   for (let i = 0; i < 40; i++) {
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(
-        `view server exited before health check passed (exit=${child.exitCode}, signal=${child.signalCode})`,
+        `view server exited before health check passed (exit=${child.exitCode}, signal=${child.signalCode})\n${childOutput()}`,
       );
     }
     try {
@@ -42,20 +46,31 @@ async function waitForHealth(port, child) {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`view server did not start on port ${port}`);
+  throw new Error(`view server did not start on port ${port}\n${childOutput()}`);
 }
 
 async function stopChild(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
 
   const closed = once(child, "close");
-  child.kill();
+  child.kill("SIGTERM");
+
+  const closedAfterSigterm = await Promise.race([
+    closed.then(() => true),
+    delay(1_000).then(() => false),
+  ]);
+  if (closedAfterSigterm) return;
+
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
   await closed;
 }
 
 async function withViewServer(t, fn) {
   const port = await freePort();
   const root = path.resolve(__dirname, "..");
+  let childOutput = "";
   const child = spawn(process.execPath, [path.join(root, "dist", "view-server.js")], {
     cwd: root,
     env: {
@@ -64,12 +79,18 @@ async function withViewServer(t, fn) {
       VIEW_BASE_URL: `http://127.0.0.1:${port}`,
       VIEW_STORE_DIR: path.join(root, ".tmp", `view-server-test-${port}`),
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+  });
+  child.stdout.on("data", (chunk) => {
+    childOutput += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    childOutput += chunk.toString();
   });
   t.after(() => stopChild(child));
 
-  await waitForHealth(port, child);
+  await waitForHealth(port, child, () => childOutput.slice(-4000));
   await fn(port);
 }
 
