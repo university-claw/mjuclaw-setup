@@ -54,6 +54,18 @@ jobs:
             exit 1
           }
 
+      - name: Check deploy script argument validation
+        shell: pwsh
+        run: |
+          try {
+            ./deploy.ps1 -PullOnly -NoPull
+            throw "Expected deploy.ps1 argument validation to fail."
+          } catch {
+            if ($_.Exception.Message -notlike "*PullOnly*NoPull*") {
+              throw
+            }
+          }
+
       - name: Validate Docker Compose config
         env:
           CLASSIFIER_AUTH_TOKEN: ci-classifier-token

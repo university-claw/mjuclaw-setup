@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 release.env
+.deploy/
 .DS_Store
 node_modules/
 dist/
