@@ -1,0 +1,19 @@
+services:
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: mjuclaw-ngrok
+    restart: unless-stopped
+    profiles:
+      - ngrok
+    depends_on:
+      agent:
+        condition: service_started
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      - "127.0.0.1:4040:4040"
+    command:
+      - http
+      - --url=${NGROK_DOMAIN}
+      - --log=stdout
+      - http://agent:${VIEW_PORT:-3001}
