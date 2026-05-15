@@ -50,3 +50,34 @@ jobs:
         run: |
           mkdir -p "$STORAGE_LOCAL_ROOT"
           docker compose -f docker-compose.yml -f docker-compose.ngrok.yml config --quiet
+
+  docker-build:
+    name: Agent Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check out mju-cli build context
+        uses: actions/checkout@v4
+        with:
+          repository: university-claw/mju-cli
+          ref: main
+          path: mju-cli
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Check out mju-public-data-reader build context
+        uses: actions/checkout@v4
+        with:
+          repository: university-claw/mju-public-data-reader
+          ref: main
+          path: mju-news
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: docker buildx build --load -t mjuclaw-agent:test .
