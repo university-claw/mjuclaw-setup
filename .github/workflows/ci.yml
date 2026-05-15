@@ -55,6 +55,9 @@ jobs:
         run: |
           mkdir -p "$STORAGE_LOCAL_ROOT"
           docker compose -f docker-compose.yml -f docker-compose.ngrok.yml config --quiet
+          docker compose --env-file release.env.example -f docker-compose.prod.yml config --quiet
+          docker compose --env-file release.env.example -f docker-compose.prod.yml --profile public-data config --quiet
+          docker compose --env-file release.env.example -f docker-compose.prod.yml -f docker-compose.ngrok.yml --profile ngrok config --quiet
 
   docker-build:
     name: Agent Docker build and publish
