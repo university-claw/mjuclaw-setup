@@ -26,13 +26,14 @@
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
 | Smoke test helper | 완료 | `smoke-test.ps1`로 배포 후 service/worker smoke test와 기록 생성 |
 | Production deploy smoke gating | 완료 | `Production Deploy` deploy mode에서 배포 후 `smoke-test.ps1` 실행과 기록 출력 |
-| 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
+| 과거 운영 PC 반자동 리허설 | 완료 | 자동 CD 도입 전 release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | Self-hosted runner 운영 기준 | 완료 | 운영 PC runner 보안/실행 경계와 실제 실행 기준 문서화 |
 | Production dry-run workflow | 완료 | CI 성공 후 자동 check-only workflow와 수동 dry-run 지원 |
 | 승인 기반 production deploy workflow | 완료 | `workflow_dispatch` + production approval 기반 수동 fallback deploy mode 운영 PC 성공 확인 |
 | Main push production dry-run | 완료 | `main` push의 CI 성공 후 운영 PC runner에서 check-only 검증 자동 실행 |
 | Main push approval-gated deploy | 대체됨 | PR24에서 approval 없는 자동 deploy로 전환 |
 | 완전 자동 CD | 완료 | 자동 dry-run 성공 후 `Production Auto Deploy`가 approval 없이 실제 배포 |
+| Deployment summary | 완료 | 자동/수동 deploy 결과를 GitHub Actions summary에 요약 |
 
 ---
 
@@ -117,26 +118,29 @@ ghcr.io/university-claw/mjuclaw-agent:sha-<short-sha>
 
 ## CD 단계
 
-현재 CD는 운영자가 승인 시점을 직접 정하는 반자동 방식이다.
+현재 기본 CD는 `mjuclaw-setup`의 `main` push를 기준으로 자동 실행된다. 운영자가 승인 시점을 직접 정하는 반자동 방식은 더 이상 기본 경로가 아니며, 수동 fallback으로만 남겨 둔다.
 
 ```mermaid
 flowchart LR
-  A["각 repo main merge"] --> B["GitHub Actions CI"]
-  B --> C["GHCR image publish"]
-  C --> D["mjuclaw-setup release.env에 sha tag 고정"]
-  D --> E["운영 PC에서 deploy.ps1 -CheckOnly 실행"]
-  E --> F["배포 대상 image/tag 확인"]
-  F --> G["운영 PC에서 deploy.ps1 실행"]
-  G --> H["docker compose config 검증"]
-  H --> I["docker compose pull"]
-  I --> J["docker compose up -d"]
-  J --> K["자동 health check"]
-  K --> L{"health 실패?"}
-  L -- "아니오" --> M["배포 성공 기록"]
-  L -- "예 + RollbackOnFailure" --> N["이전 성공 release로 rollback"]
+  A["mjuclaw-setup main push"] --> B["CI"]
+  B --> C["mjuclaw-agent image publish"]
+  C --> D["Production Dry Run"]
+  D --> E{"dry-run 성공?"}
+  E -- "아니오" --> F["자동 배포 중단"]
+  E -- "예" --> G["Production Auto Deploy"]
+  G --> H["prepare-release.ps1 -Apply"]
+  H --> I["deploy.ps1 -CheckOnly"]
+  I --> J["deploy.ps1 -PullOnly"]
+  J --> K["backup.ps1"]
+  K --> L["deploy.ps1 -RollbackOnFailure"]
+  L --> M["smoke-test.ps1"]
+  M --> N["write-deploy-summary.ps1"]
+  L -- "health 실패" --> O["직전 성공 release로 rollback 시도"]
 ```
 
-운영 PC는 build를 수행하지 않는다. 운영 PC의 책임은 pinned image를 pull하고 compose로 띄우는 것이다.
+운영 PC는 build를 수행하지 않는다. 운영 PC의 책임은 GitHub Actions가 GHCR에 publish한 pinned image를 pull하고 compose로 띄우는 것이다.
+
+개별 서비스 repo의 `main` merge는 각 repo의 CI와 GHCR publish를 수행한다. 그 변경을 운영에 반영하는 자동 배포 트리거는 `mjuclaw-setup`의 `main` push다. `prepare-release.ps1`은 배포 시점의 각 서비스 repo `main` HEAD를 읽어 `sha-*` image tag 조합을 만든다.
 
 ### CD 입력 파일
 
@@ -147,7 +151,7 @@ flowchart LR
 | `.env.production` | secrets와 런타임 설정 | 커밋 금지 |
 | `release.env` | 배포할 image/tag 조합 | 커밋 금지 |
 
-`release.env`는 `release.env.example`을 복사해서 만든다.
+자동 CD와 수동 fallback workflow에서는 `prepare-release.ps1 -Apply`가 배포 직전에 `release.env`를 생성하거나 갱신한다. 운영 PC를 처음 세팅하거나 수동으로 bootstrap해야 할 때는 `release.env.example`을 복사해서 시작한다.
 
 ```powershell
 Copy-Item release.env.example release.env
@@ -225,9 +229,9 @@ docker login ghcr.io -u <github-user>
 
 ---
 
-## 운영 PC 반자동 배포 리허설 기록
+## 과거 운영 PC 반자동 배포 리허설 기록
 
-2026년 5월 16일 운영 Windows PC에서 반자동 CD 전체 흐름을 리허설했고 성공을 확인했다.
+2026년 5월 16일 운영 Windows PC에서 자동 CD 도입 전 반자동 CD 전체 흐름을 리허설했고 성공을 확인했다. 이 기록은 현재 기본 경로가 아니라, 수동 fallback과 rollback runbook의 근거로 남긴다.
 
 검증한 흐름:
 
@@ -264,7 +268,7 @@ git pull --ff-only origin main
 - `deploy.ps1 -RollbackOnFailure`가 성공하고 최신 `deploy.json`에 `status: succeeded` 기록
 - 배포 후 Discord, LLM, router, public data worker smoke test 성공
 
-이 리허설 이후 현재 반자동 CD의 운영 단위는 다음처럼 정리된다.
+이 리허설에서 검증한 수동 fallback 운영 단위는 다음과 같다.
 
 ```text
 release 후보 생성
@@ -279,9 +283,9 @@ release 후보 생성
 
 ---
 
-## 반복 배포 Runbook
+## 수동 fallback 배포 Runbook
 
-일반적인 운영 배포는 아래 순서로 진행한다.
+기본 운영 배포는 `Production Auto Deploy`가 수행한다. 아래 절차는 자동 workflow를 잠시 끄거나, 특정 release 후보를 사람이 확인해 적용해야 하거나, 장애 대응 중 운영자가 직접 배포해야 할 때 사용하는 수동 fallback runbook이다.
 
 1. 각 서비스 repo의 PR을 main에 merge하고 GitHub Actions가 GHCR image를 publish했는지 확인한다.
 2. 운영 PC의 `mjuclaw-setup`을 최신 main으로 갱신한다.
@@ -478,9 +482,9 @@ docker run --rm --mount "type=bind,source=$source,target=/from,readonly" --mount
 
 ---
 
-## 수동 배포 명령
+## Compose 명령 참고
 
-`deploy.ps1`이 수행하는 기본 배포 명령은 아래와 같다.
+`deploy.ps1`이 내부에서 수행하는 기본 compose 명령은 아래와 같다. 운영자가 장애 대응 중 스크립트 동작을 직접 재현해야 할 때 참고한다.
 
 ```powershell
 docker compose --env-file .env.production --env-file release.env -f docker-compose.prod.yml pull
@@ -791,26 +795,28 @@ docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
 현재 완성된 흐름은 아래와 같다.
 
 ```text
-개발 repo PR
-  -> GitHub Actions test/build/docker 검증
-  -> main merge
+서비스 repo PR/main merge
+  -> 각 repo GitHub Actions test/build/docker 검증
   -> GHCR image publish (:main, :sha-<short-sha>)
-  -> mjuclaw-setup prepare-release.ps1로 release.env 후보 생성
-  -> 운영자가 후보 release.env와 release.json 확인
-  -> release.env 적용
-  -> 운영 Windows PC에서 .\deploy.ps1 -CheckOnly 실행
-  -> compose config와 image/tag 조합 확인
-  -> 운영 Windows PC에서 .\deploy.ps1 -PullOnly 실행
-  -> 운영 Windows PC에서 .\backup.ps1 실행
-  -> 운영 Windows PC에서 .\deploy.ps1 실행
-  -> docker compose pull
-  -> docker compose up -d
-  -> 자동 health check
-  -> 성공/실패 배포 기록 저장
-  -> 실패 시 필요하면 이전 성공 snapshot으로 rollback
+
+mjuclaw-setup main merge
+  -> CI
+  -> mjuclaw-agent GHCR image publish
+  -> Production Dry Run
+  -> Production Auto Deploy
+  -> prepare-release.ps1 -Apply
+  -> deploy.ps1 -CheckOnly
+  -> deploy.ps1 -PullOnly
+  -> backup.ps1
+  -> deploy.ps1 -RollbackOnFailure
+  -> smoke-test.ps1
+  -> write-deploy-summary.ps1
+  -> 성공/실패 배포 기록과 GitHub Actions summary 저장
 ```
 
-이 구조의 핵심은 운영 배포 단위를 “현재 로컬 checkout 상태”가 아니라 “검증된 image tag 조합”으로 바꾸는 것이다. 따라서 운영 PC에서 어느 commit이 떠 있는지 추적할 때는 `release.env`의 `sha-*` tag 조합을 보면 된다.
+이 구조의 핵심은 운영 배포 단위를 “현재 로컬 checkout 상태”가 아니라 “검증된 image tag 조합”으로 바꾸는 것이다. 따라서 운영 PC에서 어느 commit이 떠 있는지 추적할 때는 `release.env`, `.deploy\releases\<timestamp>\release.env`, GitHub Actions summary의 `sha-*` tag 조합을 보면 된다.
+
+개별 서비스 repo의 main merge만으로는 운영 PC deploy가 바로 실행되지 않는다. 운영 반영은 `mjuclaw-setup` main push가 만든 자동 CD 흐름에서 일어난다. 서비스 repo 변경을 운영에 반영하려면 해당 이미지 publish 완료 후 `mjuclaw-setup` main에 배포용 변경을 merge하거나, 필요 시 수동 fallback runbook을 사용한다.
 
 ---
 
@@ -873,7 +879,7 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 
 ### Workflow 단계 기준
 
-`dry-run` mode는 실제 배포 없이 check-only만 수행한다.
+수동 fallback인 `Production Deploy` workflow의 `dry-run` mode는 실제 배포 없이 check-only만 수행한다. 이름은 비슷하지만, CI 성공 후 자동으로 실행되는 `Production Dry Run` workflow와는 별도 경로다.
 
 ```text
 workflow_dispatch
@@ -891,14 +897,14 @@ workflow_dispatch
 
 이 workflow는 `actions/checkout`을 사용하지 않는다. GitHub Actions workspace 대신 운영 PC의 고정 checkout인 `C:\Users\yoonh\Desktop\mjuclaw-setup`으로 이동해 `git pull --ff-only origin main`을 실행한다. 운영 checkout에 커밋되지 않은 변경이 있으면 중단한다.
 
-수동 `dry-run` mode의 완료 기준:
+수동 fallback `dry-run` mode의 완료 기준:
 
 - `workflow_dispatch`에서 `mode: dry-run`으로 실행된다.
 - production environment와 `mjuclaw-prod-windows` runner label을 사용한다.
 - 운영 checkout에서만 `prepare-release`, `deploy`, `backup` check-only를 실행하도록 제한한다.
 - image pull, backup 생성, compose up은 수행하지 않는다.
 
-PR17 merge 후 운영 리허설 완료 기준:
+초기 승인 기반 dry-run 리허설 완료 기준:
 
 - GitHub UI에서 workflow를 main 기준으로 수동 실행한다.
 - production environment approval 없이는 job이 실행되지 않는다.
@@ -951,6 +957,7 @@ main push
   -> .\backup.ps1
   -> .\deploy.ps1 -RollbackOnFailure
   -> .\smoke-test.ps1
+  -> .\write-deploy-summary.ps1
 ```
 
 자동 deploy의 완료 기준:
@@ -961,6 +968,7 @@ main push
 - 운영 PC runner에서도 `head_sha`와 현재 `origin/main`을 다시 비교한다.
 - production approval 없이 `prepare-release`, image pull, backup, compose up, smoke test를 실행한다.
 - 실패 시 workflow를 실패시키고, 기본 service health 실패는 `deploy.ps1 -RollbackOnFailure`가 rollback을 시도한다.
+- deploy/smoke 이후 GitHub Actions summary에 image tag, 기록 경로, 다음 조치를 남긴다.
 
 수동 fallback인 `deploy` mode는 승인 후 실제 배포를 수행한다.
 
@@ -978,6 +986,7 @@ workflow_dispatch
   -> .\backup.ps1
   -> .\deploy.ps1 -RollbackOnFailure
   -> .\smoke-test.ps1
+  -> .\write-deploy-summary.ps1
 ```
 
 수동 fallback `deploy` mode의 완료 기준:
@@ -990,11 +999,29 @@ workflow_dispatch
 - `backup.ps1`가 배포 전 백업 산출물을 생성한다.
 - `deploy.ps1 -RollbackOnFailure`가 성공하고 최신 `deploy.json`에 `status: succeeded`가 기록된다.
 - `smoke-test.ps1`가 성공하고 최신 `smoke-test.json`에 `status: succeeded`가 기록된다.
+- GitHub Actions summary에 release image tag, deploy/backup/smoke record path, 후속 조치가 출력된다.
 - 배포 후 Discord/LLM 실제 대화 smoke test는 운영자가 수동으로 확인한다.
 
 `deploy.ps1 -RollbackOnFailure`는 기본 service health 실패 시 rollback을 시도한다. `smoke-test.ps1` 실패는 workflow job을 실패시키지만, 이번 단계에서는 자동 rollback으로 바로 연결하지 않는다. smoke에는 public data 외부 source 일시 장애가 섞일 수 있으므로, 실패 기록과 container log를 확인한 뒤 운영자가 rollback 또는 재배포를 판단한다.
 
 이 단계 이후 `main` push의 실제 운영 반영은 자동 배포 경로가 기본이다. production approval은 수동 fallback workflow에만 적용된다.
+
+### GitHub Actions deploy summary
+
+자동 `Production Auto Deploy`와 수동 fallback `Production Deploy`는 실제 deploy job 이후 `write-deploy-summary.ps1`을 실행한다. summary는 GitHub Actions run 화면의 Summary 영역에 남는다.
+
+summary에 포함되는 정보:
+
+- 배포 mode: `auto` 또는 `manual`
+- checkout branch와 commit SHA
+- 자동 배포의 source workflow `head_sha`
+- `release.env` 또는 deploy snapshot의 service별 image/tag 조합
+- 최신 deployment record: `.deploy\releases\<timestamp>\deploy.json`
+- 최신 backup record: `.deploy\backups\<timestamp>\backup.json`
+- 최신 smoke record: `.deploy\smoke-tests\<timestamp>\smoke-test.json`
+- 성공/실패 상태에 따른 다음 조치
+
+summary 생성 실패는 운영 배포 자체를 실패시키지 않는다. 배포 성공 여부의 기준은 계속 `deploy.ps1 -RollbackOnFailure`, `smoke-test.ps1`, 그리고 각 record의 `status` 값이다.
 
 ### 승인 기반 deploy workflow 첫 성공 기록
 
@@ -1020,12 +1047,13 @@ mjuclaw-prod-windows
 
 ### 중단 및 복구 기준
 
-runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 되돌린다.
+자동 배포나 runner 운영에 문제가 생기면 아래 순서로 새 자동 deploy를 멈추고 수동 fallback 운영으로 되돌린다.
 
-1. GitHub repo settings에서 runner를 disable 또는 remove한다.
-2. 운영 PC에서 runner service를 중지한다.
-3. 기존 PowerShell 수동 runbook으로 `prepare-release`, `backup`, `deploy`를 실행한다.
-4. 필요하면 `.deploy\releases`의 성공 snapshot으로 rollback한다.
+1. GitHub Actions에서 `Production Auto Deploy` workflow를 disable하거나, 문제가 된 `main` push 이후 추가 merge를 잠시 멈춘다.
+2. runner 자체가 문제이면 GitHub repo settings에서 runner를 disable/remove하거나 운영 PC에서 runner service를 중지한다.
+3. 이미 실패한 배포가 있으면 GitHub Actions summary, `.deploy\releases`, `.deploy\backups`, `.deploy\smoke-tests` 기록을 확인한다.
+4. 기존 PowerShell 수동 fallback runbook으로 `prepare-release`, `backup`, `deploy`를 실행한다.
+5. 필요하면 `.deploy\releases`의 성공 snapshot으로 rollback한다.
 
 참고 문서:
 
@@ -1039,18 +1067,18 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
 
 다음 단계에서 다룰 작업은 운영 자동화 고도화다.
 
-1. 자동 배포 결과 가시성 보강
-   - GitHub Actions summary에 release tag, backup path, deploy record, smoke record, 실패 시 다음 조치를 출력한다.
-   - 필요하면 Discord/webhook 알림을 별도 secret으로 추가한다.
-
-2. 운영 PC runner 서비스화 여부 결정
+1. 운영 PC runner 서비스화 여부 결정
    - 현재 `run.cmd`로 임시 실행 중이면 Windows Service 등록을 검토한다.
    - 서비스화할 경우 재부팅 후 runner 자동 시작과 Docker Desktop 접근 권한을 확인한다.
 
-3. smoke test 실패 정책 정리
+2. smoke test 실패 정책 정리
    - agent/router/classifier critical smoke 실패와 public-data 외부 source 실패를 구분한다.
    - critical smoke 실패 시 rollback 자동화를 어디까지 연결할지 결정한다.
 
-4. rollback 리허설과 보존 정책 정리
+3. rollback 리허설과 보존 정책 정리
    - 이전 release로 rollback 후 최신 release로 복귀하는 운영 리허설을 수행한다.
    - `.deploy/releases`, `.deploy/backups`, `.deploy/smoke-tests` 보존 기준을 정한다.
+
+4. 알림 채널 검토
+   - 필요하면 Discord 또는 Slack webhook으로 자동 deploy 성공/실패 요약을 보낸다.
+   - webhook secret은 GitHub Environment가 아니라 repo secret 또는 운영 PC 로컬 설정 중 하나로 관리한다.

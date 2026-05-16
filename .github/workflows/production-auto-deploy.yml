@@ -159,6 +159,7 @@ jobs:
           .\deploy.ps1 -PullOnly
 
       - name: Create production backup
+        id: backup
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -183,6 +184,21 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-Location $env:DEPLOY_WORKDIR
           .\smoke-test.ps1
+
+      - name: Write deployment summary
+        if: ${{ always() && steps.deploy.outcome != 'skipped' }}
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\write-deploy-summary.ps1 `
+            -Title "Production Auto Deploy Summary" `
+            -Mode "auto" `
+            -ExpectedHead "${{ github.event.workflow_run.head_sha }}" `
+            -BackupOutcome "${{ steps.backup.outcome }}" `
+            -DeployOutcome "${{ steps.deploy.outcome }}" `
+            -SmokeOutcome "${{ steps.smoke.outcome }}"
 
       - name: Show latest deployment record
         if: ${{ always() && steps.deploy.outcome != 'skipped' }}
