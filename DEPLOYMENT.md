@@ -25,6 +25,7 @@
 | Backup helper script | 완료 | `backup.ps1`로 운영 데이터 백업 생성 자동화 |
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
 | 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
+| Self-hosted runner 준비 계획 | 완료 | 운영 PC runner 보안/실행 경계와 단계별 도입 계획 문서화 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -796,11 +797,131 @@ docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
 
 ---
 
+## Self-hosted Runner 운영 준비 계획
+
+이 단계는 아직 실제 자동 배포를 켜는 것이 아니다. 목표는 Windows 운영 PC에 GitHub self-hosted runner를 붙이기 전에 보안 경계, 실행 위치, 승인 절차를 고정하는 것이다.
+
+self-hosted runner는 GitHub Actions job을 운영 PC에서 실행한다. 따라서 운영 PC runner는 일반 CI runner가 아니라 production 변경 권한을 가진 운영 자동화 진입점으로 취급한다.
+
+### 도입 원칙
+
+- 완전 자동 배포를 `main` push에 바로 연결하지 않는다.
+- 첫 workflow는 `workflow_dispatch` 수동 실행만 허용한다.
+- `pull_request`, fork, 임의 branch code가 운영 runner에서 실행되지 않게 한다.
+- 운영 PC runner는 `mjuclaw-setup` repo 전용 repo-level runner로 제한한다.
+- workflow는 GitHub Actions workspace가 아니라 운영 PC의 고정 checkout인 `C:\Users\yoonh\Desktop\mjuclaw-setup`에서 배포 스크립트를 실행한다.
+- `.env.production`, `release.env`, `.deploy/`는 계속 운영 PC 로컬 파일로 유지하고 GitHub secrets로 대량 이관하지 않는다.
+- GitHub Environment `production`의 required reviewer 승인 전에는 실제 배포 job이 실행되지 않게 한다.
+- runner가 붙은 뒤에도 기본 운영 방식은 `prepare-release -> backup -> deploy -> smoke test` 순서를 유지한다.
+
+### Runner 설정 기준
+
+운영 PC runner는 다음 기준으로 등록한다.
+
+| 항목 | 기준 |
+|---|---|
+| runner scope | `university-claw/mjuclaw-setup` repo-level runner |
+| runner labels | `self-hosted`, `Windows`, `mjuclaw-prod-windows` |
+| 실행 계정 | Docker Desktop과 `C:\Users\yoonh\Desktop\mjuclaw-setup` 접근 권한이 있는 Windows 계정 |
+| 네트워크 | GitHub Actions outbound HTTPS, GHCR pull, 기존 서비스 외부 연결 가능 |
+| 로컬 checkout | `C:\Users\yoonh\Desktop\mjuclaw-setup` |
+| 로컬 secrets | `.env.production`, `release.env`, Docker GHCR login credential |
+| 금지 | PR job, 테스트 job, 임의 shell 실험을 production runner에서 실행 |
+
+workflow의 `runs-on`은 generic `self-hosted`만 쓰지 않고, 반드시 production runner label까지 포함한다.
+
+```yaml
+runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
+```
+
+### GitHub Environment 설정
+
+`mjuclaw-setup` repo에 `production` environment를 만들고 아래 설정을 적용한다.
+
+| 설정 | 기준 |
+|---|---|
+| Required reviewers | 최소 1명 |
+| Prevent self-review | 가능하면 활성화 |
+| Deployment branches | `main`만 허용 |
+| Environment secrets | 최소화. 앱 runtime secrets는 운영 PC `.env.production`에 유지 |
+| Environment variables | 필요 시 runner 고정 경로 같은 비밀이 아닌 값만 사용 |
+
+초기 workflow에는 production environment를 붙이되, 첫 PR은 실제 배포 없이 dry-run만 수행한다. 실제 배포 단계는 별도 PR에서 활성화한다.
+
+### Workflow 단계 계획
+
+PR17은 dry-run workflow만 추가한다.
+
+```text
+workflow_dispatch
+  -> production environment approval
+  -> runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
+  -> cd C:\Users\yoonh\Desktop\mjuclaw-setup
+  -> git fetch origin
+  -> git switch main
+  -> git pull --ff-only origin main
+  -> .\prepare-release.ps1 -CheckOnly
+  -> .\deploy.ps1 -CheckOnly
+  -> .\backup.ps1 -CheckOnly
+```
+
+PR17의 완료 기준:
+
+- runner가 workflow job을 수신한다.
+- production environment approval 없이는 job이 실행되지 않는다.
+- 운영 checkout에서 최신 main을 fast-forward한다.
+- `prepare-release`, `deploy`, `backup` check-only가 통과한다.
+- image pull, backup 생성, compose up은 수행하지 않는다.
+
+PR18에서 실제 배포 workflow를 활성화한다.
+
+```text
+workflow_dispatch
+  -> production environment approval
+  -> cd C:\Users\yoonh\Desktop\mjuclaw-setup
+  -> git pull --ff-only origin main
+  -> .\prepare-release.ps1 -Apply
+  -> .\deploy.ps1 -CheckOnly
+  -> .\deploy.ps1 -PullOnly
+  -> .\backup.ps1
+  -> .\deploy.ps1 -RollbackOnFailure
+```
+
+PR18 이후에도 `main` push 즉시 자동 배포는 도입하지 않는다. 배포 시점은 workflow를 수동 실행하고 environment approval을 통과한 경우에만 결정한다.
+
+### 중단 및 복구 기준
+
+runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 되돌린다.
+
+1. GitHub repo settings에서 runner를 disable 또는 remove한다.
+2. 운영 PC에서 runner service를 중지한다.
+3. 기존 PowerShell 수동 runbook으로 `prepare-release`, `backup`, `deploy`를 실행한다.
+4. 필요하면 `.deploy\releases`의 성공 snapshot으로 rollback한다.
+
+참고 문서:
+
+- GitHub self-hosted runners: https://docs.github.com/en/actions/concepts/runners/self-hosted-runners
+- GitHub Actions security hardening: https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions
+- GitHub deployment environments: https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment
+
+---
+
 ## 후속 작업
 
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
-1. 선택적 완전 자동 CD
-   - Windows 운영 PC에 GitHub self-hosted runner 연결
-   - GitHub Environments approval/protection 적용
-   - 수동 승인 후 runner가 `deploy.ps1` 실행
+1. 운영 PC runner 설치 리허설
+   - repo-level self-hosted runner 등록
+   - `mjuclaw-prod-windows` label 부여
+   - GitHub Environment `production` required reviewer 설정
+
+2. PR17: production deploy dry-run workflow
+   - `workflow_dispatch` only
+   - production environment approval 적용
+   - `prepare-release`, `deploy`, `backup` check-only만 실행
+
+3. PR18: 승인 기반 실제 deploy workflow
+   - `prepare-release.ps1 -Apply`
+   - `deploy.ps1 -PullOnly`
+   - `backup.ps1`
+   - `deploy.ps1 -RollbackOnFailure`
