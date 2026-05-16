@@ -276,20 +276,8 @@ jobs:
           set -euo pipefail
           workflow=".github/workflows/production-deploy.yml"
           test -f "$workflow"
-          grep -q "workflow_run:" "$workflow"
-          grep -q "Production Dry Run" "$workflow"
-          grep -q "types:" "$workflow"
-          grep -q "completed" "$workflow"
           grep -q "workflow_dispatch:" "$workflow"
-          grep -q "auto-deploy-gate" "$workflow"
-          grep -q "github.event.workflow_run.conclusion == 'success'" "$workflow"
-          grep -q "github.event.workflow_run.head_branch == 'main'" "$workflow"
-          grep -q "github.event.workflow_run.event == 'workflow_run'" "$workflow"
-          grep -q "secrets.GITHUB_TOKEN" "$workflow"
-          grep -q "GITHUB_API_URL" "$workflow"
-          grep -q "git/ref/heads/main" "$workflow"
-          grep -q "Skipping stale automatic production deploy" "$workflow"
-          grep -q "Automatic production deploy is stale" "$workflow"
+          grep -q "github.event.inputs.mode == 'deploy'" "$workflow"
           grep -q "environment: production" "$workflow"
           grep -q "mjuclaw-prod-windows" "$workflow"
           grep -q "prepare-release.ps1 -Apply" "$workflow"
@@ -300,12 +288,67 @@ jobs:
             echo "production deploy workflow must not run on pull_request"
             exit 1
           fi
+          if grep -q "workflow_run:" "$workflow"; then
+            echo "production deploy workflow must stay manual approval-only; automatic deploy belongs in production-auto-deploy.yml"
+            exit 1
+          fi
+          if grep -q "auto-deploy-gate" "$workflow"; then
+            echo "production deploy workflow must not include automatic deploy gate logic"
+            exit 1
+          fi
           if grep -q "push:" "$workflow"; then
             echo "production deploy workflow must not run on push"
             exit 1
           fi
           if grep -q "actions/checkout" "$workflow"; then
             echo "production deploy workflow must use the fixed production checkout"
+            exit 1
+          fi
+
+      - name: Validate production auto deploy workflow safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=".github/workflows/production-auto-deploy.yml"
+          test -f "$workflow"
+          grep -q "workflow_run:" "$workflow"
+          grep -q "Production Dry Run" "$workflow"
+          grep -q "types:" "$workflow"
+          grep -q "completed" "$workflow"
+          grep -q "auto-deploy-gate" "$workflow"
+          grep -q "github.event.workflow_run.conclusion == 'success'" "$workflow"
+          grep -q "github.event.workflow_run.head_branch == 'main'" "$workflow"
+          grep -q "github.event.workflow_run.event == 'workflow_run'" "$workflow"
+          grep -q "secrets.GITHUB_TOKEN" "$workflow"
+          grep -q "GITHUB_API_URL" "$workflow"
+          grep -q "git/ref/heads/main" "$workflow"
+          grep -q "Skipping stale automatic production deploy" "$workflow"
+          grep -q "Automatic production deploy is stale" "$workflow"
+          grep -q "mjuclaw-prod-windows" "$workflow"
+          grep -q "prepare-release.ps1 -Apply" "$workflow"
+          grep -q "deploy.ps1 -PullOnly" "$workflow"
+          grep -q "backup.ps1" "$workflow"
+          grep -q "deploy.ps1 -RollbackOnFailure" "$workflow"
+          grep -q "smoke-test.ps1" "$workflow"
+          grep -Fq ".deploy\\smoke-tests" "$workflow"
+          if grep -q "pull_request:" "$workflow"; then
+            echo "production auto deploy workflow must not run on pull_request"
+            exit 1
+          fi
+          if grep -q "workflow_dispatch:" "$workflow"; then
+            echo "production auto deploy workflow must not be manually dispatched"
+            exit 1
+          fi
+          if grep -q "push:" "$workflow"; then
+            echo "production auto deploy workflow must wait for Production Dry Run instead of running directly on push"
+            exit 1
+          fi
+          if grep -q "environment:" "$workflow"; then
+            echo "production auto deploy workflow must not require production environment approval"
+            exit 1
+          fi
+          if grep -q "actions/checkout" "$workflow"; then
+            echo "production auto deploy workflow must use the fixed production checkout"
             exit 1
           fi
 
