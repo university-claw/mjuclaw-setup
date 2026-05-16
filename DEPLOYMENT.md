@@ -171,6 +171,111 @@ CLASSIFIER_TAG=sha-replace-me
 
 ---
 
+## 운영 PC 첫 이미지 배포 검증 기록
+
+2026년 5월 16일 운영 Windows PC에서 로컬 build 기반 배포를 GHCR image 기반 배포로 전환했다.
+
+검증된 최초 image 조합:
+
+```env
+AGENT_TAG=sha-31b83b7
+ROUTER_TAG=sha-4387626
+WORKER_TAG=sha-b27a9be
+CLASSIFIER_TAG=sha-57addcf
+```
+
+실행한 검증 순서:
+
+```powershell
+docker login ghcr.io -u <github-user>
+.\deploy.ps1 -CheckOnly
+.\deploy.ps1 -PullOnly
+.\deploy.ps1 -NoPull -RollbackOnFailure
+```
+
+확인된 정상 신호:
+
+- GHCR 인증 후 image pull 성공
+- `deploy.ps1 -CheckOnly`가 image/tag 조합과 compose config를 검증
+- `deploy.ps1 -PullOnly`가 service 변경 없이 image만 pull
+- `deploy.ps1 -NoPull -RollbackOnFailure`가 성공하고 `.deploy/releases/<timestamp>/deploy.json`에 `status: succeeded` 기록
+- 실행 중인 서비스가 GHCR image tag를 사용
+- `mjuclaw-worker` legacy 컨테이너 제거 완료
+- `mjuclaw-public-data-worker` 단일 scheduler worker만 실행
+- router, agent LLM, 실제 Discord 대화 smoke test 성공
+- worker `doctor`와 `schedule tick --dry-run` 성공
+
+첫 전환 중 확인한 이슈:
+
+- GHCR private package pull에는 `read:packages` 권한이 있는 GitHub access token이 필요하다.
+- 첫 `-RollbackOnFailure` 실행에서는 성공 snapshot이 없으므로 자동 rollback 기준점이 없다. 첫 성공 배포 후부터 `-RollbackOnFailure`가 실질적인 rollback 보호막이 된다.
+- Windows PowerShell에서 native stderr가 health retry loop를 깨던 문제가 있었고, `deploy.ps1`의 capture 로직을 수정했다.
+- host asset 폴더와 Docker volume에 일부 파일 차이가 있었다. PR10 이후 운영 기준 asset store는 Docker volume `public-data-assets`다.
+
+---
+
+## 반복 배포 Runbook
+
+일반적인 운영 배포는 아래 순서로 진행한다.
+
+1. 각 서비스 repo의 PR을 main에 merge하고 GitHub Actions가 GHCR image를 publish했는지 확인한다.
+2. `release.env`의 `*_TAG` 값을 배포할 `sha-*` tag로 갱신한다.
+3. 운영 PC의 `mjuclaw-setup`을 최신 main으로 갱신한다.
+
+```powershell
+cd C:\Users\yoonh\Desktop\mjuclaw-setup
+git switch main
+git pull --ff-only origin main
+```
+
+4. 실제 변경 전 preflight를 실행한다.
+
+```powershell
+.\deploy.ps1 -CheckOnly
+```
+
+확인할 것:
+
+- `release.env`에 placeholder가 없음
+- 출력된 agent/router/worker/classifier image tag가 의도한 조합과 일치
+- compose config 검증 성공
+- 이 단계에서 image pull, service 변경, `.deploy/` 기록 생성이 없음
+
+5. image pull만 먼저 검증한다.
+
+```powershell
+.\deploy.ps1 -PullOnly
+```
+
+확인할 것:
+
+- GHCR 권한 문제 없음
+- 모든 image pull 성공
+- service start 없음
+
+6. 실제 배포를 실행한다.
+
+```powershell
+.\deploy.ps1 -RollbackOnFailure
+```
+
+이미 같은 image 조합을 pull해 둔 상태에서 script/compose 변경만 반영하려면 아래처럼 pull을 생략할 수 있다.
+
+```powershell
+.\deploy.ps1 -NoPull -RollbackOnFailure
+```
+
+7. 성공 snapshot을 확인한다.
+
+```powershell
+$latest = Get-ChildItem .deploy\releases | Sort-Object Name -Descending | Select-Object -First 1
+Get-Content (Join-Path $latest.FullName "deploy.json")
+```
+
+`deploy.json`의 `status`가 `succeeded`이면 다음 rollback 기준점으로 사용할 수 있다.
+
+---
+
 ## Compose 구조
 
 이 repo에는 두 가지 compose 경로가 있다.
@@ -293,6 +398,8 @@ GHCR package가 private이면 image를 pull하기 전에 로그인한다.
 docker login ghcr.io -u <github-user>
 ```
 
+password 입력란에는 GitHub 계정 비밀번호가 아니라 `read:packages` 권한이 있는 GitHub access token을 입력한다. 배포 PC용 token은 만료일을 두고 운영하며, 만료 전 갱신 일정을 별도로 관리한다.
+
 ---
 
 ## Health Check
@@ -331,6 +438,54 @@ docker logs mjuclaw-public-data-worker --tail 20
 
 ---
 
+## Smoke Test Checklist
+
+배포 후에는 health check만 보지 말고 실제 사용자 흐름을 한 번 확인한다.
+
+기본 service health:
+
+```powershell
+docker exec mjuclaw-agent curl -sS http://localhost:3001/health
+docker exec mjuclaw-router curl -sS http://localhost:3100/healthz
+docker exec mjuclaw-classifier curl -sS http://localhost:3200/healthz
+```
+
+Discord/LLM smoke:
+
+- Discord에서 실제 대화 1회 전송
+- router 로그에서 Discord client ready와 메시지 처리 확인
+- agent가 LLM 응답을 반환하는지 확인
+- 사용자 session이 `discord-<user-id>` 기준으로 분리되는지 확인
+
+public data worker smoke:
+
+```powershell
+docker exec mjuclaw-public-data-worker node dist/main.js doctor
+docker exec mjuclaw-public-data-worker node dist/main.js schedule tick --dry-run
+```
+
+필요할 때만 실제 수집을 1건 실행한다.
+
+```powershell
+docker exec mjuclaw-public-data-worker node dist/main.js collect notices --limit 1
+```
+
+학식 수집은 OCR과 외부 source가 얽혀 공지 수집보다 무겁다. 필요한 경우에만 별도로 실행한다.
+
+```powershell
+docker exec mjuclaw-public-data-worker node dist/main.js collect cafeterias --limit 1
+```
+
+worker 구성 확인:
+
+```powershell
+docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" | Select-String worker
+```
+
+정상 상태는 `mjuclaw-public-data-worker`만 보이는 것이다. `mjuclaw-worker`가 함께 보이면 중복 scheduler 상태이므로 실패로 본다.
+
+---
+
 ## 배포 기록과 rollback
 
 `deploy.ps1`은 실행할 때마다 `.deploy/releases/<timestamp>` 디렉터리를 만들고 현재 배포에 사용한 `release.env` snapshot과 `deploy.json` 메타데이터를 저장한다.
@@ -356,6 +511,8 @@ docker logs mjuclaw-public-data-worker --tail 20
 ```powershell
 .\deploy.ps1 -RollbackLatest
 ```
+
+rollback 후에도 동일한 health/smoke test를 다시 실행한다. rollback이 성공하면 `.deploy/releases/<timestamp>/deploy.json`에 `status: rollback-succeeded`가 기록된다.
 
 특정 snapshot으로 rollback하려면 snapshot 디렉터리 또는 snapshot 안의 `release.env`를 지정한다.
 
@@ -396,16 +553,13 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
 
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
-1. 운영 PC 첫 배포 dry run
-   - `release.env`를 실제 `sha-*` tag로 채운 뒤 `.\deploy.ps1 -CheckOnly` 실행
-   - compose config와 image/tag 조합이 기대와 일치하는지 확인
-   - 이어서 `.\deploy.ps1 -PullOnly` 실행
-   - GHCR 권한과 image pull 가능 여부 확인
+1. Backup/restore runbook
+   - `agent-data`, `router-data`, `user-data`, `public-data-db`, `public-data-assets` 백업/복구 절차 정리
+   - Docker Desktop 데이터 초기화, PC 교체, volume 손상 상황을 기준으로 검증
 
-2. 운영 PC 실제 배포 리허설
-   - 짧은 점검 창에서 `.\deploy.ps1 -RollbackOnFailure` 실행
-   - `.deploy/releases` 기록 생성 확인
-   - health 실패 시 rollback 동작 확인
+2. Release tag 갱신 보조 도구
+   - 각 repo의 latest `sha-*` tag를 확인해 `release.env` 후보를 생성하는 스크립트 검토
+   - 사람이 최종 승인하고 `release.env`에 반영하는 반자동 흐름 유지
 
 3. 선택적 완전 자동 CD
    - Windows 운영 PC에 GitHub self-hosted runner 연결
