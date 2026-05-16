@@ -281,6 +281,8 @@ jobs:
           grep -q "mjuclaw-prod-windows" "$workflow"
           grep -q "prepare-release.ps1 -Apply" "$workflow"
           grep -q "deploy.ps1 -RollbackOnFailure" "$workflow"
+          grep -q "smoke-test.ps1" "$workflow"
+          grep -Fq ".deploy\\smoke-tests" "$workflow"
           if grep -q "pull_request:" "$workflow"; then
             echo "production deploy workflow must not run on pull_request"
             exit 1

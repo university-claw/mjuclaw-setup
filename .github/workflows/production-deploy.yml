@@ -187,6 +187,7 @@ jobs:
           .\backup.ps1
 
       - name: Deploy with rollback on failure
+        id: deploy
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -194,7 +195,17 @@ jobs:
           Set-Location $env:DEPLOY_WORKDIR
           .\deploy.ps1 -RollbackOnFailure
 
+      - name: Run post-deploy smoke test
+        id: smoke
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\smoke-test.ps1
+
       - name: Show latest deployment record
+        if: ${{ always() && steps.deploy.outcome != 'skipped' }}
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -205,3 +216,16 @@ jobs:
             throw "No deployment record found."
           }
           Get-Content (Join-Path $latest.FullName "deploy.json")
+
+      - name: Show latest smoke test record
+        if: ${{ always() && steps.smoke.outcome != 'skipped' }}
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          $latest = Get-ChildItem .deploy\smoke-tests | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $latest) {
+            throw "No smoke test record found."
+          }
+          Get-Content (Join-Path $latest.FullName "smoke-test.json")
