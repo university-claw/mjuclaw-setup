@@ -22,6 +22,7 @@
 | Rollback 자동화 | 완료 | `.deploy/releases` snapshot 기반 수동 rollback과 `-RollbackOnFailure` 지원 |
 | Preflight check | 완료 | `deploy.ps1 -CheckOnly`로 설정과 배포 대상 image/tag를 사전 검증 |
 | Backup/restore runbook | 완료 | 운영 PC volume과 DB 백업/복구 절차 문서화 |
+| Backup helper script | 완료 | `backup.ps1`로 운영 데이터 백업 생성 자동화 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -528,7 +529,7 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
 
 ## 운영 데이터 Backup/Restore Runbook
 
-이 절차는 운영 Windows PC의 Docker Desktop 데이터 초기화, PC 교체, volume 손상 상황에서 서비스를 복구하기 위한 기준이다. 자동화 스크립트가 아니라 수동 runbook이며, restore는 운영 데이터를 덮어쓸 수 있으므로 점검 창에서만 실행한다.
+이 절차는 운영 Windows PC의 Docker Desktop 데이터 초기화, PC 교체, volume 손상 상황에서 서비스를 복구하기 위한 기준이다. 백업 생성은 `backup.ps1`로 자동화하고, restore는 운영 데이터를 덮어쓸 수 있으므로 수동 runbook으로 유지한다.
 
 ### 백업 대상
 
@@ -549,19 +550,35 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
 
 ### 백업 생성
 
-운영 PC의 `mjuclaw-setup` repo에서 실행한다.
+운영 PC의 `mjuclaw-setup` repo에서 실행한다. 기본 백업 명령은 다음과 같다.
 
 ```powershell
 cd C:\Users\yoonh\Desktop\mjuclaw-setup
-
-$backupRoot = ".deploy\backups\$(Get-Date -Format yyyyMMdd-HHmmss)"
-New-Item -ItemType Directory -Force $backupRoot | Out-Null
-
-Copy-Item .env.production (Join-Path $backupRoot ".env.production")
-Copy-Item release.env (Join-Path $backupRoot "release.env")
-Copy-Item docker-compose.prod.yml (Join-Path $backupRoot "docker-compose.prod.yml")
-Copy-Item docker-compose.ngrok.yml (Join-Path $backupRoot "docker-compose.ngrok.yml")
+.\backup.ps1
 ```
+
+자주 쓰는 옵션:
+
+```powershell
+.\backup.ps1 -CheckOnly
+.\backup.ps1 -OutputRoot .deploy\backups
+.\backup.ps1 -EnvFile .env.production -ReleaseFile release.env
+.\backup.ps1 -ComposeProjectName mjuclaw-setup
+.\backup.ps1 -SkipDbDump
+.\backup.ps1 -IncludePaddleModels
+```
+
+`backup.ps1`이 수행하는 작업:
+
+1. Docker CLI, env 파일, release 파일, compose 파일 존재 확인
+2. Docker daemon과 필수 volume 존재 확인
+3. `.deploy\backups\<timestamp>` 디렉터리 생성
+4. `.env.production`, `release.env`, compose 파일 복사
+5. `agent-data`, `router-data`, `user-data`, `public-data-assets` volume을 tar archive로 export
+6. `public-data-db`를 `pg_dump -Fc`로 dump
+7. 산출물 SHA256을 계산해 `backup.json` manifest 생성
+
+`-CheckOnly`는 입력 파일과 백업 대상 계획만 확인하고, 백업 디렉터리나 산출물을 만들지 않는다.
 
 Docker volume은 compose project 이름을 포함한 실제 volume 이름으로 백업한다. 기본 project 이름은 repo 디렉터리명 기준 `mjuclaw-setup`이다.
 
@@ -569,36 +586,14 @@ Docker volume은 compose project 이름을 포함한 실제 volume 이름으로 
 docker volume ls --format "{{.Name}}" | Select-String "mjuclaw-setup_"
 ```
 
-`COMPOSE_PROJECT_NAME`을 별도로 지정한 환경이라면 아래 명령의 `$project` 값을 실제 volume prefix에 맞춘다.
+`COMPOSE_PROJECT_NAME`을 별도로 지정한 환경이라면 `-ComposeProjectName` 값을 실제 volume prefix에 맞춘다.
 
-필수 volume을 tar로 묶는다.
-
-```powershell
-$backupPath = (Resolve-Path $backupRoot).Path
-$project = "mjuclaw-setup"
-$volumeNames = @("agent-data", "router-data", "user-data", "public-data-assets")
-
-foreach ($name in $volumeNames) {
-  $volume = "${project}_${name}"
-  docker run --rm `
-    --mount "type=volume,source=$volume,target=/data,readonly" `
-    --mount "type=bind,source=$backupPath,target=/backup" `
-    alpine sh -c "cd /data && tar czf /backup/$($name).tar.gz ."
-}
-```
-
-`public-data-db`는 컨테이너 내부에서 dump 파일을 만든 뒤 `docker cp`로 꺼낸다. PowerShell stdout redirect로 binary dump를 받으면 깨질 수 있으므로 `>` redirection은 사용하지 않는다.
+백업 결과를 확인한다. `backup.json`에는 산출물 이름, 종류, 크기, SHA256이 기록된다.
 
 ```powershell
-docker exec mjuclaw-public-data-db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/public-data-db.dump'
-docker cp "mjuclaw-public-data-db:/tmp/public-data-db.dump" (Join-Path $backupRoot "public-data-db.dump")
-docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
-```
-
-백업 결과를 확인한다.
-
-```powershell
-Get-ChildItem $backupRoot
+Get-ChildItem .deploy\backups | Sort-Object Name -Descending | Select-Object -First 1
+$latest = Get-ChildItem .deploy\backups | Sort-Object Name -Descending | Select-Object -First 1
+Get-Content (Join-Path $latest.FullName "backup.json")
 ```
 
 백업 디렉터리에는 secrets가 포함된다. `.deploy/`는 gitignore 대상이지만, 운영 PC 밖으로 복사할 때도 개인 저장소나 암호화된 저장소에만 보관한다.
@@ -708,15 +703,11 @@ docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
 
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
-1. Backup helper script
-   - 위 runbook을 바탕으로 destructive하지 않은 백업 생성만 스크립트화
-   - restore 자동화는 별도 검토 전까지 보류
-
-2. Release tag 갱신 보조 도구
+1. Release tag 갱신 보조 도구
    - 각 repo의 latest `sha-*` tag를 확인해 `release.env` 후보를 생성하는 스크립트 검토
    - 사람이 최종 승인하고 `release.env`에 반영하는 반자동 흐름 유지
 
-3. 선택적 완전 자동 CD
+2. 선택적 완전 자동 CD
    - Windows 운영 PC에 GitHub self-hosted runner 연결
    - GitHub Environments approval/protection 적용
    - 수동 승인 후 runner가 `deploy.ps1` 실행
