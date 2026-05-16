@@ -99,6 +99,21 @@ jobs:
             exit 1
           }
 
+      - name: Check deploy summary script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            "write-deploy-summary.ps1",
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
       - name: Check deploy script argument validation
         shell: pwsh
         run: |
@@ -283,6 +298,8 @@ jobs:
           grep -q "prepare-release.ps1 -Apply" "$workflow"
           grep -q "deploy.ps1 -RollbackOnFailure" "$workflow"
           grep -q "smoke-test.ps1" "$workflow"
+          grep -q "write-deploy-summary.ps1" "$workflow"
+          grep -q "Production Manual Deploy Summary" "$workflow"
           grep -Fq ".deploy\\smoke-tests" "$workflow"
           if grep -q "pull_request:" "$workflow"; then
             echo "production deploy workflow must not run on pull_request"
@@ -330,6 +347,8 @@ jobs:
           grep -q "backup.ps1" "$workflow"
           grep -q "deploy.ps1 -RollbackOnFailure" "$workflow"
           grep -q "smoke-test.ps1" "$workflow"
+          grep -q "write-deploy-summary.ps1" "$workflow"
+          grep -q "Production Auto Deploy Summary" "$workflow"
           grep -Fq ".deploy\\smoke-tests" "$workflow"
           if grep -q "pull_request:" "$workflow"; then
             echo "production auto deploy workflow must not run on pull_request"
