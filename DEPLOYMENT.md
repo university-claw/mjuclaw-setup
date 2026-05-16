@@ -30,7 +30,7 @@
 | Self-hosted runner 운영 기준 | 완료 | 운영 PC runner 보안/실행 경계와 실제 실행 기준 문서화 |
 | Production dry-run workflow | 완료 | `workflow_dispatch` 기반 check-only workflow 추가 및 운영 PC dry-run 성공 확인 |
 | 승인 기반 production deploy workflow | 완료 | `workflow_dispatch` + production approval 기반 실제 deploy mode 운영 PC 성공 확인 |
-| Main push production dry-run | 완료 | `main` push 시 운영 PC runner에서 check-only 검증 자동 실행 |
+| Main push production dry-run | 완료 | `main` push의 CI 성공 후 운영 PC runner에서 check-only 검증 자동 실행 |
 | 완전 자동 CD | 미완료 | main push 즉시 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -866,7 +866,7 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 
 `Production Deploy` workflow는 `workflow_dispatch` 수동 실행만 허용한다. `mode` 입력으로 `dry-run` 또는 `deploy`를 선택한다. 두 mode 모두 production environment approval과 production runner label을 사용한다.
 
-`Production Dry Run` workflow는 `main` push 또는 수동 `workflow_dispatch`로 실행된다. 이 workflow는 production environment approval을 사용하지 않는다. 대신 운영 PC runner에서 check-only 명령만 실행하고, image pull, backup 생성, compose up, 실제 smoke test, deploy, rollback은 수행하지 않는다.
+`Production Dry Run` workflow는 `main` push 자체가 아니라 `CI` workflow 성공 완료 후 또는 수동 `workflow_dispatch`로 실행된다. 같은 push에서 발행되는 `mjuclaw-agent:sha-*` image가 GHCR에 올라오기 전에 dry-run이 먼저 image tag를 검사하는 race condition을 막기 위해 `workflow_run`을 사용한다. 이 workflow는 production environment approval을 사용하지 않는다. 대신 운영 PC runner에서 check-only 명령만 실행하고, image pull, backup 생성, compose up, 실제 smoke test, deploy, rollback은 수행하지 않는다.
 
 ### Workflow 단계 기준
 
@@ -904,13 +904,17 @@ PR17 merge 후 운영 리허설 완료 기준:
 - `prepare-release`, `deploy`, `backup` check-only가 통과한다.
 - `.deploy\release-candidates`, `.deploy\backups`, `.deploy\releases`에 새 산출물이 생성되지 않는다.
 
-`Production Dry Run` 자동 workflow는 `main` push마다 실제 배포 없이 check-only만 수행한다.
+`Production Dry Run` 자동 workflow는 `main` push의 `CI` workflow가 성공한 뒤 실제 배포 없이 check-only만 수행한다.
 
 ```text
 main push
+  -> CI
+  -> Agent Docker build and publish
+  -> Production Dry Run workflow_run
   -> runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
   -> cd C:\Users\yoonh\Desktop\mjuclaw-setup
   -> git fetch origin
+  -> workflow_run head_sha가 현재 origin/main인지 확인
   -> git switch main
   -> git pull --ff-only origin main
   -> .\prepare-release.ps1 -CheckOnly
@@ -921,8 +925,9 @@ main push
 
 자동 dry-run의 완료 기준:
 
-- `main` push 시 `Production Dry Run` workflow가 자동 실행된다.
+- `main` push의 `CI` workflow가 성공한 뒤 `Production Dry Run` workflow가 자동 실행된다.
 - production runner가 job을 수신한다.
+- CI 완료 이벤트의 `head_sha`가 현재 `origin/main`과 다르면 오래된 dry-run으로 보고 검증 단계를 건너뛴다.
 - 운영 checkout에서 최신 main을 fast-forward한다.
 - `prepare-release`, `deploy`, `backup`, `smoke-test` check-only가 통과한다.
 - `release.env` 적용, image pull, backup 생성, compose up, 실제 smoke test는 수행하지 않는다.

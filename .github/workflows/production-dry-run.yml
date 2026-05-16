@@ -1,10 +1,12 @@
 name: Production Dry Run
-run-name: Production Dry Run (${{ github.ref_name }})
+run-name: Production Dry Run (${{ github.event.workflow_run.head_branch || github.ref_name }})
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -17,6 +19,13 @@ concurrency:
 jobs:
   dry-run:
     name: Production dry run
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.event == 'push'
+      )
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
     timeout-minutes: 10
 
@@ -28,8 +37,19 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          if ("${{ github.ref }}" -ne "refs/heads/main") {
-            throw "Production dry run must run from main. Current ref: ${{ github.ref }}"
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            if ("${{ github.event.workflow_run.conclusion }}" -ne "success") {
+              throw "Production dry run requires a successful CI workflow. Current conclusion: ${{ github.event.workflow_run.conclusion }}"
+            }
+            if ("${{ github.event.workflow_run.head_branch }}" -ne "main") {
+              throw "Production dry run must run from main. Current branch: ${{ github.event.workflow_run.head_branch }}"
+            }
+            if ("${{ github.event.workflow_run.event }}" -ne "push") {
+              throw "Production dry run must follow a main push CI run. Current event: ${{ github.event.workflow_run.event }}"
+            }
+          }
+          elseif ("${{ github.ref }}" -ne "refs/heads/main") {
+            throw "Manual production dry run must run from main. Current ref: ${{ github.ref }}"
           }
 
       - name: Show runner context
@@ -40,8 +60,14 @@ jobs:
           Write-Host "Machine: $env:COMPUTERNAME"
           Write-Host "Deploy workdir: $env:DEPLOY_WORKDIR"
           Write-Host "Event: ${{ github.event_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            Write-Host "CI head branch: ${{ github.event.workflow_run.head_branch }}"
+            Write-Host "CI head SHA: ${{ github.event.workflow_run.head_sha }}"
+            Write-Host "CI conclusion: ${{ github.event.workflow_run.conclusion }}"
+          }
 
       - name: Sync production checkout
+        id: sync
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -64,11 +90,25 @@ jobs:
           }
 
           git fetch origin main
+
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            $expectedHead = "${{ github.event.workflow_run.head_sha }}"
+            $originMain = (git rev-parse origin/main).Trim()
+            if ($originMain -ne $expectedHead) {
+              Write-Host "Skipping stale production dry run."
+              Write-Host "CI completed for $expectedHead, but origin/main is $originMain."
+              "skipped=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              exit 0
+            }
+          }
+
+          "skipped=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           git switch main
           git pull --ff-only origin main
           git rev-parse --short HEAD
 
       - name: Validate release candidate
+        if: steps.sync.outputs.skipped != 'true'
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -77,6 +117,7 @@ jobs:
           .\prepare-release.ps1 -CheckOnly
 
       - name: Validate deploy preflight
+        if: steps.sync.outputs.skipped != 'true'
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -85,6 +126,7 @@ jobs:
           .\deploy.ps1 -CheckOnly
 
       - name: Validate backup preflight
+        if: steps.sync.outputs.skipped != 'true'
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -93,6 +135,7 @@ jobs:
           .\backup.ps1 -CheckOnly
 
       - name: Validate smoke test plan
+        if: steps.sync.outputs.skipped != 'true'
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
