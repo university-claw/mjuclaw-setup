@@ -5,6 +5,7 @@ param(
   [switch]$Ngrok,
   [switch]$PullOnly,
   [switch]$NoPull,
+  [switch]$CheckOnly,
   [switch]$WaitHealthy,
   [switch]$SkipHealthCheck,
   [int]$HealthTimeoutSeconds = 120,
@@ -19,6 +20,10 @@ $ErrorActionPreference = "Stop"
 
 if ($PullOnly -and $NoPull) {
   throw "-PullOnly and -NoPull cannot be used together."
+}
+
+if ($CheckOnly -and ($PullOnly -or $NoPull -or $RollbackOnFailure -or $Rollback -or $RollbackLatest -or $WaitHealthy -or $SkipHealthCheck)) {
+  throw "-CheckOnly cannot be used with pull, deploy, rollback, or health options."
 }
 
 if ($WaitHealthy -and $SkipHealthCheck) {
@@ -141,6 +146,87 @@ function Assert-ReleaseFileIsPinned {
   $content = Get-Content -LiteralPath $Path -Raw
   if ($content -match "sha-replace-me|replace-me") {
     throw "$Path still contains placeholder release tags. Pin release.env before deploying."
+  }
+}
+
+function Read-KeyValueFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $values = @{}
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $parts = $trimmed -split "=", 2
+    if ($parts.Count -ne 2) {
+      continue
+    }
+
+    $key = $parts[0].Trim()
+    $value = $parts[1].Trim()
+    $value = $value.Trim('"')
+    $value = $value.Trim("'")
+    $values[$key] = $value
+  }
+
+  return $values
+}
+
+function Get-ReleaseValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Values,
+    [Parameter(Mandatory = $true)]
+    [string]$Key,
+    [Parameter(Mandatory = $true)]
+    [string]$Default
+  )
+
+  if ($Values.ContainsKey($Key) -and $Values[$Key]) {
+    return $Values[$Key]
+  }
+
+  return $Default
+}
+
+function Show-ReleasePlan {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ReleasePath
+  )
+
+  $values = Read-KeyValueFile -Path $ReleasePath
+  $services = @(
+    @{
+      Name = "agent"
+      Image = (Get-ReleaseValue -Values $values -Key "AGENT_IMAGE" -Default "ghcr.io/university-claw/mjuclaw-agent")
+      Tag = (Get-ReleaseValue -Values $values -Key "AGENT_TAG" -Default "main")
+    },
+    @{
+      Name = "router"
+      Image = (Get-ReleaseValue -Values $values -Key "ROUTER_IMAGE" -Default "ghcr.io/university-claw/mjuclaw-router")
+      Tag = (Get-ReleaseValue -Values $values -Key "ROUTER_TAG" -Default "main")
+    },
+    @{
+      Name = "worker"
+      Image = (Get-ReleaseValue -Values $values -Key "WORKER_IMAGE" -Default "ghcr.io/university-claw/mju-public-data-worker")
+      Tag = (Get-ReleaseValue -Values $values -Key "WORKER_TAG" -Default "main")
+    },
+    @{
+      Name = "classifier"
+      Image = (Get-ReleaseValue -Values $values -Key "CLASSIFIER_IMAGE" -Default "ghcr.io/university-claw/intent-classifier")
+      Tag = (Get-ReleaseValue -Values $values -Key "CLASSIFIER_TAG" -Default "main")
+    }
+  )
+
+  Write-Host "Planned images:"
+  foreach ($service in $services) {
+    Write-Host ("  {0,-10} {1}:{2}" -f $service.Name, $service.Image, $service.Tag)
   }
 }
 
@@ -462,6 +548,20 @@ try {
   else {
     Assert-File $ReleaseFilePath "release file"
     Assert-ReleaseFileIsPinned $ReleaseFilePath
+    if ($CheckOnly) {
+      Invoke-Step "Validating compose configuration" {
+        Invoke-Docker -Arguments ((New-ComposeArgs -ReleasePath $ReleaseFilePath) + @("config", "--quiet"))
+      }
+
+      Invoke-Step "Planned release images" {
+        Show-ReleasePlan -ReleasePath $ReleaseFilePath
+      }
+
+      Write-Host ""
+      Write-Host "Check-only preflight completed. No images were pulled and no services were changed."
+      return
+    }
+
     $PreviousSuccessfulSnapshot = Find-LatestSuccessfulSnapshot
     $Deployment = New-DeploymentRecord -ReleasePath $ReleaseFilePath -Mode "deploy"
   }
