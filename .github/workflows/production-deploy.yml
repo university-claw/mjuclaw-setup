@@ -1,7 +1,12 @@
 name: Production Deploy
-run-name: Production Deploy (${{ inputs.mode }})
+run-name: Production Deploy (${{ github.event.inputs.mode || github.event.workflow_run.head_branch || github.ref_name }})
 
 on:
+  workflow_run:
+    workflows:
+      - Production Dry Run
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       mode:
@@ -22,9 +27,54 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  auto-deploy-gate:
+    name: Prepare automatic deploy gate
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_deploy: ${{ steps.main-head.outputs.should_deploy }}
+
+    steps:
+      - name: Confirm source workflow head is current main
+        id: main-head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          actual_head="$(
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
+              ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main |
+              awk '{print $1}'
+          )"
+
+          if [ -z "$actual_head" ]; then
+            echo "Could not resolve origin/main."
+            exit 1
+          fi
+
+          echo "Source workflow head: ${EXPECTED_HEAD}"
+          echo "Current origin/main: ${actual_head}"
+
+          if [ "$actual_head" != "$EXPECTED_HEAD" ]; then
+            echo "Skipping stale automatic production deploy."
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+
   dry-run:
     name: Production deploy dry run
-    if: ${{ inputs.mode == 'dry-run' }}
+    if: ${{ github.event.inputs.mode == 'dry-run' }}
     environment: production
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
     timeout-minutes: 10
@@ -102,7 +152,8 @@ jobs:
 
   deploy:
     name: Production deploy
-    if: ${{ inputs.mode == 'deploy' }}
+    needs: auto-deploy-gate
+    if: ${{ always() && (github.event.inputs.mode == 'deploy' || needs.auto-deploy-gate.outputs.should_deploy == 'true') }}
     environment: production
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
     timeout-minutes: 30
@@ -115,7 +166,18 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          if ("${{ github.ref }}" -ne "refs/heads/main") {
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            if ("${{ github.event.workflow_run.conclusion }}" -ne "success") {
+              throw "Automatic production deploy requires a successful Production Dry Run workflow. Current conclusion: ${{ github.event.workflow_run.conclusion }}"
+            }
+            if ("${{ github.event.workflow_run.head_branch }}" -ne "main") {
+              throw "Automatic production deploy must run from main. Current branch: ${{ github.event.workflow_run.head_branch }}"
+            }
+            if ("${{ github.event.workflow_run.event }}" -ne "workflow_run") {
+              throw "Automatic production deploy must follow an automatic Production Dry Run. Current source event: ${{ github.event.workflow_run.event }}"
+            }
+          }
+          elseif ("${{ github.ref }}" -ne "refs/heads/main") {
             throw "Production deploy must be dispatched from main. Current ref: ${{ github.ref }}"
           }
 
@@ -126,6 +188,12 @@ jobs:
           Write-Host "Runner: $env:RUNNER_NAME"
           Write-Host "Machine: $env:COMPUTERNAME"
           Write-Host "Deploy workdir: $env:DEPLOY_WORKDIR"
+          Write-Host "Event: ${{ github.event_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            Write-Host "Production Dry Run head branch: ${{ github.event.workflow_run.head_branch }}"
+            Write-Host "Production Dry Run head SHA: ${{ github.event.workflow_run.head_sha }}"
+            Write-Host "Production Dry Run conclusion: ${{ github.event.workflow_run.conclusion }}"
+          }
 
       - name: Sync production checkout
         shell: powershell
@@ -150,6 +218,15 @@ jobs:
           }
 
           git fetch origin main
+
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            $expectedHead = "${{ github.event.workflow_run.head_sha }}"
+            $originMain = (git rev-parse origin/main).Trim()
+            if ($originMain -ne $expectedHead) {
+              throw "Automatic production deploy is stale. Production Dry Run completed for $expectedHead, but origin/main is $originMain."
+            }
+          }
+
           git switch main
           git pull --ff-only origin main
           git rev-parse --short HEAD
