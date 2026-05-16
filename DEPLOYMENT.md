@@ -26,8 +26,9 @@
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
 | 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | Self-hosted runner 준비 계획 | 완료 | 운영 PC runner 보안/실행 경계와 단계별 도입 계획 문서화 |
-| Production dry-run workflow | 준비 | `workflow_dispatch` 기반 check-only workflow 추가 |
-| 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
+| Production dry-run workflow | 완료 | `workflow_dispatch` 기반 check-only workflow 추가 |
+| 승인 기반 production deploy workflow | 준비 | `workflow_dispatch` + production approval 기반 실제 deploy mode 추가 |
+| 완전 자동 CD | 미완료 | main push 즉시 자동 배포는 아직 도입하지 않음 |
 
 ---
 
@@ -848,14 +849,15 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 | Environment secrets | 최소화. 앱 runtime secrets는 운영 PC `.env.production`에 유지 |
 | Environment variables | 필요 시 runner 고정 경로 같은 비밀이 아닌 값만 사용 |
 
-초기 workflow에는 production environment를 붙이되, 첫 PR은 실제 배포 없이 dry-run만 수행한다. 실제 배포 단계는 별도 PR에서 활성화한다.
+`Production Deploy` workflow는 `workflow_dispatch` 수동 실행만 허용한다. `mode` 입력으로 `dry-run` 또는 `deploy`를 선택한다. 두 mode 모두 production environment approval과 production runner label을 사용한다.
 
 ### Workflow 단계 계획
 
-PR17은 `.github/workflows/production-deploy.yml`에 dry-run workflow만 추가한다.
+`dry-run` mode는 실제 배포 없이 check-only만 수행한다.
 
 ```text
 workflow_dispatch
+  -> mode: dry-run
   -> production environment approval
   -> runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
   -> cd C:\Users\yoonh\Desktop\mjuclaw-setup
@@ -869,7 +871,7 @@ workflow_dispatch
 
 이 workflow는 `actions/checkout`을 사용하지 않는다. GitHub Actions workspace 대신 운영 PC의 고정 checkout인 `C:\Users\yoonh\Desktop\mjuclaw-setup`으로 이동해 `git pull --ff-only origin main`을 실행한다. 운영 checkout에 커밋되지 않은 변경이 있으면 중단한다.
 
-PR17의 완료 기준:
+`dry-run` mode의 완료 기준:
 
 - workflow file이 `workflow_dispatch` only로 추가된다.
 - production environment와 `mjuclaw-prod-windows` runner label을 사용한다.
@@ -885,12 +887,15 @@ PR17 merge 후 운영 리허설 완료 기준:
 - `prepare-release`, `deploy`, `backup` check-only가 통과한다.
 - `.deploy\release-candidates`, `.deploy\backups`, `.deploy\releases`에 새 산출물이 생성되지 않는다.
 
-PR18에서 실제 배포 workflow를 활성화한다.
+`deploy` mode는 승인 후 실제 배포를 수행한다.
 
 ```text
 workflow_dispatch
+  -> mode: deploy
   -> production environment approval
   -> cd C:\Users\yoonh\Desktop\mjuclaw-setup
+  -> git fetch origin
+  -> git switch main
   -> git pull --ff-only origin main
   -> .\prepare-release.ps1 -Apply
   -> .\deploy.ps1 -CheckOnly
@@ -898,6 +903,17 @@ workflow_dispatch
   -> .\backup.ps1
   -> .\deploy.ps1 -RollbackOnFailure
 ```
+
+`deploy` mode의 완료 기준:
+
+- GitHub UI에서 main 기준으로 `mode: deploy`를 수동 실행한다.
+- production environment approval 없이는 job이 실행되지 않는다.
+- 승인 후 runner가 deploy job을 수신한다.
+- `prepare-release.ps1 -Apply`가 후보 `release.env`를 만들고 운영 `release.env`에 적용한다.
+- `deploy.ps1 -CheckOnly`와 `deploy.ps1 -PullOnly`가 통과한다.
+- `backup.ps1`가 배포 전 백업 산출물을 생성한다.
+- `deploy.ps1 -RollbackOnFailure`가 성공하고 최신 `deploy.json`에 `status: succeeded`가 기록된다.
+- 배포 후 Discord, LLM, router, public data worker smoke test가 성공한다.
 
 PR18 이후에도 `main` push 즉시 자동 배포는 도입하지 않는다. 배포 시점은 workflow를 수동 실행하고 environment approval을 통과한 경우에만 결정한다.
 
@@ -927,13 +943,13 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
    - `mjuclaw-prod-windows` label 부여
    - GitHub Environment `production` required reviewer 설정
 
-2. Production dry-run workflow 실행 리허설
-   - GitHub UI에서 `Production Deploy` workflow 수동 실행
+2. Production deploy workflow 실행 리허설
+   - GitHub UI에서 `Production Deploy` workflow를 `mode: deploy`로 수동 실행
    - production environment approval 대기/승인 확인
-   - 운영 PC runner가 `prepare-release`, `deploy`, `backup` check-only를 수행하는지 확인
+   - 배포 전 backup 산출물 생성 확인
+   - 최신 `deploy.json`의 `status: succeeded` 확인
+   - Discord/LLM/router/worker smoke test 수행
 
-3. PR18: 승인 기반 실제 deploy workflow
-   - `prepare-release.ps1 -Apply`
-   - `deploy.ps1 -PullOnly`
-   - `backup.ps1`
-   - `deploy.ps1 -RollbackOnFailure`
+3. Production deploy 결과 문서화
+   - `DEPLOYMENT.md`에 승인 기반 deploy workflow 첫 성공 기록 추가
+   - main push 즉시 자동 배포는 계속 보류
