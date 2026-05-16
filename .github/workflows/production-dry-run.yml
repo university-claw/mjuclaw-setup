@@ -1,0 +1,101 @@
+name: Production Dry Run
+run-name: Production Dry Run (${{ github.ref_name }})
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-dry-run
+  cancel-in-progress: true
+
+jobs:
+  dry-run:
+    name: Production dry run
+    runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
+    timeout-minutes: 10
+
+    env:
+      DEPLOY_WORKDIR: 'C:\Users\yoonh\Desktop\mjuclaw-setup'
+
+    steps:
+      - name: Guard main branch only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ("${{ github.ref }}" -ne "refs/heads/main") {
+            throw "Production dry run must run from main. Current ref: ${{ github.ref }}"
+          }
+
+      - name: Show runner context
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Machine: $env:COMPUTERNAME"
+          Write-Host "Deploy workdir: $env:DEPLOY_WORKDIR"
+          Write-Host "Event: ${{ github.event_name }}"
+
+      - name: Sync production checkout
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path -LiteralPath $env:DEPLOY_WORKDIR -PathType Container)) {
+            throw "Production checkout not found: $env:DEPLOY_WORKDIR"
+          }
+
+          Set-Location $env:DEPLOY_WORKDIR
+
+          if (-not (Test-Path -LiteralPath ".git" -PathType Container)) {
+            throw "Production checkout is not a git repository: $env:DEPLOY_WORKDIR"
+          }
+
+          $status = git status --short
+          if ($status) {
+            $status | ForEach-Object { Write-Host $_ }
+            throw "Production checkout has uncommitted changes. Clean the checkout before running production dry run."
+          }
+
+          git fetch origin main
+          git switch main
+          git pull --ff-only origin main
+          git rev-parse --short HEAD
+
+      - name: Validate release candidate
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\prepare-release.ps1 -CheckOnly
+
+      - name: Validate deploy preflight
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\deploy.ps1 -CheckOnly
+
+      - name: Validate backup preflight
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\backup.ps1 -CheckOnly
+
+      - name: Validate smoke test plan
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\smoke-test.ps1 -CheckOnly

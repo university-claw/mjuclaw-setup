@@ -30,6 +30,7 @@
 | Self-hosted runner 운영 기준 | 완료 | 운영 PC runner 보안/실행 경계와 실제 실행 기준 문서화 |
 | Production dry-run workflow | 완료 | `workflow_dispatch` 기반 check-only workflow 추가 및 운영 PC dry-run 성공 확인 |
 | 승인 기반 production deploy workflow | 완료 | `workflow_dispatch` + production approval 기반 실제 deploy mode 운영 PC 성공 확인 |
+| Main push production dry-run | 완료 | `main` push 시 운영 PC runner에서 check-only 검증 자동 실행 |
 | 완전 자동 CD | 미완료 | main push 즉시 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -821,7 +822,8 @@ self-hosted runner는 GitHub Actions job을 운영 PC에서 실행한다. 따라
 ### 도입 원칙
 
 - 완전 자동 배포를 `main` push에 바로 연결하지 않는다.
-- 첫 workflow는 `workflow_dispatch` 수동 실행만 허용한다.
+- 실제 deploy workflow는 `workflow_dispatch` 수동 실행만 허용한다.
+- `main` push 자동화는 check-only dry-run workflow에만 허용한다.
 - `pull_request`, fork, 임의 branch code가 운영 runner에서 실행되지 않게 한다.
 - 운영 PC runner는 `mjuclaw-setup` repo 전용 repo-level runner로 제한한다.
 - workflow는 GitHub Actions workspace가 아니라 운영 PC의 고정 checkout인 `C:\Users\yoonh\Desktop\mjuclaw-setup`에서 배포 스크립트를 실행한다.
@@ -864,6 +866,8 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 
 `Production Deploy` workflow는 `workflow_dispatch` 수동 실행만 허용한다. `mode` 입력으로 `dry-run` 또는 `deploy`를 선택한다. 두 mode 모두 production environment approval과 production runner label을 사용한다.
 
+`Production Dry Run` workflow는 `main` push 또는 수동 `workflow_dispatch`로 실행된다. 이 workflow는 production environment approval을 사용하지 않는다. 대신 운영 PC runner에서 check-only 명령만 실행하고, image pull, backup 생성, compose up, 실제 smoke test, deploy, rollback은 수행하지 않는다.
+
 ### Workflow 단계 기준
 
 `dry-run` mode는 실제 배포 없이 check-only만 수행한다.
@@ -899,6 +903,30 @@ PR17 merge 후 운영 리허설 완료 기준:
 - 운영 checkout에서 최신 main을 fast-forward한다.
 - `prepare-release`, `deploy`, `backup` check-only가 통과한다.
 - `.deploy\release-candidates`, `.deploy\backups`, `.deploy\releases`에 새 산출물이 생성되지 않는다.
+
+`Production Dry Run` 자동 workflow는 `main` push마다 실제 배포 없이 check-only만 수행한다.
+
+```text
+main push
+  -> runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
+  -> cd C:\Users\yoonh\Desktop\mjuclaw-setup
+  -> git fetch origin
+  -> git switch main
+  -> git pull --ff-only origin main
+  -> .\prepare-release.ps1 -CheckOnly
+  -> .\deploy.ps1 -CheckOnly
+  -> .\backup.ps1 -CheckOnly
+  -> .\smoke-test.ps1 -CheckOnly
+```
+
+자동 dry-run의 완료 기준:
+
+- `main` push 시 `Production Dry Run` workflow가 자동 실행된다.
+- production runner가 job을 수신한다.
+- 운영 checkout에서 최신 main을 fast-forward한다.
+- `prepare-release`, `deploy`, `backup`, `smoke-test` check-only가 통과한다.
+- `release.env` 적용, image pull, backup 생성, compose up, 실제 smoke test는 수행하지 않는다.
+- `.deploy\release-candidates`, `.deploy\backups`, `.deploy\releases`, `.deploy\smoke-tests`에 새 산출물이 생성되지 않는다.
 
 `deploy` mode는 승인 후 실제 배포를 수행한다.
 
@@ -981,9 +1009,9 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
    - 현재 `run.cmd`로 임시 실행 중이면 Windows Service 등록을 검토한다.
    - 서비스화할 경우 재부팅 후 runner 자동 시작과 Docker Desktop 접근 권한을 확인한다.
 
-2. main push 자동 dry-run 도입 검토
-   - `main` push 시 production runner에서 `prepare-release.ps1 -CheckOnly`, `deploy.ps1 -CheckOnly`, `backup.ps1 -CheckOnly`만 자동 실행할지 결정한다.
-   - 이 단계에서는 image pull, backup 생성, compose up, smoke test는 수행하지 않는다.
+2. main push approval-gated deploy 도입 검토
+   - `main` push가 deploy workflow를 자동 시작하되, production approval 이후에만 실제 deploy를 수행할지 결정한다.
+   - approval 없는 즉시 deploy로 넘어가기 전 중간 단계로 검토한다.
 
 3. main push 즉시 자동 배포는 계속 보류
    - 승인 기반 `workflow_dispatch` 운영을 기본으로 유지한다.
