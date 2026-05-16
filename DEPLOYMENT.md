@@ -25,6 +25,7 @@
 | Backup helper script | 완료 | `backup.ps1`로 운영 데이터 백업 생성 자동화 |
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
 | Smoke test helper | 완료 | `smoke-test.ps1`로 배포 후 service/worker smoke test와 기록 생성 |
+| Production deploy smoke gating | 완료 | `Production Deploy` deploy mode에서 배포 후 `smoke-test.ps1` 실행과 기록 출력 |
 | 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | Self-hosted runner 운영 기준 | 완료 | 운영 PC runner 보안/실행 경계와 실제 실행 기준 문서화 |
 | Production dry-run workflow | 완료 | `workflow_dispatch` 기반 check-only workflow 추가 및 운영 PC dry-run 성공 확인 |
@@ -914,6 +915,7 @@ workflow_dispatch
   -> .\deploy.ps1 -PullOnly
   -> .\backup.ps1
   -> .\deploy.ps1 -RollbackOnFailure
+  -> .\smoke-test.ps1
 ```
 
 `deploy` mode의 완료 기준:
@@ -925,7 +927,10 @@ workflow_dispatch
 - `deploy.ps1 -CheckOnly`와 `deploy.ps1 -PullOnly`가 통과한다.
 - `backup.ps1`가 배포 전 백업 산출물을 생성한다.
 - `deploy.ps1 -RollbackOnFailure`가 성공하고 최신 `deploy.json`에 `status: succeeded`가 기록된다.
-- 배포 후 Discord, LLM, router, public data worker smoke test가 성공한다.
+- `smoke-test.ps1`가 성공하고 최신 `smoke-test.json`에 `status: succeeded`가 기록된다.
+- 배포 후 Discord/LLM 실제 대화 smoke test는 운영자가 수동으로 확인한다.
+
+`deploy.ps1 -RollbackOnFailure`는 기본 service health 실패 시 rollback을 시도한다. `smoke-test.ps1` 실패는 workflow job을 실패시키지만, 이번 단계에서는 자동 rollback으로 바로 연결하지 않는다. smoke에는 public data 외부 source 일시 장애가 섞일 수 있으므로, 실패 기록과 container log를 확인한 뒤 운영자가 rollback 또는 재배포를 판단한다.
 
 PR18 이후에도 `main` push 즉시 자동 배포는 도입하지 않는다. 배포 시점은 workflow를 수동 실행하고 environment approval을 통과한 경우에만 결정한다.
 
@@ -949,7 +954,7 @@ Windows
 mjuclaw-prod-windows
 ```
 
-이 기록 이후 PR17/PR18의 운영 리허설 항목은 완료된 것으로 본다. 애플리케이션별 smoke test는 배포 후 운영자가 Discord, LLM, router, public data worker 기준으로 계속 확인한다.
+이 기록 이후 PR17/PR18의 운영 리허설 항목은 완료된 것으로 본다. PR21 이후 router/worker 기본 smoke는 workflow가 `smoke-test.ps1`로 확인하고, Discord/LLM 실제 대화 smoke는 배포 후 운영자가 계속 수동 확인한다.
 
 ### 중단 및 복구 기준
 
@@ -976,9 +981,9 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
    - 현재 `run.cmd`로 임시 실행 중이면 Windows Service 등록을 검토한다.
    - 서비스화할 경우 재부팅 후 runner 자동 시작과 Docker Desktop 접근 권한을 확인한다.
 
-2. Production Deploy workflow에 smoke test 연결 검토
-   - `deploy.ps1 -RollbackOnFailure` 성공 후 `smoke-test.ps1`를 실행할지 결정한다.
-   - Discord/LLM 실제 대화 검증은 side effect가 있으므로 계속 수동 smoke로 유지한다.
+2. main push 자동 dry-run 도입 검토
+   - `main` push 시 production runner에서 `prepare-release.ps1 -CheckOnly`, `deploy.ps1 -CheckOnly`, `backup.ps1 -CheckOnly`만 자동 실행할지 결정한다.
+   - 이 단계에서는 image pull, backup 생성, compose up, smoke test는 수행하지 않는다.
 
 3. main push 즉시 자동 배포는 계속 보류
    - 승인 기반 `workflow_dispatch` 운영을 기본으로 유지한다.
