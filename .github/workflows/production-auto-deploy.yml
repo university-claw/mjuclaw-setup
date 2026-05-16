@@ -1,109 +1,73 @@
-name: Production Deploy
-run-name: Production Deploy (${{ github.event.inputs.mode || github.ref_name }})
+name: Production Auto Deploy
+run-name: Production Auto Deploy (${{ github.event.workflow_run.head_branch || github.ref_name }})
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Run dry-run checks or deploy to production.
-        type: choice
-        required: true
-        default: dry-run
-        options:
-          - dry-run
-          - deploy
+  workflow_run:
+    workflows:
+      - Production Dry Run
+    types:
+      - completed
 
 permissions:
   contents: read
-  deployments: write
 
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
 jobs:
-  dry-run:
-    name: Production deploy dry run
-    if: ${{ github.event.inputs.mode == 'dry-run' }}
-    environment: production
-    runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
-    timeout-minutes: 10
-
-    env:
-      DEPLOY_WORKDIR: 'C:\Users\yoonh\Desktop\mjuclaw-setup'
+  auto-deploy-gate:
+    name: Prepare automatic deploy gate
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_deploy: ${{ steps.main-head.outputs.should_deploy }}
 
     steps:
-      - name: Guard main branch only
-        shell: powershell
+      - name: Confirm source workflow head is current main
+        id: main-head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          $ErrorActionPreference = "Stop"
-          if ("${{ github.ref }}" -ne "refs/heads/main") {
-            throw "Production deploy dry run must be dispatched from main. Current ref: ${{ github.ref }}"
-          }
+          set -euo pipefail
 
-      - name: Show runner context
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Write-Host "Runner: $env:RUNNER_NAME"
-          Write-Host "Machine: $env:COMPUTERNAME"
-          Write-Host "Deploy workdir: $env:DEPLOY_WORKDIR"
+          actual_head="$(
+            curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${REPOSITORY}/git/ref/heads/main" |
+              python3 -c "import json, sys; print(json.load(sys.stdin)['object']['sha'])"
+          )"
 
-      - name: Sync production checkout
-        shell: powershell
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
+          if [ -z "$actual_head" ]; then
+            echo "Could not resolve origin/main."
+            exit 1
+          fi
 
-          if (-not (Test-Path -LiteralPath $env:DEPLOY_WORKDIR -PathType Container)) {
-            throw "Production checkout not found: $env:DEPLOY_WORKDIR"
-          }
+          echo "Production Dry Run head: ${EXPECTED_HEAD}"
+          echo "Current origin/main: ${actual_head}"
 
-          Set-Location $env:DEPLOY_WORKDIR
+          if [ "$actual_head" != "$EXPECTED_HEAD" ]; then
+            echo "Skipping stale automatic production deploy."
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-          if (-not (Test-Path -LiteralPath ".git" -PathType Container)) {
-            throw "Production checkout is not a git repository: $env:DEPLOY_WORKDIR"
-          }
-
-          $status = git status --short
-          if ($status) {
-            $status | ForEach-Object { Write-Host $_ }
-            throw "Production checkout has uncommitted changes. Clean the checkout before running deployment automation."
-          }
-
-          git fetch origin main
-          git switch main
-          git pull --ff-only origin main
-          git rev-parse --short HEAD
-
-      - name: Validate release candidate
-        shell: powershell
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:DEPLOY_WORKDIR
-          .\prepare-release.ps1 -CheckOnly
-
-      - name: Validate deploy preflight
-        shell: powershell
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:DEPLOY_WORKDIR
-          .\deploy.ps1 -CheckOnly
-
-      - name: Validate backup preflight
-        shell: powershell
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:DEPLOY_WORKDIR
-          .\backup.ps1 -CheckOnly
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Production deploy
-    if: ${{ github.event.inputs.mode == 'deploy' }}
-    environment: production
+    name: Production auto deploy
+    needs: auto-deploy-gate
+    if: ${{ needs.auto-deploy-gate.outputs.should_deploy == 'true' }}
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
     timeout-minutes: 30
 
@@ -111,12 +75,18 @@ jobs:
       DEPLOY_WORKDIR: 'C:\Users\yoonh\Desktop\mjuclaw-setup'
 
     steps:
-      - name: Guard main branch only
+      - name: Guard automatic production deploy
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          if ("${{ github.ref }}" -ne "refs/heads/main") {
-            throw "Production deploy must be dispatched from main. Current ref: ${{ github.ref }}"
+          if ("${{ github.event.workflow_run.conclusion }}" -ne "success") {
+            throw "Automatic production deploy requires a successful Production Dry Run workflow. Current conclusion: ${{ github.event.workflow_run.conclusion }}"
+          }
+          if ("${{ github.event.workflow_run.head_branch }}" -ne "main") {
+            throw "Automatic production deploy must run from main. Current branch: ${{ github.event.workflow_run.head_branch }}"
+          }
+          if ("${{ github.event.workflow_run.event }}" -ne "workflow_run") {
+            throw "Automatic production deploy must follow an automatic Production Dry Run. Current source event: ${{ github.event.workflow_run.event }}"
           }
 
       - name: Show runner context
@@ -126,6 +96,9 @@ jobs:
           Write-Host "Runner: $env:RUNNER_NAME"
           Write-Host "Machine: $env:COMPUTERNAME"
           Write-Host "Deploy workdir: $env:DEPLOY_WORKDIR"
+          Write-Host "Production Dry Run head branch: ${{ github.event.workflow_run.head_branch }}"
+          Write-Host "Production Dry Run head SHA: ${{ github.event.workflow_run.head_sha }}"
+          Write-Host "Production Dry Run conclusion: ${{ github.event.workflow_run.conclusion }}"
 
       - name: Sync production checkout
         shell: powershell
@@ -150,6 +123,13 @@ jobs:
           }
 
           git fetch origin main
+
+          $expectedHead = "${{ github.event.workflow_run.head_sha }}"
+          $originMain = (git rev-parse origin/main).Trim()
+          if ($originMain -ne $expectedHead) {
+            throw "Automatic production deploy is stale. Production Dry Run completed for $expectedHead, but origin/main is $originMain."
+          }
+
           git switch main
           git pull --ff-only origin main
           git rev-parse --short HEAD

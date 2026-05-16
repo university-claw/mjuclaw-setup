@@ -2,7 +2,7 @@
 
 이 문서는 현재까지 구축된 MJUClaw 배포 구조를 정리한다. 목표는 운영 Windows PC에서 더 이상 여러 repo를 직접 clone/build하지 않고, GitHub Actions가 검증해 GHCR에 publish한 이미지를 pull해서 배포하는 것이다.
 
-현재 배포 방식은 **승인 기반 CD**다. CI는 각 repo에서 자동으로 실행되고 이미지를 발행한다. `mjuclaw-setup`의 `main` push는 CI와 production dry-run 성공 후 `Production Deploy` workflow를 자동으로 approval 대기 상태까지 열 수 있다. 실제 운영 반영은 production approval을 통과한 뒤에만 진행되며, 운영자는 필요 시 GitHub Actions의 `Production Deploy` workflow를 수동 실행하거나 운영 PC에서 직접 `deploy.ps1`을 실행할 수도 있다.
+현재 배포 방식은 **main push 기반 자동 CD**다. CI는 각 repo에서 자동으로 실행되고 이미지를 발행한다. `mjuclaw-setup`의 `main` push는 CI와 production dry-run 성공 후 `Production Auto Deploy` workflow를 통해 운영 PC에 자동 배포된다. 운영자는 필요 시 GitHub Actions의 `Production Deploy` workflow를 수동 approval fallback으로 실행하거나 운영 PC에서 직접 `deploy.ps1`을 실행할 수도 있다.
 
 ---
 
@@ -28,11 +28,11 @@
 | Production deploy smoke gating | 완료 | `Production Deploy` deploy mode에서 배포 후 `smoke-test.ps1` 실행과 기록 출력 |
 | 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | Self-hosted runner 운영 기준 | 완료 | 운영 PC runner 보안/실행 경계와 실제 실행 기준 문서화 |
-| Production dry-run workflow | 완료 | `workflow_dispatch` 기반 check-only workflow 추가 및 운영 PC dry-run 성공 확인 |
-| 승인 기반 production deploy workflow | 완료 | `workflow_dispatch` + production approval 기반 실제 deploy mode 운영 PC 성공 확인 |
+| Production dry-run workflow | 완료 | CI 성공 후 자동 check-only workflow와 수동 dry-run 지원 |
+| 승인 기반 production deploy workflow | 완료 | `workflow_dispatch` + production approval 기반 수동 fallback deploy mode 운영 PC 성공 확인 |
 | Main push production dry-run | 완료 | `main` push의 CI 성공 후 운영 PC runner에서 check-only 검증 자동 실행 |
-| Main push approval-gated deploy | 완료 | 자동 dry-run 성공 후 `Production Deploy`가 production approval 대기 |
-| 완전 자동 CD | 미완료 | main push 즉시 자동 배포는 아직 도입하지 않음 |
+| Main push approval-gated deploy | 대체됨 | PR24에서 approval 없는 자동 deploy로 전환 |
+| 완전 자동 CD | 완료 | 자동 dry-run 성공 후 `Production Auto Deploy`가 approval 없이 실제 배포 |
 
 ---
 
@@ -816,20 +816,20 @@ docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
 
 ## Self-hosted Runner 운영 기준
 
-이 단계는 `main` push 즉시 자동 배포를 켜는 것이 아니다. 목표는 Windows 운영 PC에 GitHub self-hosted runner를 붙이되, 보안 경계, 실행 위치, 승인 절차를 고정한 승인 기반 반자동 CD로 운영하는 것이다.
+Windows 운영 PC의 GitHub self-hosted runner는 production 배포 자동화를 실행한다. 초기 도입 단계에서는 승인 기반 반자동 CD로 운영했지만, 현재 기본 경로는 `main` push 이후 dry-run 성공을 거쳐 approval 없이 자동 배포하는 방식이다.
 
 self-hosted runner는 GitHub Actions job을 운영 PC에서 실행한다. 따라서 운영 PC runner는 일반 CI runner가 아니라 production 변경 권한을 가진 운영 자동화 진입점으로 취급한다.
 
 ### 도입 원칙
 
-- 완전 자동 배포를 `main` push에 바로 연결하지 않는다.
-- 실제 deploy workflow는 `workflow_dispatch` 수동 실행만 허용한다.
-- `main` push 자동화는 check-only dry-run workflow에만 허용한다.
+- 완전 자동 배포는 `CI -> Production Dry Run -> Production Auto Deploy` 순서로만 실행한다.
+- 수동 `Production Deploy` workflow는 approval이 필요한 fallback으로 유지한다.
+- `main` push 직접 deploy는 허용하지 않고, dry-run workflow 성공 이후에만 auto deploy를 연결한다.
 - `pull_request`, fork, 임의 branch code가 운영 runner에서 실행되지 않게 한다.
 - 운영 PC runner는 `mjuclaw-setup` repo 전용 repo-level runner로 제한한다.
 - workflow는 GitHub Actions workspace가 아니라 운영 PC의 고정 checkout인 `C:\Users\yoonh\Desktop\mjuclaw-setup`에서 배포 스크립트를 실행한다.
 - `.env.production`, `release.env`, `.deploy/`는 계속 운영 PC 로컬 파일로 유지하고 GitHub secrets로 대량 이관하지 않는다.
-- GitHub Environment `production`의 required reviewer 승인 전에는 실제 배포 job이 실행되지 않게 한다.
+- 자동 배포 workflow에는 GitHub Environment approval을 걸지 않는다. approval은 수동 fallback workflow에만 적용한다.
 - runner가 붙은 뒤에도 기본 운영 방식은 `prepare-release -> backup -> deploy -> smoke test` 순서를 유지한다.
 
 ### Runner 설정 기준
@@ -855,7 +855,7 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 
 ### GitHub Environment 설정
 
-`mjuclaw-setup` repo에 `production` environment를 만들고 아래 설정을 적용한다.
+`mjuclaw-setup` repo에 `production` environment를 만들고 아래 설정을 적용한다. 이 environment는 수동 fallback인 `Production Deploy` workflow에서만 사용한다. `Production Auto Deploy` workflow는 approval 없는 자동 배포 경로라서 `production` environment를 사용하지 않는다.
 
 | 설정 | 기준 |
 |---|---|
@@ -865,7 +865,9 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 | Environment secrets | 최소화. 앱 runtime secrets는 운영 PC `.env.production`에 유지 |
 | Environment variables | 필요 시 runner 고정 경로 같은 비밀이 아닌 값만 사용 |
 
-`Production Deploy` workflow는 수동 `workflow_dispatch`와 자동 `workflow_run`을 지원한다. 수동 실행에서는 `mode` 입력으로 `dry-run` 또는 `deploy`를 선택한다. 자동 실행에서는 `Production Dry Run` workflow가 성공한 경우에만 deploy job이 열리고, 실제 배포는 production environment approval 이후에만 수행된다.
+`Production Deploy` workflow는 수동 `workflow_dispatch` 전용 fallback이다. `mode` 입력으로 `dry-run` 또는 `deploy`를 선택하며, 두 mode 모두 production environment approval 이후에만 실행된다.
+
+`Production Auto Deploy` workflow는 `Production Dry Run` 성공 완료 후 자동 실행된다. 이 workflow는 production environment approval을 사용하지 않는다. 대신 자동 dry-run 성공, upstream event 검증, stale SHA 검증, 운영 checkout clean check, backup, `-RollbackOnFailure`, smoke test로 배포를 제한한다.
 
 `Production Dry Run` workflow는 `main` push 자체가 아니라 `CI` workflow 성공 완료 후 또는 수동 `workflow_dispatch`로 실행된다. 같은 push에서 발행되는 `mjuclaw-agent:sha-*` image가 GHCR에 올라오기 전에 dry-run이 먼저 image tag를 검사하는 race condition을 막기 위해 `workflow_run`을 사용한다. 이 workflow는 production environment approval을 사용하지 않는다. 대신 운영 PC runner에서 check-only 명령만 실행하고, image pull, backup 생성, compose up, 실제 smoke test, deploy, rollback은 수행하지 않는다.
 
@@ -934,16 +936,15 @@ main push
 - `release.env` 적용, image pull, backup 생성, compose up, 실제 smoke test는 수행하지 않는다.
 - `.deploy\release-candidates`, `.deploy\backups`, `.deploy\releases`, `.deploy\smoke-tests`에 새 산출물이 생성되지 않는다.
 
-`Production Deploy` 자동 workflow는 자동 dry-run이 성공한 뒤 production approval 대기 상태로 열린다.
+`Production Auto Deploy` workflow는 자동 dry-run이 성공한 뒤 approval 없이 실제 배포를 수행한다.
 
 ```text
 main push
   -> CI
   -> Production Dry Run
-  -> Production Deploy workflow_run
+  -> Production Auto Deploy workflow_run
   -> source workflow head_sha가 현재 origin/main인지 확인
-  -> production environment approval 대기
-  -> 승인 후 운영 PC runner에서 다시 origin/main 확인
+  -> 운영 PC runner에서 다시 origin/main 확인
   -> .\prepare-release.ps1 -Apply
   -> .\deploy.ps1 -CheckOnly
   -> .\deploy.ps1 -PullOnly
@@ -952,15 +953,16 @@ main push
   -> .\smoke-test.ps1
 ```
 
-자동 approval-gated deploy의 완료 기준:
+자동 deploy의 완료 기준:
 
-- `Production Dry Run`이 성공한 경우에만 `Production Deploy` workflow가 열린다.
+- `Production Dry Run`이 성공한 경우에만 `Production Auto Deploy` workflow가 열린다.
 - upstream dry-run의 source event가 자동 `workflow_run`인 경우만 deploy 후보가 된다. 수동 dry-run 완료는 자동 deploy를 열지 않는다.
-- approval 요청 전 `head_sha`가 현재 `origin/main`과 다르면 오래된 deploy로 보고 건너뛴다.
-- approval 이후 운영 PC runner에서도 `head_sha`와 현재 `origin/main`을 다시 비교한다.
-- production approval 없이는 `prepare-release`, image pull, backup, compose up, smoke test가 실행되지 않는다.
+- GitHub hosted gate에서 `head_sha`가 현재 `origin/main`과 다르면 오래된 deploy로 보고 건너뛴다.
+- 운영 PC runner에서도 `head_sha`와 현재 `origin/main`을 다시 비교한다.
+- production approval 없이 `prepare-release`, image pull, backup, compose up, smoke test를 실행한다.
+- 실패 시 workflow를 실패시키고, 기본 service health 실패는 `deploy.ps1 -RollbackOnFailure`가 rollback을 시도한다.
 
-`deploy` mode는 승인 후 실제 배포를 수행한다.
+수동 fallback인 `deploy` mode는 승인 후 실제 배포를 수행한다.
 
 ```text
 workflow_dispatch
@@ -978,7 +980,7 @@ workflow_dispatch
   -> .\smoke-test.ps1
 ```
 
-`deploy` mode의 완료 기준:
+수동 fallback `deploy` mode의 완료 기준:
 
 - GitHub UI에서 main 기준으로 `mode: deploy`를 수동 실행한다.
 - production environment approval 없이는 job이 실행되지 않는다.
@@ -992,7 +994,7 @@ workflow_dispatch
 
 `deploy.ps1 -RollbackOnFailure`는 기본 service health 실패 시 rollback을 시도한다. `smoke-test.ps1` 실패는 workflow job을 실패시키지만, 이번 단계에서는 자동 rollback으로 바로 연결하지 않는다. smoke에는 public data 외부 source 일시 장애가 섞일 수 있으므로, 실패 기록과 container log를 확인한 뒤 운영자가 rollback 또는 재배포를 판단한다.
 
-이 단계 이후에도 approval 없는 `main` push 즉시 자동 배포는 도입하지 않는다. 실제 배포는 자동으로 열린 workflow든 수동 실행 workflow든 production environment approval을 통과한 경우에만 진행된다.
+이 단계 이후 `main` push의 실제 운영 반영은 자동 배포 경로가 기본이다. production approval은 수동 fallback workflow에만 적용된다.
 
 ### 승인 기반 deploy workflow 첫 성공 기록
 
@@ -1037,10 +1039,18 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
 
 다음 단계에서 다룰 작업은 운영 자동화 고도화다.
 
-1. 운영 PC runner 서비스화 여부 결정
+1. 자동 배포 결과 가시성 보강
+   - GitHub Actions summary에 release tag, backup path, deploy record, smoke record, 실패 시 다음 조치를 출력한다.
+   - 필요하면 Discord/webhook 알림을 별도 secret으로 추가한다.
+
+2. 운영 PC runner 서비스화 여부 결정
    - 현재 `run.cmd`로 임시 실행 중이면 Windows Service 등록을 검토한다.
    - 서비스화할 경우 재부팅 후 runner 자동 시작과 Docker Desktop 접근 권한을 확인한다.
 
-2. main push 즉시 자동 배포는 계속 보류
-   - 승인 기반 `workflow_dispatch` 운영을 기본으로 유지한다.
-   - 충분히 안정화된 뒤에도 production approval 없는 자동 배포는 별도 PR에서 다시 판단한다.
+3. smoke test 실패 정책 정리
+   - agent/router/classifier critical smoke 실패와 public-data 외부 source 실패를 구분한다.
+   - critical smoke 실패 시 rollback 자동화를 어디까지 연결할지 결정한다.
+
+4. rollback 리허설과 보존 정책 정리
+   - 이전 release로 rollback 후 최신 release로 복귀하는 운영 리허설을 수행한다.
+   - `.deploy/releases`, `.deploy/backups`, `.deploy/smoke-tests` 보존 기준을 정한다.
