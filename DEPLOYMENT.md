@@ -26,6 +26,7 @@
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
 | 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | Self-hosted runner 준비 계획 | 완료 | 운영 PC runner 보안/실행 경계와 단계별 도입 계획 문서화 |
+| Production dry-run workflow | 준비 | `workflow_dispatch` 기반 check-only workflow 추가 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -826,6 +827,7 @@ self-hosted runner는 GitHub Actions job을 운영 PC에서 실행한다. 따라
 | 네트워크 | GitHub Actions outbound HTTPS, GHCR pull, 기존 서비스 외부 연결 가능 |
 | 로컬 checkout | `C:\Users\yoonh\Desktop\mjuclaw-setup` |
 | 로컬 secrets | `.env.production`, `release.env`, Docker GHCR login credential |
+| Git 인증 | runner 실행 계정에서 `git fetch origin main`과 `git pull --ff-only origin main`이 비대화형으로 성공해야 함 |
 | 금지 | PR job, 테스트 job, 임의 shell 실험을 production runner에서 실행 |
 
 workflow의 `runs-on`은 generic `self-hosted`만 쓰지 않고, 반드시 production runner label까지 포함한다.
@@ -850,7 +852,7 @@ runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
 
 ### Workflow 단계 계획
 
-PR17은 dry-run workflow만 추가한다.
+PR17은 `.github/workflows/production-deploy.yml`에 dry-run workflow만 추가한다.
 
 ```text
 workflow_dispatch
@@ -865,13 +867,23 @@ workflow_dispatch
   -> .\backup.ps1 -CheckOnly
 ```
 
+이 workflow는 `actions/checkout`을 사용하지 않는다. GitHub Actions workspace 대신 운영 PC의 고정 checkout인 `C:\Users\yoonh\Desktop\mjuclaw-setup`으로 이동해 `git pull --ff-only origin main`을 실행한다. 운영 checkout에 커밋되지 않은 변경이 있으면 중단한다.
+
 PR17의 완료 기준:
 
-- runner가 workflow job을 수신한다.
+- workflow file이 `workflow_dispatch` only로 추가된다.
+- production environment와 `mjuclaw-prod-windows` runner label을 사용한다.
+- 운영 checkout에서만 `prepare-release`, `deploy`, `backup` check-only를 실행하도록 제한한다.
+- image pull, backup 생성, compose up은 수행하지 않는다.
+
+PR17 merge 후 운영 리허설 완료 기준:
+
+- GitHub UI에서 workflow를 main 기준으로 수동 실행한다.
 - production environment approval 없이는 job이 실행되지 않는다.
+- 승인 후 runner가 workflow job을 수신한다.
 - 운영 checkout에서 최신 main을 fast-forward한다.
 - `prepare-release`, `deploy`, `backup` check-only가 통과한다.
-- image pull, backup 생성, compose up은 수행하지 않는다.
+- `.deploy\release-candidates`, `.deploy\backups`, `.deploy\releases`에 새 산출물이 생성되지 않는다.
 
 PR18에서 실제 배포 workflow를 활성화한다.
 
@@ -915,10 +927,10 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
    - `mjuclaw-prod-windows` label 부여
    - GitHub Environment `production` required reviewer 설정
 
-2. PR17: production deploy dry-run workflow
-   - `workflow_dispatch` only
-   - production environment approval 적용
-   - `prepare-release`, `deploy`, `backup` check-only만 실행
+2. Production dry-run workflow 실행 리허설
+   - GitHub UI에서 `Production Deploy` workflow 수동 실행
+   - production environment approval 대기/승인 확인
+   - 운영 PC runner가 `prepare-release`, `deploy`, `backup` check-only를 수행하는지 확인
 
 3. PR18: 승인 기반 실제 deploy workflow
    - `prepare-release.ps1 -Apply`
