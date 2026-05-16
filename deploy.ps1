@@ -461,6 +461,16 @@ function Wait-Healthy {
   throw "Health check failed after ${HealthTimeoutSeconds}s.`n$summary"
 }
 
+function Remove-LegacyWorkerContainer {
+  $inspect = Invoke-DockerCapture -Arguments @("inspect", "mjuclaw-worker")
+  if ($inspect.ExitCode -ne 0) {
+    Write-Host "  No legacy mjuclaw-worker container found."
+    return
+  }
+
+  Invoke-Docker -Arguments @("rm", "-f", "mjuclaw-worker")
+}
+
 function Invoke-ComposeDeployment {
   param(
     [Parameter(Mandatory = $true)]
@@ -495,6 +505,10 @@ function Invoke-ComposeDeployment {
     Invoke-Docker -Arguments ($composeArgs + @("up", "-d"))
   }
 
+  Invoke-Step "Removing legacy worker container" {
+    Remove-LegacyWorkerContainer
+  }
+
   Invoke-Step "Current service status" {
     Invoke-Docker -Arguments ($composeArgs + @("ps"))
   }
@@ -504,8 +518,8 @@ function Invoke-ComposeDeployment {
       Wait-Healthy
     }
 
-    Invoke-Step "Recent worker logs" {
-      Invoke-Docker -Arguments @("logs", "mjuclaw-worker", "--tail", "20")
+    Invoke-Step "Recent public data worker logs" {
+      Invoke-Docker -Arguments @("logs", "mjuclaw-public-data-worker", "--tail", "20")
     }
   }
   else {
