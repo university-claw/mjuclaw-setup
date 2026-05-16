@@ -124,6 +124,62 @@ jobs:
           New-Item -ItemType Directory -Force -Path /tmp/mjuclaw-assets | Out-Null
           ./deploy.ps1 -CheckOnly -EnvFile .tmp/ci.env.production -ReleaseFile .tmp/ci.release.env
 
+  deploy-script-windows:
+    name: Deploy script Windows checks
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker capture handles native stderr
+        shell: powershell
+        run: |
+          $fakeBin = Join-Path $env:RUNNER_TEMP "fake-docker"
+          New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
+          @"
+          @echo off
+          echo simulated stderr 1>&2
+          exit /b 7
+          "@ | Set-Content -Encoding ASCII -Path (Join-Path $fakeBin "docker.cmd")
+
+          $env:PATH = "$fakeBin;$env:PATH"
+
+          $tokens = $null
+          $errors = $null
+          $source = Get-Content deploy.ps1 -Raw
+          $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+            $source,
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
+          $functionAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+              $node.Name -eq "Invoke-DockerCapture"
+          }, $true)
+          if (-not $functionAst) {
+            throw "Invoke-DockerCapture was not found."
+          }
+
+          Invoke-Expression $functionAst.Extent.Text
+          $ErrorActionPreference = "Stop"
+          $result = Invoke-DockerCapture -Arguments @("exec", "fake", "curl")
+
+          if ($result.ExitCode -ne 7) {
+            throw "Expected exit code 7, got $($result.ExitCode)."
+          }
+          if ($result.Output -notmatch "simulated stderr") {
+            throw "Expected stderr to be captured, got: $($result.Output)"
+          }
+          $global:LASTEXITCODE = 0
+
   docker-build:
     name: Agent Docker build and publish
     runs-on: ubuntu-latest

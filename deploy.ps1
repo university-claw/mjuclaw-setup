@@ -130,10 +130,19 @@ function Invoke-DockerCapture {
     [string[]]$Arguments
   )
 
-  $output = & docker @Arguments 2>&1
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & docker @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
   return [pscustomobject]@{
-    ExitCode = $LASTEXITCODE
-    Output = ($output | Out-String).Trim()
+    ExitCode = $exitCode
+    Output = ($output | ForEach-Object { $_.ToString() } | Out-String).Trim()
   }
 }
 
