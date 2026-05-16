@@ -1,0 +1,371 @@
+[CmdletBinding()]
+param(
+  [string]$OutputRoot = ".deploy\release-candidates",
+  [string]$ReleaseFile = "release.env",
+  [string]$RefOverrideFile = "",
+  [string]$Branch = "main",
+  [switch]$Apply,
+  [switch]$SkipImageVerify,
+  [switch]$CheckOnly
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+if (-not $OutputRoot.Trim()) {
+  throw "-OutputRoot must not be empty."
+}
+
+if (-not $ReleaseFile.Trim()) {
+  throw "-ReleaseFile must not be empty."
+}
+
+if (-not $Branch.Trim()) {
+  throw "-Branch must not be empty."
+}
+
+if ($RefOverrideFile -and -not $RefOverrideFile.Trim()) {
+  throw "-RefOverrideFile must not be empty when provided."
+}
+
+if ($CheckOnly -and $Apply) {
+  throw "-CheckOnly cannot be used with -Apply."
+}
+
+$Root = $PSScriptRoot
+if (-not $Root) {
+  $Root = (Get-Location).Path
+}
+
+function Resolve-RepoPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if ([System.IO.Path]::IsPathRooted($Path)) {
+    return [System.IO.Path]::GetFullPath($Path)
+  }
+
+  return [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+}
+
+function Assert-Command {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+    throw "$Name is not installed or is not available on PATH."
+  }
+}
+
+function Invoke-Step {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Label,
+    [Parameter(Mandatory = $true)]
+    [scriptblock]$Action
+  )
+
+  Write-Host ""
+  Write-Host "==> $Label"
+  & $Action
+}
+
+function Invoke-NativeCapture {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Command,
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & $Command @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = ($output | ForEach-Object { $_.ToString() } | Out-String).Trim()
+  }
+}
+
+function Get-RemoteHead {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Repository,
+    [Parameter(Mandatory = $true)]
+    [string]$Ref
+  )
+
+  $url = "https://github.com/$Repository.git"
+  $arguments = @()
+  $token = $env:CI_REPO_READ_TOKEN
+  if (-not $token) {
+    $token = $env:GITHUB_TOKEN
+  }
+  if ($token) {
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes(("x-access-token:{0}" -f $token))
+    $encoded = [Convert]::ToBase64String($bytes)
+    $arguments += @(
+      "-c", "http.https://github.com/.extraheader=",
+      "-c", "http.https://github.com/.extraheader=AUTHORIZATION: basic $encoded"
+    )
+  }
+
+  $arguments += @("ls-remote", $url, "refs/heads/$Ref")
+  $result = Invoke-NativeCapture -Command "git" -Arguments $arguments
+  if ($result.ExitCode -ne 0) {
+    throw "git ls-remote failed for $Repository $Ref. $($result.Output)"
+  }
+
+  $line = ($result.Output -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+  if (-not $line) {
+    throw "Remote branch not found: $Repository refs/heads/$Ref"
+  }
+
+  $parts = $line -split "\s+"
+  if ($parts.Count -lt 1 -or $parts[0].Length -lt 7) {
+    throw "Unexpected ls-remote output for ${Repository}: $line"
+  }
+
+  return $parts[0]
+}
+
+function Read-RefOverrideFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $values = @{}
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $parts = $trimmed -split "=", 2
+    if ($parts.Count -ne 2) {
+      throw "Invalid ref override line: $line"
+    }
+
+    $key = $parts[0].Trim()
+    $value = $parts[1].Trim().Trim('"').Trim("'")
+    if ($value -notmatch "^[0-9a-fA-F]{7,40}$") {
+      throw "Invalid commit SHA for ${key}: $value"
+    }
+
+    $values[$key] = $value.ToLowerInvariant()
+  }
+
+  return $values
+}
+
+function Get-ServiceCommit {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$RefOverrides,
+    [Parameter(Mandatory = $true)]
+    [string]$ServiceName,
+    [Parameter(Mandatory = $true)]
+    [string]$Repository,
+    [Parameter(Mandatory = $true)]
+    [string]$Ref
+  )
+
+  if ($RefOverrides.ContainsKey($ServiceName)) {
+    return $RefOverrides[$ServiceName]
+  }
+
+  if ($RefOverrides.ContainsKey($Repository)) {
+    return $RefOverrides[$Repository]
+  }
+
+  return Get-RemoteHead -Repository $Repository -Ref $Ref
+}
+
+function Assert-ImageExists {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Image,
+    [Parameter(Mandatory = $true)]
+    [string]$Tag
+  )
+
+  $ref = "${Image}:${Tag}"
+  $result = Invoke-NativeCapture -Command "docker" -Arguments @("manifest", "inspect", $ref)
+  if ($result.ExitCode -ne 0) {
+    throw "Image tag is not available: $ref. Confirm GHCR login and wait for publish to finish. $($result.Output)"
+  }
+}
+
+function New-ReleaseEnvContent {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object[]]$Services
+  )
+
+  $lines = @(
+    "# Generated by prepare-release.ps1.",
+    "# Review before deploying. Prefer sha-* tags for production rollouts.",
+    ""
+  )
+
+  foreach ($service in $Services) {
+    $lines += "$($service.ImageVariable)=$($service.Image)"
+    $lines += "$($service.TagVariable)=$($service.Tag)"
+    $lines += ""
+  }
+
+  return ($lines -join [Environment]::NewLine).TrimEnd() + [Environment]::NewLine
+}
+
+$OutputRootPath = Resolve-RepoPath -Path $OutputRoot
+$ReleaseFilePath = Resolve-RepoPath -Path $ReleaseFile
+$RefOverrideFilePath = $null
+if ($RefOverrideFile) {
+  $RefOverrideFilePath = Resolve-RepoPath -Path $RefOverrideFile
+}
+
+$serviceDefinitions = @(
+  [ordered]@{
+    Name = "agent"
+    Repository = "university-claw/mjuclaw-setup"
+    Image = "ghcr.io/university-claw/mjuclaw-agent"
+    ImageVariable = "AGENT_IMAGE"
+    TagVariable = "AGENT_TAG"
+  },
+  [ordered]@{
+    Name = "router"
+    Repository = "university-claw/mjuclaw-router"
+    Image = "ghcr.io/university-claw/mjuclaw-router"
+    ImageVariable = "ROUTER_IMAGE"
+    TagVariable = "ROUTER_TAG"
+  },
+  [ordered]@{
+    Name = "worker"
+    Repository = "university-claw/mju-public-data-worker"
+    Image = "ghcr.io/university-claw/mju-public-data-worker"
+    ImageVariable = "WORKER_IMAGE"
+    TagVariable = "WORKER_TAG"
+  },
+  [ordered]@{
+    Name = "classifier"
+    Repository = "university-claw/intent-classifier"
+    Image = "ghcr.io/university-claw/intent-classifier"
+    ImageVariable = "CLASSIFIER_IMAGE"
+    TagVariable = "CLASSIFIER_TAG"
+  }
+)
+
+Invoke-Step "Checking release candidate inputs" {
+  Assert-Command -Name "git"
+  if (-not $SkipImageVerify) {
+    Assert-Command -Name "docker"
+  }
+  if ($RefOverrideFilePath -and -not (Test-Path -LiteralPath $RefOverrideFilePath -PathType Leaf)) {
+    throw "Ref override file not found: $RefOverrideFilePath"
+  }
+
+  Write-Host "Source branch: $Branch"
+  Write-Host "Output root: $OutputRootPath"
+  Write-Host "Release file: $ReleaseFilePath"
+  if ($RefOverrideFilePath) {
+    Write-Host "Ref override file: $RefOverrideFilePath"
+  }
+  if ($SkipImageVerify) {
+    Write-Host "Image verification: skipped"
+  }
+  else {
+    Write-Host "Image verification: docker manifest inspect"
+  }
+}
+
+$refOverrides = @{}
+if ($RefOverrideFilePath) {
+  $refOverrides = Read-RefOverrideFile -Path $RefOverrideFilePath
+}
+
+$services = [System.Collections.ArrayList]::new()
+
+Invoke-Step "Resolving service commits" {
+  foreach ($definition in $serviceDefinitions) {
+    $commit = Get-ServiceCommit -RefOverrides $refOverrides -ServiceName $definition.Name -Repository $definition.Repository -Ref $Branch
+    $shortSha = $commit.Substring(0, 7)
+    $tag = "sha-$shortSha"
+    $service = [ordered]@{
+      name = $definition.Name
+      repository = $definition.Repository
+      branch = $Branch
+      commit = $commit
+      shortSha = $shortSha
+      image = $definition.Image
+      tag = $tag
+      imageVariable = $definition.ImageVariable
+      tagVariable = $definition.TagVariable
+    }
+    $null = $services.Add($service)
+    Write-Host ("  {0,-10} {1} {2}:{3}" -f $definition.Name, $shortSha, $definition.Image, $tag)
+  }
+}
+
+if (-not $SkipImageVerify) {
+  Invoke-Step "Verifying GHCR image tags" {
+    foreach ($service in $services) {
+      Assert-ImageExists -Image $service.image -Tag $service.tag
+      Write-Host "  ok $($service.image):$($service.tag)"
+    }
+  }
+}
+
+if ($CheckOnly) {
+  Write-Host ""
+  Write-Host "Check-only completed. No release candidate files were created."
+  exit 0
+}
+
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$candidateRoot = Join-Path $OutputRootPath $timestamp
+$candidateReleasePath = Join-Path $candidateRoot "release.env"
+$candidateManifestPath = Join-Path $candidateRoot "release.json"
+
+Invoke-Step "Writing release candidate" {
+  New-Item -ItemType Directory -Force -Path $candidateRoot | Out-Null
+  New-ReleaseEnvContent -Services $services | Set-Content -Encoding UTF8 -Path $candidateReleasePath
+
+  $manifest = [ordered]@{
+    status = "candidate"
+    createdAt = (Get-Date).ToUniversalTime().ToString("o")
+    branch = $Branch
+    skippedImageVerify = [bool]$SkipImageVerify
+    releaseEnv = $candidateReleasePath
+    services = $services
+  }
+  $manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 -Path $candidateManifestPath
+
+  Write-Host $candidateReleasePath
+  Write-Host $candidateManifestPath
+}
+
+if ($Apply) {
+  Invoke-Step "Applying release candidate" {
+    Copy-Item -LiteralPath $candidateReleasePath -Destination $ReleaseFilePath -Force
+    Write-Host "Updated $ReleaseFilePath"
+  }
+}
+else {
+  Write-Host ""
+  Write-Host "Review the candidate release.env before deploying."
+  Write-Host "Apply it manually:"
+  Write-Host "  Copy-Item `"$candidateReleasePath`" `"$ReleaseFilePath`""
+  Write-Host "Or rerun with -Apply."
+}

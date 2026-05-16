@@ -23,6 +23,7 @@
 | Preflight check | 완료 | `deploy.ps1 -CheckOnly`로 설정과 배포 대상 image/tag를 사전 검증 |
 | Backup/restore runbook | 완료 | 운영 PC volume과 DB 백업/복구 절차 문서화 |
 | Backup helper script | 완료 | `backup.ps1`로 운영 데이터 백업 생성 자동화 |
+| Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -221,13 +222,50 @@ docker login ghcr.io -u <github-user>
 일반적인 운영 배포는 아래 순서로 진행한다.
 
 1. 각 서비스 repo의 PR을 main에 merge하고 GitHub Actions가 GHCR image를 publish했는지 확인한다.
-2. `release.env`의 `*_TAG` 값을 배포할 `sha-*` tag로 갱신한다.
-3. 운영 PC의 `mjuclaw-setup`을 최신 main으로 갱신한다.
+2. 운영 PC의 `mjuclaw-setup`을 최신 main으로 갱신한다.
 
 ```powershell
 cd C:\Users\yoonh\Desktop\mjuclaw-setup
 git switch main
 git pull --ff-only origin main
+```
+
+3. `release.env` 후보를 생성한다.
+
+```powershell
+.\prepare-release.ps1
+```
+
+`prepare-release.ps1`은 각 서비스 repo의 `main` HEAD를 읽어 `sha-*` tag 조합을 만들고, 기본적으로 `.deploy\release-candidates\<timestamp>\release.env`와 `release.json`만 생성한다. `release.env`를 바로 덮어쓰지 않는다.
+
+자주 쓰는 옵션:
+
+```powershell
+.\prepare-release.ps1 -CheckOnly -SkipImageVerify
+.\prepare-release.ps1 -SkipImageVerify
+.\prepare-release.ps1 -Apply
+.\prepare-release.ps1 -OutputRoot .deploy\release-candidates
+```
+
+확인할 것:
+
+- `release.json`의 repo별 commit이 배포하려는 main commit과 일치
+- 후보 `release.env`의 image/tag 조합이 의도와 일치
+- `-SkipImageVerify` 없이 실행했을 때 GHCR image tag 검증 성공
+
+GHCR image publish가 아직 끝나지 않았으면 image 검증이 실패할 수 있다. 이 경우 배포하지 말고 GitHub Actions publish 완료 후 다시 실행한다.
+
+후보를 확인한 뒤 수동으로 적용한다.
+
+```powershell
+$latest = Get-ChildItem .deploy\release-candidates | Sort-Object Name -Descending | Select-Object -First 1
+Copy-Item (Join-Path $latest.FullName "release.env") .\release.env
+```
+
+또는 후보 생성과 적용을 한 번에 실행한다.
+
+```powershell
+.\prepare-release.ps1 -Apply
 ```
 
 4. 실제 변경 전 preflight를 실행한다.
@@ -703,11 +741,7 @@ docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
 
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
-1. Release tag 갱신 보조 도구
-   - 각 repo의 latest `sha-*` tag를 확인해 `release.env` 후보를 생성하는 스크립트 검토
-   - 사람이 최종 승인하고 `release.env`에 반영하는 반자동 흐름 유지
-
-2. 선택적 완전 자동 CD
+1. 선택적 완전 자동 CD
    - Windows 운영 PC에 GitHub self-hosted runner 연결
    - GitHub Environments approval/protection 적용
    - 수동 승인 후 runner가 `deploy.ps1` 실행
