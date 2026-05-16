@@ -21,6 +21,7 @@
 | Health gating | 완료 | `deploy.ps1`이 agent/router/classifier health endpoint를 확인하고 실패 시 non-zero exit |
 | Rollback 자동화 | 완료 | `.deploy/releases` snapshot 기반 수동 rollback과 `-RollbackOnFailure` 지원 |
 | Preflight check | 완료 | `deploy.ps1 -CheckOnly`로 설정과 배포 대상 image/tag를 사전 검증 |
+| Backup/restore runbook | 완료 | 운영 PC volume과 DB 백업/복구 절차 문서화 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -525,6 +526,160 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
 
 ---
 
+## 운영 데이터 Backup/Restore Runbook
+
+이 절차는 운영 Windows PC의 Docker Desktop 데이터 초기화, PC 교체, volume 손상 상황에서 서비스를 복구하기 위한 기준이다. 자동화 스크립트가 아니라 수동 runbook이며, restore는 운영 데이터를 덮어쓸 수 있으므로 점검 창에서만 실행한다.
+
+### 백업 대상
+
+| 대상 | 백업 방식 | 복구 필요도 |
+|---|---|---|
+| `.env.production` | 파일 복사 | 필수. secrets와 runtime 설정 |
+| `release.env` | 파일 복사 | 필수. 복구 시 띄울 image/tag 조합 |
+| `docker-compose.prod.yml` | 파일 복사 | 권장. 당시 compose 기준 보존 |
+| `docker-compose.ngrok.yml` | 파일 복사 | ngrok 사용 시 권장 |
+| `agent-data` | Docker volume tar | 필수. OpenClaw config, 세션, cron, view-store |
+| `router-data` | Docker volume tar | 권장. router pairing/device state |
+| `user-data` | Docker volume tar | `MJU_STORAGE=postgres`가 아닌 데이터가 남아 있을 수 있으므로 보존 |
+| `public-data-assets` | Docker volume tar | 필수. 공지/학식 원본 첨부와 이미지 |
+| `public-data-db` | `pg_dump -Fc` | 필수. public data DB |
+| `public-data-paddle-models` | 백업 생략 | cache 성격. 새 PC에서 다시 받을 수 있음 |
+
+`public-data-db`는 volume tar보다 `pg_dump`를 기본 백업 방식으로 사용한다. 실행 중인 Postgres 데이터 디렉터리를 그대로 tar로 묶는 방식은 복구 안정성이 낮다.
+
+### 백업 생성
+
+운영 PC의 `mjuclaw-setup` repo에서 실행한다.
+
+```powershell
+cd C:\Users\yoonh\Desktop\mjuclaw-setup
+
+$backupRoot = ".deploy\backups\$(Get-Date -Format yyyyMMdd-HHmmss)"
+New-Item -ItemType Directory -Force $backupRoot | Out-Null
+
+Copy-Item .env.production (Join-Path $backupRoot ".env.production")
+Copy-Item release.env (Join-Path $backupRoot "release.env")
+Copy-Item docker-compose.prod.yml (Join-Path $backupRoot "docker-compose.prod.yml")
+Copy-Item docker-compose.ngrok.yml (Join-Path $backupRoot "docker-compose.ngrok.yml")
+```
+
+Docker volume은 compose project 이름을 포함한 실제 volume 이름으로 백업한다. 기본 project 이름은 repo 디렉터리명 기준 `mjuclaw-setup`이다.
+
+```powershell
+docker volume ls --format "{{.Name}}" | Select-String "mjuclaw-setup_"
+```
+
+`COMPOSE_PROJECT_NAME`을 별도로 지정한 환경이라면 아래 명령의 `$project` 값을 실제 volume prefix에 맞춘다.
+
+필수 volume을 tar로 묶는다.
+
+```powershell
+$backupPath = (Resolve-Path $backupRoot).Path
+$project = "mjuclaw-setup"
+$volumeNames = @("agent-data", "router-data", "user-data", "public-data-assets")
+
+foreach ($name in $volumeNames) {
+  $volume = "${project}_${name}"
+  docker run --rm `
+    --mount "type=volume,source=$volume,target=/data,readonly" `
+    --mount "type=bind,source=$backupPath,target=/backup" `
+    alpine sh -c "cd /data && tar czf /backup/$($name).tar.gz ."
+}
+```
+
+`public-data-db`는 컨테이너 내부에서 dump 파일을 만든 뒤 `docker cp`로 꺼낸다. PowerShell stdout redirect로 binary dump를 받으면 깨질 수 있으므로 `>` redirection은 사용하지 않는다.
+
+```powershell
+docker exec mjuclaw-public-data-db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/public-data-db.dump'
+docker cp "mjuclaw-public-data-db:/tmp/public-data-db.dump" (Join-Path $backupRoot "public-data-db.dump")
+docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
+```
+
+백업 결과를 확인한다.
+
+```powershell
+Get-ChildItem $backupRoot
+```
+
+백업 디렉터리에는 secrets가 포함된다. `.deploy/`는 gitignore 대상이지만, 운영 PC 밖으로 복사할 때도 개인 저장소나 암호화된 저장소에만 보관한다.
+
+### 복구 순서
+
+복구 대상 PC에서 Docker Desktop과 Git을 준비하고 `mjuclaw-setup`을 clone한다. 이후 백업 디렉터리를 repo 안의 `.deploy\restore\<timestamp>` 같은 위치에 둔다.
+
+```powershell
+cd C:\Users\yoonh\Desktop\mjuclaw-setup
+
+$restoreRoot = ".deploy\restore\20260516-120000"
+Copy-Item (Join-Path $restoreRoot ".env.production") .env.production
+Copy-Item (Join-Path $restoreRoot "release.env") release.env
+```
+
+GHCR 접근을 확인하고 image를 먼저 내려받는다.
+
+```powershell
+docker login ghcr.io -u <github-user>
+.\deploy.ps1 -CheckOnly
+.\deploy.ps1 -PullOnly
+```
+
+DB가 아닌 volume을 먼저 복원한다. 기본 전제는 새 PC 또는 비어 있는 Docker volume으로의 복구다. 기존 volume에 복원하면 같은 경로의 파일은 덮어쓰지만 snapshot에 없는 오래된 파일은 자동으로 지우지 않는다. 기존 운영 PC에서 실행할 때는 반드시 별도 백업을 만든 뒤 진행한다.
+
+```powershell
+$restorePath = (Resolve-Path $restoreRoot).Path
+$project = "mjuclaw-setup"
+$volumeNames = @("agent-data", "router-data", "user-data", "public-data-assets")
+
+foreach ($name in $volumeNames) {
+  $volume = "${project}_${name}"
+  docker volume create $volume
+  docker run --rm `
+    --mount "type=volume,source=$volume,target=/data" `
+    --mount "type=bind,source=$restorePath,target=/backup,readonly" `
+    alpine sh -c "cd /data && tar xzf /backup/$($name).tar.gz"
+}
+```
+
+Postgres 컨테이너를 먼저 띄우고 dump를 복원한다.
+
+```powershell
+docker compose --env-file .env.production --env-file release.env -f docker-compose.prod.yml --profile public-data up -d public-data-db
+docker cp (Join-Path $restoreRoot "public-data-db.dump") "mjuclaw-public-data-db:/tmp/public-data-db.dump"
+docker exec mjuclaw-public-data-db sh -c 'pg_restore --clean --if-exists -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/public-data-db.dump'
+docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
+```
+
+전체 서비스를 올린다.
+
+```powershell
+.\deploy.ps1 -NoPull
+```
+
+복구 직후에는 아직 성공 snapshot이 없을 수 있으므로 `-RollbackOnFailure`가 실질적인 보호를 제공하지 못할 수 있다. 첫 복구 배포가 성공하면 이후부터 해당 성공 기록을 rollback 기준점으로 사용할 수 있다.
+
+### 복구 검증
+
+복구 후에는 아래 순서로 검증한다.
+
+1. `docker compose --env-file .env.production --env-file release.env -f docker-compose.prod.yml ps`
+2. agent/router/classifier health check
+3. `mjuclaw-public-data-worker` `doctor`
+4. `schedule tick --dry-run`
+5. 실제 Discord 대화 1회
+6. 기존 사용자 session 분리 기준 확인
+7. `mjuclaw-worker` legacy 컨테이너가 없는지 확인
+
+검증 명령은 `Smoke Test Checklist` 섹션의 명령을 그대로 사용한다. 복구가 성공하면 현재 `release.env` 기준으로 `.\deploy.ps1 -NoPull -RollbackOnFailure`를 한 번 더 실행해 성공 snapshot을 남길 수 있다.
+
+### 운영 원칙
+
+- 백업은 배포 전, Docker Desktop 업데이트 전, Windows 재부팅/장애 조치 전처럼 위험한 작업 전에 만든다.
+- `.env.production`, `release.env`, DB dump에는 secrets 또는 사용자 데이터가 포함될 수 있으므로 공유 채널에 올리지 않는다.
+- `public-data-paddle-models`는 cache라 기본 백업에서 제외한다. 복구 후 worker가 필요할 때 다시 내려받는다.
+- restore는 자동화하지 않는다. 추후 script를 만들더라도 `-DryRun`, 대상 경로 확인, 명시적 confirmation을 요구하는 별도 PR로 다룬다.
+
+---
+
 ## 현재 파이프라인 요약
 
 현재 완성된 흐름은 아래와 같다.
@@ -553,9 +708,9 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
 
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
-1. Backup/restore runbook
-   - `agent-data`, `router-data`, `user-data`, `public-data-db`, `public-data-assets` 백업/복구 절차 정리
-   - Docker Desktop 데이터 초기화, PC 교체, volume 손상 상황을 기준으로 검증
+1. Backup helper script
+   - 위 runbook을 바탕으로 destructive하지 않은 백업 생성만 스크립트화
+   - restore 자동화는 별도 검토 전까지 보류
 
 2. Release tag 갱신 보조 도구
    - 각 repo의 latest `sha-*` tag를 확인해 `release.env` 후보를 생성하는 스크립트 검토
