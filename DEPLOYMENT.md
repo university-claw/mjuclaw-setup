@@ -18,8 +18,8 @@
 | Production compose | 완료 | `docker-compose.prod.yml`로 GHCR image 기반 실행 |
 | Release manifest | 완료 | `release.env.example`로 image/tag 조합 고정 방식 정의 |
 | Windows deploy wrapper | 완료 | `deploy.ps1`로 pull/up 실행 |
-| Health gating | 미완료 | 수동 health check만 문서화, 자동 실패 판정은 후속 PR |
-| Rollback 자동화 | 미완료 | 이전 `release.env` 조합으로 수동 복구, 자동 rollback은 후속 PR |
+| Health gating | 완료 | `deploy.ps1`이 agent/router/classifier health endpoint를 확인하고 실패 시 non-zero exit |
+| Rollback 자동화 | 완료 | `.deploy/releases` snapshot 기반 수동 rollback과 `-RollbackOnFailure` 지원 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -115,7 +115,10 @@ flowchart LR
   E --> F["docker compose config 검증"]
   F --> G["docker compose pull"]
   G --> H["docker compose up -d"]
-  H --> I["수동 health check"]
+  H --> I["자동 health check"]
+  I --> J{"health 실패?"}
+  J -- "아니오" --> K["배포 성공 기록"]
+  J -- "예 + RollbackOnFailure" --> L["이전 성공 release로 rollback"]
 ```
 
 운영 PC는 build를 수행하지 않는다. 운영 PC의 책임은 pinned image를 pull하고 compose로 띄우는 것이다.
@@ -196,7 +199,12 @@ CLASSIFIER_TAG=sha-replace-me
 .\deploy.ps1 -Ngrok
 .\deploy.ps1 -PullOnly
 .\deploy.ps1 -NoPull
+.\deploy.ps1 -SkipHealthCheck
+.\deploy.ps1 -RollbackOnFailure
+.\deploy.ps1 -RollbackLatest
+.\deploy.ps1 -Rollback .deploy\releases\20260515-123000
 .\deploy.ps1 -EnvFile .env.production -ReleaseFile release.env
+.\deploy.ps1 -HealthTimeoutSeconds 180 -HealthIntervalSeconds 10
 ```
 
 스크립트가 수행하는 일:
@@ -211,7 +219,9 @@ CLASSIFIER_TAG=sha-replace-me
 8. image pull
 9. `docker compose up -d`
 10. `docker compose ps` 출력
-11. 수동 health check 명령 출력
+11. agent/router/classifier health check
+12. worker 최근 로그 출력
+13. `.deploy/releases/<timestamp>`에 배포 기록 저장
 
 옵션별 동작:
 
@@ -220,6 +230,13 @@ CLASSIFIER_TAG=sha-replace-me
 | `-Ngrok` | `docker-compose.ngrok.yml`과 `ngrok` profile 포함 |
 | `-PullOnly` | image pull까지만 수행하고 서비스 시작 생략 |
 | `-NoPull` | 이미 pull된 image로 `up -d`만 수행 |
+| `-SkipHealthCheck` | 배포 후 자동 health check 생략 |
+| `-WaitHealthy` | health check 실행 의도를 명시적으로 드러내는 옵션. 기본값도 health check 실행 |
+| `-HealthTimeoutSeconds` | health check 전체 대기 시간. 기본 120초 |
+| `-HealthIntervalSeconds` | health 재시도 간격. 기본 5초 |
+| `-RollbackOnFailure` | health check 실패 시 직전 성공 snapshot으로 자동 rollback |
+| `-RollbackLatest` | 가장 최근 성공 snapshot으로 rollback |
+| `-Rollback <path>` | 지정한 snapshot 디렉터리 또는 `release.env` 파일로 rollback |
 | `-EnvFile` | 기본 `.env.production` 대신 지정한 env 파일 사용 |
 | `-ReleaseFile` | 기본 `release.env` 대신 지정한 release manifest 사용 |
 
@@ -277,7 +294,46 @@ docker logs mjuclaw-worker --tail 20
 - agent가 LLM/tool call 단계에서 반복 실패
 - worker가 DB 연결 또는 OCR 초기화에서 반복 실패
 
-현재 단계의 `deploy.ps1`은 자동 health gating과 rollback을 수행하지 않는다. health check 실패 시에는 이전 `release.env` tag 조합으로 되돌린 뒤 다시 실행한다.
+`deploy.ps1`은 기본적으로 배포 후 agent/router/classifier health endpoint를 확인한다. 제한 시간 안에 모든 endpoint가 성공하지 않으면 non-zero exit로 종료한다. health check를 생략해야 하는 특수 상황에서는 `-SkipHealthCheck`를 명시한다.
+
+`-RollbackOnFailure`를 함께 사용하면 health check 실패 시 직전 성공 snapshot의 `release.env`로 자동 rollback을 시도한다.
+
+---
+
+## 배포 기록과 rollback
+
+`deploy.ps1`은 실행할 때마다 `.deploy/releases/<timestamp>` 디렉터리를 만들고 현재 배포에 사용한 `release.env` snapshot과 `deploy.json` 메타데이터를 저장한다.
+
+`.deploy/`는 운영 PC의 로컬 기록이며 git에 커밋하지 않는다.
+
+`-RollbackOnFailure`와 `-RollbackLatest`는 이전에 성공으로 기록된 snapshot이 있을 때만 사용할 수 있다. 첫 배포 전에는 rollback 대상이 없으므로, 첫 성공 배포 후부터 자동 rollback이 의미를 가진다.
+
+배포 기록에는 다음 정보가 남는다.
+
+- 배포 mode: `deploy` 또는 `rollback`
+- 시작/종료 시각
+- 사용한 env 파일 경로
+- 사용한 release manifest 경로
+- snapshot된 `release.env`
+- ngrok 사용 여부
+- health check 설정
+- 배포 결과 상태
+- 실패 메시지와 rollback 대상
+
+가장 최근 성공 배포로 rollback하려면 아래 명령을 사용한다.
+
+```powershell
+.\deploy.ps1 -RollbackLatest
+```
+
+특정 snapshot으로 rollback하려면 snapshot 디렉터리 또는 snapshot 안의 `release.env`를 지정한다.
+
+```powershell
+.\deploy.ps1 -Rollback .deploy\releases\20260515-123000
+.\deploy.ps1 -Rollback .deploy\releases\20260515-123000\release.env
+```
+
+rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up -d`, health check를 수행한다. pull을 생략해야 하는 경우에만 `-NoPull`을 함께 사용한다.
 
 ---
 
@@ -294,7 +350,9 @@ docker logs mjuclaw-worker --tail 20
   -> 운영 Windows PC에서 .\deploy.ps1 실행
   -> docker compose pull
   -> docker compose up -d
-  -> 수동 health check
+  -> 자동 health check
+  -> 성공/실패 배포 기록 저장
+  -> 실패 시 필요하면 이전 성공 snapshot으로 rollback
 ```
 
 이 구조의 핵심은 운영 배포 단위를 “현재 로컬 checkout 상태”가 아니라 “검증된 image tag 조합”으로 바꾸는 것이다. 따라서 운영 PC에서 어느 commit이 떠 있는지 추적할 때는 `release.env`의 `sha-*` tag 조합을 보면 된다.
@@ -305,22 +363,16 @@ docker logs mjuclaw-worker --tail 20
 
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
-1. `deploy.ps1` health gating 추가
-   - agent/router/classifier endpoint 자동 확인
-   - worker log sanity check
-   - 실패 시 non-zero exit
+1. 운영 PC 첫 배포 dry run
+   - `release.env`를 실제 `sha-*` tag로 채운 뒤 `.\deploy.ps1 -PullOnly` 실행
+   - GHCR 권한과 image pull 가능 여부 확인
 
-2. 배포 기록 저장
-   - 배포 시작/완료 시각
-   - 사용한 `release.env` snapshot
-   - deploy 결과
-   - health check 결과
+2. 운영 PC 실제 배포 리허설
+   - 짧은 점검 창에서 `.\deploy.ps1 -RollbackOnFailure` 실행
+   - `.deploy/releases` 기록 생성 확인
+   - health 실패 시 rollback 동작 확인
 
-3. rollback 자동화
-   - 직전 성공 release snapshot 보관
-   - 실패 시 이전 image tag 조합으로 복구
-
-4. 선택적 완전 자동 CD
+3. 선택적 완전 자동 CD
    - Windows 운영 PC에 GitHub self-hosted runner 연결
    - GitHub Environments approval/protection 적용
    - 수동 승인 후 runner가 `deploy.ps1` 실행
