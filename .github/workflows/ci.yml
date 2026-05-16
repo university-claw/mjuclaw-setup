@@ -69,6 +69,21 @@ jobs:
             exit 1
           }
 
+      - name: Check prepare release script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            "prepare-release.ps1",
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
       - name: Check deploy script argument validation
         shell: pwsh
         run: |
@@ -105,6 +120,27 @@ jobs:
             throw "Expected backup.ps1 compose project validation to fail."
           } catch {
             if ($_.Exception.Message -notlike "*ComposeProjectName*empty*") {
+              throw
+            }
+          }
+          exit 0
+
+      - name: Check prepare release script argument validation
+        shell: pwsh
+        run: |
+          try {
+            ./prepare-release.ps1 -CheckOnly -Apply
+            throw "Expected prepare-release.ps1 check-only apply validation to fail."
+          } catch {
+            if ($_.Exception.Message -notlike "*CheckOnly*Apply*") {
+              throw
+            }
+          }
+          try {
+            ./prepare-release.ps1 -OutputRoot ""
+            throw "Expected prepare-release.ps1 output root validation to fail."
+          } catch {
+            if ($_.Exception.Message -notlike "*OutputRoot*empty*") {
               throw
             }
           }
@@ -188,6 +224,12 @@ jobs:
           "@ | Set-Content -Encoding UTF8 -Path .tmp/ci.env.production
           Copy-Item release.env.example .tmp/ci.release.env
           ./backup.ps1 -CheckOnly -EnvFile .tmp/ci.env.production -ReleaseFile .tmp/ci.release.env -OutputRoot .tmp/backups
+
+      - name: Validate prepare release check-only mode
+        shell: pwsh
+        env:
+          CI_REPO_READ_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+        run: ./prepare-release.ps1 -CheckOnly -SkipImageVerify
 
   deploy-script-windows:
     name: Deploy script Windows checks
