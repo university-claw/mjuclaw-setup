@@ -110,7 +110,10 @@ function Get-RemoteHead {
   if ($token) {
     $bytes = [System.Text.Encoding]::ASCII.GetBytes(("x-access-token:{0}" -f $token))
     $encoded = [Convert]::ToBase64String($bytes)
-    $arguments += @("-c", "http.https://github.com/.extraheader=AUTHORIZATION: basic $encoded")
+    $arguments += @(
+      "-c", "http.https://github.com/.extraheader=",
+      "-c", "http.https://github.com/.extraheader=AUTHORIZATION: basic $encoded"
+    )
   }
 
   $arguments += @("ls-remote", $url, "refs/heads/$Ref")
