@@ -1,7 +1,17 @@
 name: Production Deploy
+run-name: Production Deploy (${{ inputs.mode }})
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Run dry-run checks or deploy to production.
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - deploy
 
 permissions:
   contents: read
@@ -14,6 +24,7 @@ concurrency:
 jobs:
   dry-run:
     name: Production deploy dry run
+    if: ${{ inputs.mode == 'dry-run' }}
     environment: production
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
     timeout-minutes: 10
@@ -88,3 +99,109 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-Location $env:DEPLOY_WORKDIR
           .\backup.ps1 -CheckOnly
+
+  deploy:
+    name: Production deploy
+    if: ${{ inputs.mode == 'deploy' }}
+    environment: production
+    runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
+    timeout-minutes: 30
+
+    env:
+      DEPLOY_WORKDIR: 'C:\Users\yoonh\Desktop\mjuclaw-setup'
+
+    steps:
+      - name: Guard main branch only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ("${{ github.ref }}" -ne "refs/heads/main") {
+            throw "Production deploy must be dispatched from main. Current ref: ${{ github.ref }}"
+          }
+
+      - name: Show runner context
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Machine: $env:COMPUTERNAME"
+          Write-Host "Deploy workdir: $env:DEPLOY_WORKDIR"
+
+      - name: Sync production checkout
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path -LiteralPath $env:DEPLOY_WORKDIR -PathType Container)) {
+            throw "Production checkout not found: $env:DEPLOY_WORKDIR"
+          }
+
+          Set-Location $env:DEPLOY_WORKDIR
+
+          if (-not (Test-Path -LiteralPath ".git" -PathType Container)) {
+            throw "Production checkout is not a git repository: $env:DEPLOY_WORKDIR"
+          }
+
+          $status = git status --short
+          if ($status) {
+            $status | ForEach-Object { Write-Host $_ }
+            throw "Production checkout has uncommitted changes. Clean the checkout before running deployment automation."
+          }
+
+          git fetch origin main
+          git switch main
+          git pull --ff-only origin main
+          git rev-parse --short HEAD
+
+      - name: Apply release candidate
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\prepare-release.ps1 -Apply
+
+      - name: Validate deploy preflight
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\deploy.ps1 -CheckOnly
+
+      - name: Pull production images
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\deploy.ps1 -PullOnly
+
+      - name: Create production backup
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\backup.ps1
+
+      - name: Deploy with rollback on failure
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          .\deploy.ps1 -RollbackOnFailure
+
+      - name: Show latest deployment record
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:DEPLOY_WORKDIR
+          $latest = Get-ChildItem .deploy\releases | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $latest) {
+            throw "No deployment record found."
+          }
+          Get-Content (Join-Path $latest.FullName "deploy.json")
