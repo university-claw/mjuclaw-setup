@@ -227,9 +227,15 @@ jobs:
 
       - name: Validate prepare release check-only mode
         shell: pwsh
-        env:
-          CI_REPO_READ_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
-        run: ./prepare-release.ps1 -CheckOnly -SkipImageVerify
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp | Out-Null
+          @"
+          agent=1111111111111111111111111111111111111111
+          router=2222222222222222222222222222222222222222
+          worker=3333333333333333333333333333333333333333
+          classifier=4444444444444444444444444444444444444444
+          "@ | Set-Content -Encoding UTF8 -Path .tmp/ci.release.refs
+          ./prepare-release.ps1 -CheckOnly -SkipImageVerify -RefOverrideFile .tmp/ci.release.refs
 
   deploy-script-windows:
     name: Deploy script Windows checks

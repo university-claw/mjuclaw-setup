@@ -2,6 +2,7 @@
 param(
   [string]$OutputRoot = ".deploy\release-candidates",
   [string]$ReleaseFile = "release.env",
+  [string]$RefOverrideFile = "",
   [string]$Branch = "main",
   [switch]$Apply,
   [switch]$SkipImageVerify,
@@ -21,6 +22,10 @@ if (-not $ReleaseFile.Trim()) {
 
 if (-not $Branch.Trim()) {
   throw "-Branch must not be empty."
+}
+
+if ($RefOverrideFile -and -not $RefOverrideFile.Trim()) {
+  throw "-RefOverrideFile must not be empty when provided."
 }
 
 if ($CheckOnly -and $Apply) {
@@ -135,6 +140,59 @@ function Get-RemoteHead {
   return $parts[0]
 }
 
+function Read-RefOverrideFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $values = @{}
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $parts = $trimmed -split "=", 2
+    if ($parts.Count -ne 2) {
+      throw "Invalid ref override line: $line"
+    }
+
+    $key = $parts[0].Trim()
+    $value = $parts[1].Trim().Trim('"').Trim("'")
+    if ($value -notmatch "^[0-9a-fA-F]{7,40}$") {
+      throw "Invalid commit SHA for ${key}: $value"
+    }
+
+    $values[$key] = $value.ToLowerInvariant()
+  }
+
+  return $values
+}
+
+function Get-ServiceCommit {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$RefOverrides,
+    [Parameter(Mandatory = $true)]
+    [string]$ServiceName,
+    [Parameter(Mandatory = $true)]
+    [string]$Repository,
+    [Parameter(Mandatory = $true)]
+    [string]$Ref
+  )
+
+  if ($RefOverrides.ContainsKey($ServiceName)) {
+    return $RefOverrides[$ServiceName]
+  }
+
+  if ($RefOverrides.ContainsKey($Repository)) {
+    return $RefOverrides[$Repository]
+  }
+
+  return Get-RemoteHead -Repository $Repository -Ref $Ref
+}
+
 function Assert-ImageExists {
   param(
     [Parameter(Mandatory = $true)]
@@ -173,6 +231,10 @@ function New-ReleaseEnvContent {
 
 $OutputRootPath = Resolve-RepoPath -Path $OutputRoot
 $ReleaseFilePath = Resolve-RepoPath -Path $ReleaseFile
+$RefOverrideFilePath = $null
+if ($RefOverrideFile) {
+  $RefOverrideFilePath = Resolve-RepoPath -Path $RefOverrideFile
+}
 
 $serviceDefinitions = @(
   [ordered]@{
@@ -210,10 +272,16 @@ Invoke-Step "Checking release candidate inputs" {
   if (-not $SkipImageVerify) {
     Assert-Command -Name "docker"
   }
+  if ($RefOverrideFilePath -and -not (Test-Path -LiteralPath $RefOverrideFilePath -PathType Leaf)) {
+    throw "Ref override file not found: $RefOverrideFilePath"
+  }
 
   Write-Host "Source branch: $Branch"
   Write-Host "Output root: $OutputRootPath"
   Write-Host "Release file: $ReleaseFilePath"
+  if ($RefOverrideFilePath) {
+    Write-Host "Ref override file: $RefOverrideFilePath"
+  }
   if ($SkipImageVerify) {
     Write-Host "Image verification: skipped"
   }
@@ -222,11 +290,16 @@ Invoke-Step "Checking release candidate inputs" {
   }
 }
 
+$refOverrides = @{}
+if ($RefOverrideFilePath) {
+  $refOverrides = Read-RefOverrideFile -Path $RefOverrideFilePath
+}
+
 $services = [System.Collections.ArrayList]::new()
 
 Invoke-Step "Resolving service commits" {
   foreach ($definition in $serviceDefinitions) {
-    $commit = Get-RemoteHead -Repository $definition.Repository -Ref $Branch
+    $commit = Get-ServiceCommit -RefOverrides $refOverrides -ServiceName $definition.Name -Repository $definition.Repository -Ref $Branch
     $shortSha = $commit.Substring(0, 7)
     $tag = "sha-$shortSha"
     $service = [ordered]@{
