@@ -20,6 +20,7 @@
 | Windows deploy wrapper | 완료 | `deploy.ps1`로 pull/up 실행 |
 | Health gating | 완료 | `deploy.ps1`이 agent/router/classifier health endpoint를 확인하고 실패 시 non-zero exit |
 | Rollback 자동화 | 완료 | `.deploy/releases` snapshot 기반 수동 rollback과 `-RollbackOnFailure` 지원 |
+| Preflight check | 완료 | `deploy.ps1 -CheckOnly`로 설정과 배포 대상 image/tag를 사전 검증 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -87,6 +88,7 @@ flowchart LR
 - prod compose config
 - prod `public-data` profile config
 - prod + ngrok compose config
+- `deploy.ps1 -CheckOnly` preflight 동작
 
 `Agent Docker build and publish`는 `mjuclaw-agent` image를 만든다. 이때 build context로 다음 repo를 함께 checkout한다.
 
@@ -111,14 +113,16 @@ flowchart LR
   A["각 repo main merge"] --> B["GitHub Actions CI"]
   B --> C["GHCR image publish"]
   C --> D["mjuclaw-setup release.env에 sha tag 고정"]
-  D --> E["운영 PC에서 deploy.ps1 실행"]
-  E --> F["docker compose config 검증"]
-  F --> G["docker compose pull"]
-  G --> H["docker compose up -d"]
-  H --> I["자동 health check"]
-  I --> J{"health 실패?"}
-  J -- "아니오" --> K["배포 성공 기록"]
-  J -- "예 + RollbackOnFailure" --> L["이전 성공 release로 rollback"]
+  D --> E["운영 PC에서 deploy.ps1 -CheckOnly 실행"]
+  E --> F["배포 대상 image/tag 확인"]
+  F --> G["운영 PC에서 deploy.ps1 실행"]
+  G --> H["docker compose config 검증"]
+  H --> I["docker compose pull"]
+  I --> J["docker compose up -d"]
+  J --> K["자동 health check"]
+  K --> L{"health 실패?"}
+  L -- "아니오" --> M["배포 성공 기록"]
+  L -- "예 + RollbackOnFailure" --> N["이전 성공 release로 rollback"]
 ```
 
 운영 PC는 build를 수행하지 않는다. 운영 PC의 책임은 pinned image를 pull하고 compose로 띄우는 것이다.
@@ -156,6 +160,14 @@ CLASSIFIER_TAG=sha-replace-me
 ```
 
 `release.env`에 `sha-replace-me` 같은 placeholder가 남아 있으면 `deploy.ps1`이 배포를 중단한다.
+
+실제 컨테이너를 바꾸기 전에 아래 명령으로 preflight를 먼저 실행한다.
+
+```powershell
+.\deploy.ps1 -CheckOnly
+```
+
+`-CheckOnly`는 Docker와 필수 파일을 확인하고 compose config를 검증한 뒤, 실제로 배포될 image/tag 조합을 출력한다. 이 모드에서는 image pull, `up -d`, health check, rollback, `.deploy/` 기록 생성을 수행하지 않는다.
 
 ---
 
@@ -197,6 +209,7 @@ CLASSIFIER_TAG=sha-replace-me
 
 ```powershell
 .\deploy.ps1 -Ngrok
+.\deploy.ps1 -CheckOnly
 .\deploy.ps1 -PullOnly
 .\deploy.ps1 -NoPull
 .\deploy.ps1 -SkipHealthCheck
@@ -216,18 +229,20 @@ CLASSIFIER_TAG=sha-replace-me
 5. `release.env` 확인
 6. `release.env` placeholder tag 방지
 7. compose config 검증
-8. image pull
-9. `docker compose up -d`
-10. `docker compose ps` 출력
-11. agent/router/classifier health check
-12. worker 최근 로그 출력
-13. `.deploy/releases/<timestamp>`에 배포 기록 저장
+8. `-CheckOnly`이면 배포할 image/tag 조합 출력 후 종료
+9. image pull
+10. `docker compose up -d`
+11. `docker compose ps` 출력
+12. agent/router/classifier health check
+13. worker 최근 로그 출력
+14. `.deploy/releases/<timestamp>`에 배포 기록 저장
 
 옵션별 동작:
 
 | 옵션 | 동작 |
 |---|---|
 | `-Ngrok` | `docker-compose.ngrok.yml`과 `ngrok` profile 포함 |
+| `-CheckOnly` | Docker/env/release/compose 설정과 배포 대상 image/tag만 검증. image pull과 service 변경 없음 |
 | `-PullOnly` | image pull까지만 수행하고 서비스 시작 생략 |
 | `-NoPull` | 이미 pull된 image로 `up -d`만 수행 |
 | `-SkipHealthCheck` | 배포 후 자동 health check 생략 |
@@ -347,6 +362,8 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
   -> main merge
   -> GHCR image publish (:main, :sha-<short-sha>)
   -> mjuclaw-setup release.env에서 배포할 sha tag 조합 선택
+  -> 운영 Windows PC에서 .\deploy.ps1 -CheckOnly 실행
+  -> compose config와 image/tag 조합 확인
   -> 운영 Windows PC에서 .\deploy.ps1 실행
   -> docker compose pull
   -> docker compose up -d
@@ -364,7 +381,9 @@ rollback도 일반 배포와 동일하게 compose config 검증, image pull, `up
 다음 단계에서 다룰 작업은 아직 완료되지 않았다.
 
 1. 운영 PC 첫 배포 dry run
-   - `release.env`를 실제 `sha-*` tag로 채운 뒤 `.\deploy.ps1 -PullOnly` 실행
+   - `release.env`를 실제 `sha-*` tag로 채운 뒤 `.\deploy.ps1 -CheckOnly` 실행
+   - compose config와 image/tag 조합이 기대와 일치하는지 확인
+   - 이어서 `.\deploy.ps1 -PullOnly` 실행
    - GHCR 권한과 image pull 가능 여부 확인
 
 2. 운영 PC 실제 배포 리허설

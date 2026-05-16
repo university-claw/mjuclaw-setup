@@ -65,6 +65,14 @@ jobs:
               throw
             }
           }
+          try {
+            ./deploy.ps1 -CheckOnly -RollbackLatest
+            throw "Expected deploy.ps1 check-only rollback validation to fail."
+          } catch {
+            if ($_.Exception.Message -notlike "*CheckOnly*rollback*") {
+              throw
+            }
+          }
 
       - name: Validate Docker Compose config
         env:
@@ -85,6 +93,36 @@ jobs:
           docker compose --env-file release.env.example -f docker-compose.prod.yml config --quiet
           docker compose --env-file release.env.example -f docker-compose.prod.yml --profile public-data config --quiet
           docker compose --env-file release.env.example -f docker-compose.prod.yml -f docker-compose.ngrok.yml --profile ngrok config --quiet
+
+      - name: Validate deploy check-only mode
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp | Out-Null
+          @"
+          DISCORD_BOT_TOKEN=ci-discord-token
+          GEMINI_API_KEY=ci-gemini-key
+          MJUCLAW_ROUTER_TOKEN=ci-router-token
+          MJU_PGPASSWORD=ci-user-db-password
+          MJU_VAULT_KEY=0000000000000000000000000000000000000000000000000000000000000000
+          NGROK_AUTHTOKEN=ci-ngrok-token
+          NGROK_DOMAIN=ci.example.ngrok-free.dev
+          OPENCLAW_GATEWAY_TOKEN=ci-gateway-token
+          PGPASSWORD=ci-public-db-password
+          STORAGE_LOCAL_ROOT=/tmp/mjuclaw-assets
+          CLASSIFIER_AUTH_TOKEN=ci-classifier-token
+          "@ | Set-Content -Encoding UTF8 -Path .tmp/ci.env.production
+          @"
+          AGENT_IMAGE=ghcr.io/university-claw/mjuclaw-agent
+          AGENT_TAG=main
+          ROUTER_IMAGE=ghcr.io/university-claw/mjuclaw-router
+          ROUTER_TAG=main
+          WORKER_IMAGE=ghcr.io/university-claw/mju-public-data-worker
+          WORKER_TAG=main
+          CLASSIFIER_IMAGE=ghcr.io/university-claw/intent-classifier
+          CLASSIFIER_TAG=main
+          "@ | Set-Content -Encoding UTF8 -Path .tmp/ci.release.env
+          New-Item -ItemType Directory -Force -Path /tmp/mjuclaw-assets | Out-Null
+          ./deploy.ps1 -CheckOnly -EnvFile .tmp/ci.env.production -ReleaseFile .tmp/ci.release.env
 
   docker-build:
     name: Agent Docker build and publish
