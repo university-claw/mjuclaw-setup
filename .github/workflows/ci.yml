@@ -93,6 +93,13 @@ jobs:
           docker compose --env-file release.env.example -f docker-compose.prod.yml config --quiet
           docker compose --env-file release.env.example -f docker-compose.prod.yml --profile public-data config --quiet
           docker compose --env-file release.env.example -f docker-compose.prod.yml -f docker-compose.ngrok.yml --profile ngrok config --quiet
+          docker compose --env-file release.env.example -f docker-compose.prod.yml --profile public-data config > /tmp/prod-public-data.yml
+          if grep -q "container_name: mjuclaw-worker$" /tmp/prod-public-data.yml; then
+            echo "mjuclaw-worker must not be present in prod public-data compose config"
+            exit 1
+          fi
+          grep -q "container_name: mjuclaw-public-data-worker$" /tmp/prod-public-data.yml
+          test "$(grep -c "target: /data/assets$" /tmp/prod-public-data.yml)" -ge 2
 
       - name: Validate deploy check-only mode
         shell: pwsh
@@ -110,6 +117,7 @@ jobs:
           PGPASSWORD=ci-public-db-password
           STORAGE_LOCAL_ROOT=/tmp/mjuclaw-assets
           CLASSIFIER_AUTH_TOKEN=ci-classifier-token
+          COMPOSE_PROFILES=public-data
           "@ | Set-Content -Encoding UTF8 -Path .tmp/ci.env.production
           @"
           AGENT_IMAGE=ghcr.io/university-claw/mjuclaw-agent

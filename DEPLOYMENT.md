@@ -188,12 +188,25 @@ CLASSIFIER_TAG=sha-replace-me
 - `mjuclaw-agent`
 - `mjuclaw-router`
 - `mjuclaw-classifier`
-- `mjuclaw-worker`
+- `mjuclaw-public-data-worker`
 
 옵션 profile:
 
 - `ngrok`: `docker-compose.ngrok.yml`과 함께 사용
-- `public-data`: bundled Postgres와 별도 public-data-worker profile 사용
+- `public-data`: bundled Postgres와 단일 `mjuclaw-public-data-worker` 사용
+
+운영 PC의 `.env.production`에는 `COMPOSE_PROFILES=public-data`를 설정한다. 이 profile이 꺼지면 bundled Postgres와 `mjuclaw-public-data-worker`가 실행되지 않는다.
+
+운영 compose에서는 `mjuclaw-worker`를 별도로 띄우지 않는다. public data 수집 scheduler는 `mjuclaw-public-data-worker` 하나만 실행한다.
+
+public data 원본 첨부/이미지는 Docker volume인 `public-data-assets`에 저장된다. `mjuclaw-public-data-worker`는 이 volume을 `/data/assets`에 write mount하고, `mjuclaw-agent`는 같은 volume을 `/data/assets:ro`로 read-only mount한다.
+
+기존 운영 PC에서 host bind mount `${STORAGE_LOCAL_ROOT}`를 사용해 왔다면, PR10 배포 전에 host asset을 Docker volume으로 병합한다. 이 명령은 host 파일을 삭제하지 않고, 없는 파일만 volume 쪽에 보강하는 용도다.
+
+```powershell
+$source = (Select-String -Path .env.production -Pattern '^STORAGE_LOCAL_ROOT=').Line -replace '^STORAGE_LOCAL_ROOT=', ''
+docker run --rm --mount "type=bind,source=$source,target=/from,readonly" --mount "type=volume,source=mjuclaw-setup_public-data-assets,target=/to" alpine sh -c "cd /from && cp -a . /to/"
+```
 
 ---
 
@@ -232,10 +245,11 @@ CLASSIFIER_TAG=sha-replace-me
 8. `-CheckOnly`이면 배포할 image/tag 조합 출력 후 종료
 9. image pull
 10. `docker compose up -d`
-11. `docker compose ps` 출력
-12. agent/router/classifier health check
-13. worker 최근 로그 출력
-14. `.deploy/releases/<timestamp>`에 배포 기록 저장
+11. legacy `mjuclaw-worker` orphan 컨테이너 제거
+12. `docker compose ps` 출력
+13. agent/router/classifier health check
+14. public-data worker 최근 로그 출력
+15. `.deploy/releases/<timestamp>`에 배포 기록 저장
 
 옵션별 동작:
 
@@ -290,20 +304,22 @@ docker compose --env-file .env.production --env-file release.env -f docker-compo
 docker exec mjuclaw-agent curl -sS http://localhost:3001/health
 docker exec mjuclaw-router curl -sS http://localhost:3100/healthz
 docker exec mjuclaw-classifier curl -sS http://localhost:3200/healthz
-docker logs mjuclaw-worker --tail 20
+docker logs mjuclaw-public-data-worker --tail 20
 ```
 
 정상 신호:
 
-- `mjuclaw-agent`, `mjuclaw-router`, `mjuclaw-classifier`, `mjuclaw-worker`가 Up 상태
+- `mjuclaw-agent`, `mjuclaw-router`, `mjuclaw-classifier`, `mjuclaw-public-data-worker`가 Up 상태
 - agent `/health` 응답 성공
 - router `/healthz` 응답 성공
 - classifier `/healthz` 응답 성공
 - worker 로그에서 반복적인 crash/restart가 없음
+- `mjuclaw-worker` legacy 컨테이너가 남아 있지 않음
 
 실패 신호:
 
 - compose service가 Restarting 또는 Exited 상태
+- `mjuclaw-worker`와 `mjuclaw-public-data-worker`가 동시에 실행됨
 - health endpoint가 timeout 또는 non-2xx 응답
 - router가 Discord gateway에 연결하지 못함
 - agent가 LLM/tool call 단계에서 반복 실패
