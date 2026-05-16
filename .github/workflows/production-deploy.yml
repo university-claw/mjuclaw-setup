@@ -45,15 +45,19 @@ jobs:
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.event.workflow_run.head_sha }}
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           actual_head="$(
-            git -c http.https://github.com/.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
-              ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main |
-              awk '{print $1}'
+            curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${REPOSITORY}/git/ref/heads/main" |
+              python3 -c "import json, sys; print(json.load(sys.stdin)['object']['sha'])"
           )"
 
           if [ -z "$actual_head" ]; then
