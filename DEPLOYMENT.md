@@ -24,6 +24,7 @@
 | Backup/restore runbook | 완료 | 운영 PC volume과 DB 백업/복구 절차 문서화 |
 | Backup helper script | 완료 | `backup.ps1`로 운영 데이터 백업 생성 자동화 |
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
+| Smoke test helper | 완료 | `smoke-test.ps1`로 배포 후 service/worker smoke test와 기록 생성 |
 | 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | Self-hosted runner 운영 기준 | 완료 | 운영 PC runner 보안/실행 경계와 실제 실행 기준 문서화 |
 | Production dry-run workflow | 완료 | `workflow_dispatch` 기반 check-only workflow 추가 및 운영 PC dry-run 성공 확인 |
@@ -540,29 +541,40 @@ docker logs mjuclaw-public-data-worker --tail 20
 
 배포 후에는 health check만 보지 말고 실제 사용자 흐름을 한 번 확인한다.
 
-기본 service health:
+기본 smoke test helper:
 
 ```powershell
-docker exec mjuclaw-agent curl -sS http://localhost:3001/health
-docker exec mjuclaw-router curl -sS http://localhost:3100/healthz
-docker exec mjuclaw-classifier curl -sS http://localhost:3200/healthz
+.\smoke-test.ps1 -CheckOnly
+.\smoke-test.ps1
 ```
 
-Discord/LLM smoke:
+`smoke-test.ps1`는 다음 항목을 검증한다.
+
+- Docker daemon 접근 가능 여부
+- agent `/health`
+- router `/healthz`
+- classifier `/healthz`
+- legacy `mjuclaw-worker` container 부재
+- public data worker container 실행 상태
+- public data worker `doctor`
+- public data worker `schedule tick --dry-run`
+
+결과는 `.deploy\smoke-tests\<timestamp>\smoke-test.json`에 저장된다. 실패하면 non-zero exit로 종료하므로 운영자가 실패 원인을 확인한 뒤 rollback 또는 재배포를 결정한다.
+
+public data worker 검증을 잠시 제외해야 하는 경우에만 아래 옵션을 사용한다.
+
+```powershell
+.\smoke-test.ps1 -SkipPublicDataWorker
+```
+
+Discord/LLM smoke는 아직 자동화하지 않는다. 배포 후 운영자가 아래 흐름을 수동으로 확인한다.
 
 - Discord에서 실제 대화 1회 전송
 - router 로그에서 Discord client ready와 메시지 처리 확인
 - agent가 LLM 응답을 반환하는지 확인
 - 사용자 session이 `discord-<user-id>` 기준으로 분리되는지 확인
 
-public data worker smoke:
-
-```powershell
-docker exec mjuclaw-public-data-worker node dist/main.js doctor
-docker exec mjuclaw-public-data-worker node dist/main.js schedule tick --dry-run
-```
-
-필요할 때만 실제 수집을 1건 실행한다.
+필요할 때만 public data 실제 수집을 1건 실행한다.
 
 ```powershell
 docker exec mjuclaw-public-data-worker node dist/main.js collect notices --limit 1
@@ -964,9 +976,9 @@ runner 도입 후 문제가 생기면 아래 순서로 반자동 운영으로 �
    - 현재 `run.cmd`로 임시 실행 중이면 Windows Service 등록을 검토한다.
    - 서비스화할 경우 재부팅 후 runner 자동 시작과 Docker Desktop 접근 권한을 확인한다.
 
-2. 배포 후 smoke test 자동화 검토
-   - router/agent health 외에 Discord 대화, LLM 응답, public data worker dry-run 검증을 workflow 또는 별도 runbook으로 묶을지 결정한다.
-   - 자동화 전까지는 배포 후 운영자가 기존 smoke test를 수동 확인한다.
+2. Production Deploy workflow에 smoke test 연결 검토
+   - `deploy.ps1 -RollbackOnFailure` 성공 후 `smoke-test.ps1`를 실행할지 결정한다.
+   - Discord/LLM 실제 대화 검증은 side effect가 있으므로 계속 수동 smoke로 유지한다.
 
 3. main push 즉시 자동 배포는 계속 보류
    - 승인 기반 `workflow_dispatch` 운영을 기본으로 유지한다.

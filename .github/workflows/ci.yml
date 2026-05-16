@@ -84,6 +84,21 @@ jobs:
             exit 1
           }
 
+      - name: Check smoke test script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            "smoke-test.ps1",
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
       - name: Check deploy script argument validation
         shell: pwsh
         run: |
@@ -139,6 +154,19 @@ jobs:
           try {
             ./prepare-release.ps1 -OutputRoot ""
             throw "Expected prepare-release.ps1 output root validation to fail."
+          } catch {
+            if ($_.Exception.Message -notlike "*OutputRoot*empty*") {
+              throw
+            }
+          }
+          exit 0
+
+      - name: Check smoke test script argument validation
+        shell: pwsh
+        run: |
+          try {
+            ./smoke-test.ps1 -OutputRoot ""
+            throw "Expected smoke-test.ps1 output root validation to fail."
           } catch {
             if ($_.Exception.Message -notlike "*OutputRoot*empty*") {
               throw
@@ -224,6 +252,11 @@ jobs:
           "@ | Set-Content -Encoding UTF8 -Path .tmp/ci.env.production
           Copy-Item release.env.example .tmp/ci.release.env
           ./backup.ps1 -CheckOnly -EnvFile .tmp/ci.env.production -ReleaseFile .tmp/ci.release.env -OutputRoot .tmp/backups
+
+      - name: Validate smoke test check-only mode
+        shell: pwsh
+        run: |
+          ./smoke-test.ps1 -CheckOnly -OutputRoot .tmp/smoke-tests
 
       - name: Validate prepare release check-only mode
         shell: pwsh
