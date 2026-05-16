@@ -178,6 +178,7 @@ jobs:
           if ($result.Output -notmatch "simulated stderr") {
             throw "Expected stderr to be captured, got: $($result.Output)"
           }
+          $global:LASTEXITCODE = 0
 
   docker-build:
     name: Agent Docker build and publish
