@@ -24,6 +24,7 @@
 | Backup/restore runbook | 완료 | 운영 PC volume과 DB 백업/복구 절차 문서화 |
 | Backup helper script | 완료 | `backup.ps1`로 운영 데이터 백업 생성 자동화 |
 | Release candidate helper | 완료 | `prepare-release.ps1`로 `release.env` 후보 생성 |
+| 운영 PC 반자동 리허설 | 완료 | release 후보 생성, 백업, 배포, smoke test 전체 흐름 검증 |
 | 완전 자동 CD | 미완료 | self-hosted runner 기반 자동 배포는 아직 도입하지 않음 |
 
 ---
@@ -214,6 +215,60 @@ docker login ghcr.io -u <github-user>
 - 첫 `-RollbackOnFailure` 실행에서는 성공 snapshot이 없으므로 자동 rollback 기준점이 없다. 첫 성공 배포 후부터 `-RollbackOnFailure`가 실질적인 rollback 보호막이 된다.
 - Windows PowerShell에서 native stderr가 health retry loop를 깨던 문제가 있었고, `deploy.ps1`의 capture 로직을 수정했다.
 - host asset 폴더와 Docker volume에 일부 파일 차이가 있었다. PR10 이후 운영 기준 asset store는 Docker volume `public-data-assets`다.
+
+---
+
+## 운영 PC 반자동 배포 리허설 기록
+
+2026년 5월 16일 운영 Windows PC에서 반자동 CD 전체 흐름을 리허설했고 성공을 확인했다.
+
+검증한 흐름:
+
+```powershell
+git switch main
+git pull --ff-only origin main
+.\prepare-release.ps1 -CheckOnly
+.\prepare-release.ps1
+# 후보 release.env/release.json 확인 후 release.env 적용
+.\deploy.ps1 -CheckOnly
+.\deploy.ps1 -PullOnly
+.\backup.ps1 -CheckOnly
+.\backup.ps1
+.\deploy.ps1 -RollbackOnFailure
+```
+
+확인한 산출물:
+
+- `.deploy\release-candidates\<timestamp>\release.env`
+- `.deploy\release-candidates\<timestamp>\release.json`
+- `.deploy\backups\<timestamp>\backup.json`
+- `.deploy\backups\<timestamp>\*.tar.gz`
+- `.deploy\backups\<timestamp>\public-data-db.dump`
+- `.deploy\releases\<timestamp>\release.env`
+- `.deploy\releases\<timestamp>\deploy.json`
+
+정상 기준:
+
+- `prepare-release.ps1`가 후보 `release.env`를 만들고 기본 실행만으로 운영 `release.env`를 덮어쓰지 않음
+- 후보 확인 후 운영 `release.env` 적용
+- `deploy.ps1 -CheckOnly`가 적용된 image/tag 조합을 검증
+- `deploy.ps1 -PullOnly`가 GHCR image pull을 검증
+- `backup.ps1`가 배포 전 백업 산출물과 `backup.json` manifest를 생성
+- `deploy.ps1 -RollbackOnFailure`가 성공하고 최신 `deploy.json`에 `status: succeeded` 기록
+- 배포 후 Discord, LLM, router, public data worker smoke test 성공
+
+이 리허설 이후 현재 반자동 CD의 운영 단위는 다음처럼 정리된다.
+
+```text
+release 후보 생성
+  -> 운영자 확인 및 release.env 적용
+  -> preflight
+  -> image pull
+  -> 배포 전 백업
+  -> 배포
+  -> smoke test
+  -> 성공 snapshot 보존
+```
 
 ---
 
@@ -722,9 +777,13 @@ docker exec mjuclaw-public-data-db rm -f /tmp/public-data-db.dump
   -> GitHub Actions test/build/docker 검증
   -> main merge
   -> GHCR image publish (:main, :sha-<short-sha>)
-  -> mjuclaw-setup release.env에서 배포할 sha tag 조합 선택
+  -> mjuclaw-setup prepare-release.ps1로 release.env 후보 생성
+  -> 운영자가 후보 release.env와 release.json 확인
+  -> release.env 적용
   -> 운영 Windows PC에서 .\deploy.ps1 -CheckOnly 실행
   -> compose config와 image/tag 조합 확인
+  -> 운영 Windows PC에서 .\deploy.ps1 -PullOnly 실행
+  -> 운영 Windows PC에서 .\backup.ps1 실행
   -> 운영 Windows PC에서 .\deploy.ps1 실행
   -> docker compose pull
   -> docker compose up -d
