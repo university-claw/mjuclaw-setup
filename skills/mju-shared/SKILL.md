@@ -71,6 +71,7 @@ metadata:
 - UCheck: `mju ucheck ...`
 - Library: `mju library ...`
 - Skills catalog: `mju skills list`
+- 셔틀 알림: `mju-shuttle-alert subscribe|refresh|unsubscribe|status <DISCORD_USER_ID>`
 
 ## 데이터 표시
 
@@ -84,3 +85,11 @@ metadata:
      -d '{"dataType":"grades","title":"2026-1학기 성적","summary":"평균 4.12","rawData":{...},"aiResponse":"..."}'
    ```
    응답의 `url` 필드를 Discord 링크 버튼으로 보여주세요.
+
+## 셔틀 출발 알림
+
+- 사용자가 “마지막 수업 끝나고 셔틀 알려줘”, “셔틀 출발 알림 켜줘”처럼 명시적으로 신청하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID>`를 실행합니다.
+- 기본 리드타임은 10분입니다. 사용자가 “5분 전”처럼 지정하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID> 5`를 사용합니다.
+- 시간표나 셔틀 시간표가 바뀐 뒤 재계산이 필요하면 `mju-shuttle-alert refresh <DISCORD_USER_ID>`를 실행합니다.
+- 해제 요청은 되돌리기 어려운 상태 변경이므로 확인 후 `mju-shuttle-alert unsubscribe <DISCORD_USER_ID>`를 실행합니다.
+- 상태 확인은 `mju-shuttle-alert status <DISCORD_USER_ID>`를 사용하고, 결과는 원문 JSON 대신 켜짐 여부, 리드타임, 등록된 요일 수만 요약합니다.
