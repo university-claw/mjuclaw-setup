@@ -58,6 +58,7 @@ RUN chmod +x /usr/local/bin/mju-attendance-alert
 # mju-shuttle-alert — 사용자별 마지막 수업 종료 기반 셔틀 출발 알림 helper
 COPY bin/mju-shuttle-alert /usr/local/bin/mju-shuttle-alert
 RUN chmod +x /usr/local/bin/mju-shuttle-alert
+COPY data/shuttles/ /opt/mjuclaw/shuttles/
 
 # mju-login — 비밀번호 특수문자 안전 로그인 (heredoc stdin)
 COPY bin/mju-login /usr/local/bin/mju-login

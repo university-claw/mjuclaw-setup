@@ -90,6 +90,7 @@ metadata:
 
 - 사용자가 “마지막 수업 끝나고 셔틀 알려줘”, “셔틀 출발 알림 켜줘”처럼 명시적으로 신청하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID>`를 실행합니다.
 - 기본 리드타임은 10분입니다. 사용자가 “5분 전”처럼 지정하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID> 5`를 사용합니다.
-- 시간표나 셔틀 시간표가 바뀐 뒤 재계산이 필요하면 `mju-shuttle-alert refresh <DISCORD_USER_ID>`를 실행합니다.
+- 셔틀 시간표는 학기별 공지 PDF를 사람이 검수한 정적 JSON(`/opt/mjuclaw/shuttles/current.json`)을 사용합니다.
+- 사용자 시간표나 정적 셔틀 JSON이 바뀐 뒤 재계산이 필요하면 `mju-shuttle-alert refresh <DISCORD_USER_ID>`를 실행합니다.
 - 해제 요청은 되돌리기 어려운 상태 변경이므로 확인 후 `mju-shuttle-alert unsubscribe <DISCORD_USER_ID>`를 실행합니다.
 - 상태 확인은 `mju-shuttle-alert status <DISCORD_USER_ID>`를 사용하고, 결과는 원문 JSON 대신 켜짐 여부, 리드타임, 등록된 요일 수만 요약합니다.

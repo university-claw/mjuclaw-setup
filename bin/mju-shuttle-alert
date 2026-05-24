@@ -2,11 +2,11 @@
 # mju-shuttle-alert: 사용자별 마지막 수업 종료 기반 셔틀 출발 알림 helper
 #
 # 동작:
-#   subscribe   — mju msi +last-class-times와 mju-news shuttles next를 조합해 주간 cron 등록
-#   refresh     — 기존 셔틀 cron 제거 후 현재 시간표/셔틀 시간표 기준으로 재등록
+#   subscribe   — mju msi +last-class-times와 정적 셔틀 시간표 JSON을 조합해 주간 cron 등록
+#   refresh     — 기존 셔틀 cron 제거 후 현재 시간표/정적 셔틀 시간표 기준으로 재등록
 #   unsubscribe — 사용자 관련 셔틀 cron 제거
 #   status      — 현재 구독 상태 JSON 출력
-#   check       — cron이 호출. 당일 셔틀 후보 조회 후 router /discord/send로 DM 전송
+#   check       — cron이 호출. 당일 정적 셔틀 시간표 후보 조회 후 router /discord/send로 DM 전송
 
 set -euo pipefail
 
@@ -18,8 +18,8 @@ fi
 DATA_ROOT="${MJU_ALERT_DATA_ROOT:-/data/users}"
 OPENCLAW_BIN="${OPENCLAW_BIN:-openclaw}"
 MJU_BIN="${MJU_BIN:-mju}"
-MJU_NEWS_BIN="${MJU_NEWS_BIN:-mju-news}"
 CURL_BIN="${CURL_BIN:-curl}"
+SHUTTLE_TIMETABLE_FILE="${MJU_SHUTTLE_TIMETABLE_FILE:-/opt/mjuclaw/shuttles/current.json}"
 
 user_dir() { printf '%s/%s\n' "$DATA_ROOT" "$1"; }
 config_file() { printf '%s/shuttle-alert.json\n' "$(user_dir "$1")"; }
@@ -200,7 +200,7 @@ case "$CMD" in
     mkdir -p "$CONFIG_DIR"
     CONFIG_TMP=$(mktemp "$CONFIG_DIR/.shuttle-alert.XXXXXX")
 
-    if ! LAST_CLASS_JSON="$LAST_CLASS_PLAN" LEAD_MIN="$LEAD" USER_ID="$ID" CONFIG_TMP="$CONFIG_TMP" OPENCLAW_BIN="$OPENCLAW_BIN" MJU_NEWS_BIN="$MJU_NEWS_BIN" python3 - <<'PY'
+    if ! LAST_CLASS_JSON="$LAST_CLASS_PLAN" LEAD_MIN="$LEAD" USER_ID="$ID" CONFIG_TMP="$CONFIG_TMP" OPENCLAW_BIN="$OPENCLAW_BIN" SHUTTLE_TIMETABLE_FILE="$SHUTTLE_TIMETABLE_FILE" python3 - <<'PY'
 import json
 import os
 import re
@@ -209,6 +209,68 @@ import subprocess
 import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
+
+def load_timetable():
+    path = os.environ["SHUTTLE_TIMETABLE_FILE"]
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise RuntimeError(f"셔틀 시간표 파일을 찾지 못했습니다: {path}")
+    departures = data.get("departures")
+    routes = data.get("routes")
+    has_departures = isinstance(departures, list) and bool(departures)
+    has_routes = isinstance(routes, list) and any(route.get("times") for route in routes if isinstance(route, dict))
+    if not has_departures and not has_routes:
+        raise RuntimeError(f"셔틀 시간표 파일에 departures 또는 routes[].times가 없습니다: {path}")
+    return data
+
+def iter_departure_items(timetable):
+    for item in timetable.get("departures") or []:
+        yield item
+    for route in timetable.get("routes") or []:
+        if not isinstance(route, dict):
+            continue
+        for raw_time in route.get("times") or []:
+            item = {key: value for key, value in route.items() if key != "times"}
+            if isinstance(raw_time, dict):
+                item.update(raw_time)
+            else:
+                item["time"] = raw_time
+            yield item
+
+def active_day_types(service_date):
+    text = service_date.isoformat()
+    timetable = load_timetable()
+    holidays = set(timetable.get("holidayDates", []))
+    if text in holidays:
+        return {"daily", "holiday"}
+    weekday = service_date.weekday()
+    if weekday < 5:
+        return {"daily", "weekday"}
+    if weekday == 5:
+        return {"daily", "saturday"}
+    return {"daily", "sunday"}
+
+def departure_day_types(item):
+    raw = item.get("dayTypes")
+    if isinstance(raw, list):
+        return {str(value) for value in raw}
+    return {str(item.get("dayType", "weekday"))}
+
+def normalize_departure(item, index):
+    return {
+        "id": item.get("id", index + 1),
+        "campus": item.get("campus"),
+        "routeName": item.get("routeName"),
+        "direction": item.get("direction"),
+        "stopName": item.get("stopName"),
+        "dayType": item.get("dayType") or ",".join(sorted(departure_day_types(item))),
+        "dayTypes": sorted(departure_day_types(item)),
+        "departureTime": item.get("time") or item.get("departureTime"),
+        "note": item.get("note"),
+        "sortOrder": item.get("sortOrder", index),
+    }
 
 def cleanup(names):
     openclaw_bin = os.environ["OPENCLAW_BIN"]
@@ -234,27 +296,29 @@ def hhmm_from_minutes(total):
     return f"{total // 60:02d}:{total % 60:02d}"
 
 def query_next(service_date, after, limit):
-    result = subprocess.run(
-        [
-            os.environ["MJU_NEWS_BIN"],
-            "shuttles",
-            "next",
-            "--date",
-            service_date.isoformat(),
-            "--after",
-            after,
-            "--limit",
-            str(limit),
-            "--format",
-            "json",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "mju-news shuttles next failed")
-    return json.loads(result.stdout)
+    timetable = load_timetable()
+    valid_from = timetable.get("validFrom")
+    valid_to = timetable.get("validTo")
+    service_date_text = service_date.isoformat()
+    if valid_from and service_date_text < valid_from:
+        return {"items": [], "total": 0, "timetable": timetable}
+    if valid_to and service_date_text > valid_to:
+        return {"items": [], "total": 0, "timetable": timetable}
+
+    active_types = active_day_types(service_date)
+    items = []
+    for index, item in enumerate(iter_departure_items(timetable)):
+        normalized = normalize_departure(item, index)
+        departure_time = normalized.get("departureTime")
+        if not isinstance(departure_time, str) or not re.match(r"^\d{2}:\d{2}$", departure_time):
+            continue
+        if departure_time < after:
+            continue
+        if not active_types.intersection(departure_day_types(item)):
+            continue
+        items.append(normalized)
+    items.sort(key=lambda item: (item["departureTime"], item.get("sortOrder", 0), item.get("routeName") or ""))
+    return {"items": items[:limit], "total": len(items), "timetable": timetable}
 
 def add_cron(name, cron_expr, command_parts):
     message = "다음을 정확히 실행: exec로 " + " ".join(shlex.quote(part) for part in command_parts) + " 를 실행하고, 추가 명령 없이 <final></final>로 종료."
@@ -381,11 +445,21 @@ try:
             "candidateCount": len(candidates),
         })
 
+    timetable = load_timetable()
     config = {
         "enabled": True,
         "leadMinutes": lead,
         "timezone": "Asia/Seoul",
         "subscribedAt": datetime.now(timezone.utc).isoformat(),
+        "shuttleTimetableFile": os.environ["SHUTTLE_TIMETABLE_FILE"],
+        "shuttleTimetable": {
+            "termCode": timetable.get("termCode"),
+            "termLabel": timetable.get("termLabel"),
+            "campus": timetable.get("campus"),
+            "validFrom": timetable.get("validFrom"),
+            "validTo": timetable.get("validTo"),
+            "source": timetable.get("source", {}),
+        },
         "planYear": data.get("year"),
         "planTermCode": data.get("termCode"),
         "planTermLabel": data.get("termLabel"),
@@ -495,7 +569,117 @@ PY
     LIMIT="3"
     [[ "$MODE" == "departure" ]] && LIMIT="3"
 
-    if ! NEXT_JSON=$("$MJU_NEWS_BIN" shuttles next --date "$TODAY" --after "$END_TIME" --limit "$LIMIT" --format json 2>&1); then
+    if ! NEXT_JSON=$(SHUTTLE_TIMETABLE_FILE="$SHUTTLE_TIMETABLE_FILE" TODAY="$TODAY" END_TIME="$END_TIME" LIMIT="$LIMIT" python3 - <<'PY'
+import json
+import os
+import re
+import sys
+from datetime import date
+
+def load_timetable():
+    path = os.environ["SHUTTLE_TIMETABLE_FILE"]
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"ERR: 셔틀 시간표 파일을 찾지 못했습니다: {path}", file=sys.stderr)
+        sys.exit(1)
+    departures = data.get("departures")
+    routes = data.get("routes")
+    has_departures = isinstance(departures, list) and bool(departures)
+    has_routes = isinstance(routes, list) and any(route.get("times") for route in routes if isinstance(route, dict))
+    if not has_departures and not has_routes:
+        print(f"ERR: 셔틀 시간표 파일에 departures 또는 routes[].times가 없습니다: {path}", file=sys.stderr)
+        sys.exit(1)
+    return data
+
+def iter_departure_items(timetable):
+    for item in timetable.get("departures") or []:
+        yield item
+    for route in timetable.get("routes") or []:
+        if not isinstance(route, dict):
+            continue
+        for raw_time in route.get("times") or []:
+            item = {key: value for key, value in route.items() if key != "times"}
+            if isinstance(raw_time, dict):
+                item.update(raw_time)
+            else:
+                item["time"] = raw_time
+            yield item
+
+def active_day_types(timetable, service_date):
+    text = service_date.isoformat()
+    holidays = set(timetable.get("holidayDates", []))
+    if text in holidays:
+        return {"daily", "holiday"}
+    weekday = service_date.weekday()
+    if weekday < 5:
+        return {"daily", "weekday"}
+    if weekday == 5:
+        return {"daily", "saturday"}
+    return {"daily", "sunday"}
+
+def departure_day_types(item):
+    raw = item.get("dayTypes")
+    if isinstance(raw, list):
+        return {str(value) for value in raw}
+    return {str(item.get("dayType", "weekday"))}
+
+def normalize_departure(item, index):
+    day_types = departure_day_types(item)
+    return {
+        "id": item.get("id", index + 1),
+        "campus": item.get("campus"),
+        "routeName": item.get("routeName"),
+        "direction": item.get("direction"),
+        "stopName": item.get("stopName"),
+        "dayType": item.get("dayType") or ",".join(sorted(day_types)),
+        "dayTypes": sorted(day_types),
+        "departureTime": item.get("time") or item.get("departureTime"),
+        "note": item.get("note"),
+        "sortOrder": item.get("sortOrder", index),
+    }
+
+timetable = load_timetable()
+service_date = date.fromisoformat(os.environ["TODAY"])
+after = os.environ["END_TIME"]
+limit = int(os.environ["LIMIT"])
+service_date_text = service_date.isoformat()
+
+items = []
+if not (timetable.get("validFrom") and service_date_text < timetable["validFrom"]) and not (
+    timetable.get("validTo") and service_date_text > timetable["validTo"]
+):
+    active_types = active_day_types(timetable, service_date)
+    for index, item in enumerate(iter_departure_items(timetable)):
+        normalized = normalize_departure(item, index)
+        departure_time = normalized.get("departureTime")
+        if not isinstance(departure_time, str) or not re.match(r"^\d{2}:\d{2}$", departure_time):
+            continue
+        if departure_time < after:
+            continue
+        if not active_types.intersection(departure_day_types(item)):
+            continue
+        items.append(normalized)
+
+items.sort(key=lambda item: (item["departureTime"], item.get("sortOrder", 0), item.get("routeName") or ""))
+print(json.dumps({
+    "serviceDate": service_date_text,
+    "after": after,
+    "limit": limit,
+    "timetable": {
+        "termCode": timetable.get("termCode"),
+        "termLabel": timetable.get("termLabel"),
+        "campus": timetable.get("campus"),
+        "validFrom": timetable.get("validFrom"),
+        "validTo": timetable.get("validTo"),
+        "source": timetable.get("source", {}),
+    },
+    "total": len(items),
+    "items": items[:limit],
+}, ensure_ascii=False))
+PY
+    ); then
       echo "ERR: 셔틀 후보 조회 실패" >&2
       echo "$NEXT_JSON" >&2
       exit 1
@@ -509,7 +693,7 @@ import sys
 try:
     data = json.loads(os.environ["NEXT_JSON"])
 except Exception as exc:
-    print(f"ERR: invalid mju-news shuttles JSON: {exc}", file=sys.stderr)
+    print(f"ERR: invalid shuttle timetable JSON: {exc}", file=sys.stderr)
     sys.exit(1)
 
 mode = os.environ["MODE"]

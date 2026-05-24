@@ -6,7 +6,6 @@
 #   notices recent/search    → news
 #   notices get <id>         → news-detail
 #   cafeterias today/week    → cafeteria
-#   shuttles latest/next     → viewUrl 없음 (알림 helper용 JSON)
 #   doctor / skills          → viewUrl 없음 (조회 대상 아님)
 #
 # view-server POST 실패해도 원본 출력은 그대로 반환 (에이전트 동작 방해 금지).
