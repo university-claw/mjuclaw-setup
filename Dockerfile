@@ -4,7 +4,7 @@
 # 공개 정보(공지/학식) 데이터는 호스트의 Postgres(mju-public-data-worker 공유)에서 읽는다.
 #
 # 사전 준비 (./setup.sh로 자동화 가능):
-#   git clone --branch msi-course-scores https://github.com/university-claw/mju-cli.git
+#   git clone --branch dev https://github.com/university-claw/mju-cli.git
 #   git clone https://github.com/university-claw/mju-news.git   # v2.0.0+: Reader CLI
 #   # 호스트에 Postgres 설치 + mju-public-data-worker를 한 번 이상 실행
 #

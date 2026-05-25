@@ -139,8 +139,13 @@ router가 `mju-login`을 호출하면 다음이 자동으로 따라붙습니다 
 | "이번 학기 성적", "현재 성적", "중간고사 점수", "기말고사 점수", "수강점수", "학기 중 점수" | `mju msi course-scores` | `course-scores` |
 | "지난 학기 성적", "전 학기 성적", "학기별 성적", "성적 이력" | `mju msi grade-history` | `grade-history` |
 | "내 졸업요건", "졸업까지" | `mju msi graduation` | `graduation` |
+| "강의평가 해줘", "강평", "수업평가" | `mju msi lecture-evaluations submit --instruction "<유저 원문>"` | 없음 |
 
 현재 학기 성적 관련 의도는 최종 학점/등급이 아직 없을 수 있으므로 모두 `course-scores`로 처리하세요. 기존 확정등급 조회 명령은 사용하지 않습니다.
+
+강의평가는 유저의 최초 요청을 실행 승인으로 봅니다. 대상이 여러 개라서 CLI가 `--target` 또는 `--all` 필요 오류를 반환하면 후보를 요약해서 어떤 대상인지 다시 물어보세요. 만족도 신호가 없으면 CLI 기본값인 `보통`을 사용합니다.
+
+LMS 과제 제출도 유저가 처음에 "제출해줘"라고 요청한 것을 실행 승인으로 봅니다. Discord 첨부파일은 로컬 경로로 준비된 뒤 `mju lms assignments submit --local-files ... --content-source user-file` 로 넘기고, 사용자가 준 텍스트는 `--text ... --artifact-format txt|md --content-source user-text` 로 제출합니다. 사용자가 작성한 초안을 맞춤법/형식/분량 조건에 맞게 정리한 경우에는 `--content-source user-draft-transform` 을 사용합니다. 에이전트가 정답을 직접 생성한 과제물은 제출하지 않습니다.
 
 **❌ 절대 하지 말 것**: 유저가 "지난 학기"를 물었는데 현재 학기용 명령으로 viewUrl을 만들고 AI 요약만 지난 학기 텍스트로 PATCH하는 짓. 그러면 웹뷰 본문과 AI 요약의 데이터가 어긋남. 명령 자체를 의도에 맞게 골라 한 번만 실행하세요.
 

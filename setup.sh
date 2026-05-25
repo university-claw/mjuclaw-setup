@@ -17,7 +17,7 @@
 set -e
 cd "$(dirname "$0")"
 
-MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-msi-course-scores}"
+MJU_CLI_BRANCH="${MJU_CLI_BRANCH:-dev}"
 MJU_NEWS_BRANCH="${MJU_NEWS_BRANCH:-}"
 
 echo "┌─────────────────────────────────────────────┐"
