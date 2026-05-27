@@ -22,6 +22,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # OpenClaw CLI 설치
 RUN npm install -g openclaw@2026.4.11
 
+# OpenClaw 2026.4.11 normalizes gemini-3.1-flash-lite to the deprecated
+# preview id internally. Patch the installed runtime so deployment env can use
+# the current Gemini model id until upstream removes that mapping.
+RUN python3 - <<'PY'
+from pathlib import Path
+
+root = Path("/usr/local/lib/node_modules/openclaw")
+targets = [
+    root / "dist",
+    root / "node_modules/@mariozechner/pi-ai/dist",
+]
+old = "gemini-3.1-flash-lite-preview"
+new = "gemini-3.1-flash-lite"
+
+for target in targets:
+    for path in target.rglob("*"):
+        if not path.is_file() or path.suffix not in {".js", ".mjs", ".map", ".d.ts"}:
+            continue
+        text = path.read_text(errors="ignore")
+        if old not in text:
+            continue
+        path.write_text(text.replace(old, new))
+PY
+
 # 작업 유저 생성
 RUN groupadd -r agent && useradd -r -g agent -m -d /home/agent agent
 

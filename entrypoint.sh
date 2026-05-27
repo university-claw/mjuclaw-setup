@@ -42,7 +42,8 @@ DISCORD_USER_ID="${DISCORD_USER_ID:-415349075274104832}"
 # v4: channels.discord.enabled=False — Discord WS 단독 소유는 mjuclaw-router로 이전.
 # v5: channels.discord 항목 자체 제거 (enabled=False만으로는 sidecar가 어떤 경로로
 #     connect 시도해 데이터 누출 가능. agent는 토큰 자체를 받지 않는다).
-CONFIG_SCHEMA_VERSION="5"
+# v6: openclaw doctor가 생성하는 main agent model catalog도 OPENCLAW_MODEL로 보정.
+CONFIG_SCHEMA_VERSION="6"
 CONFIG_PATH="/home/agent/.openclaw/openclaw.json"
 VERSION_MARKER="/home/agent/.openclaw/.mjuclaw-schema-version"
 CONFIG_INPUTS_MARKER="/home/agent/.openclaw/.mjuclaw-config-inputs.json"
@@ -220,6 +221,85 @@ done
 # ── 초기 doctor 실행 ────────────────────────────────────────────
 openclaw doctor --fix > /dev/null 2>&1 || true
 
+# openclaw doctor는 ~/.openclaw/openclaw.json과 별개로 main agent의 model
+# catalog를 생성한다. 이 파일에 예전 preview id가 남으면 gateway가 env/config가
+# 아니라 catalog id를 우선 선택해 deprecated model을 호출한다.
+python3 <<'PYEOF'
+import json
+import os
+from pathlib import Path
+
+model = os.environ.get("OPENCLAW_MODEL", "gemini-2.5-flash")
+path = Path("/home/agent/.openclaw/agents/main/agent/models.json")
+path.parent.mkdir(parents=True, exist_ok=True)
+
+if path.exists():
+    data = json.loads(path.read_text())
+else:
+    data = {}
+providers = data.setdefault("providers", {})
+google = providers.setdefault("google", {})
+google["baseUrl"] = "https://generativelanguage.googleapis.com/v1beta"
+google["api"] = "google-generative-ai"
+models = google.setdefault("models", [])
+if not models:
+    models.append({})
+
+models[0].update(
+    {
+        "id": model,
+        "name": "google/" + model,
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 1048576,
+        "maxTokens": 8192,
+        "api": "google-generative-ai",
+    }
+)
+
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+os.chmod(tmp, 0o600)
+tmp.replace(path)
+
+# OpenClaw는 기존 session index에 저장된 model 값을 gateway 시작 시 다시 반영한다.
+# 그래서 catalog만 고치면 오래된 세션이 deprecated preview id를 되살릴 수 있다.
+old_model_values = {
+    "gemini-3.1-flash-lite-preview",
+    "google/gemini-3.1-flash-lite-preview",
+}
+sessions_path = Path("/home/agent/.openclaw/agents/main/sessions/sessions.json")
+
+
+def replace_old_model_values(value):
+    if isinstance(value, dict):
+        changed = False
+        for key, child in list(value.items()):
+            if key == "model" and isinstance(child, str) and child in old_model_values:
+                value[key] = "google/" + model if child.startswith("google/") else model
+                changed = True
+            else:
+                child_changed = replace_old_model_values(child)
+                changed = changed or child_changed
+        return changed
+    if isinstance(value, list):
+        changed = False
+        for child in value:
+            changed = replace_old_model_values(child) or changed
+        return changed
+    return False
+
+
+if sessions_path.exists():
+    sessions = json.loads(sessions_path.read_text())
+    if replace_old_model_values(sessions):
+        tmp = sessions_path.with_suffix(sessions_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(sessions, indent=2), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        tmp.replace(sessions_path)
+PYEOF
+
 # ── 구 mju-news-scrape cron 제거 ─────────────────────────────────
 # v2.0.0에서 스크래핑 책임은 호스트의 mju-public-data-worker가 가져갔다.
 # 예전 버전 위에서 업그레이드한 설치본이면 남아있을 수 있으므로 정리한다.
@@ -302,7 +382,7 @@ attendance_backfill() {
     [[ "$discord_id" =~ ^[0-9]{17,20}$ ]] || continue
     # vault에 크리덴셜 있는지로 "온보딩 완료" 판정
     vault_any=("$user_dir"vault/*.enc)
-    [ -e "${vault_any[0]}" ] || continue
+    [ "${#vault_any[@]}" -gt 0 ] || continue
 
     status_out=$(mju-attendance-alert status "$discord_id" 2>/dev/null || printf '%s' '{"enabled":false}')
     if printf '%s' "$status_out" | grep -q '"courses"'; then
