@@ -6,7 +6,8 @@ import { renderViewHtml, renderExpiredHtml } from "./view-renderer";
 import type { ViewEntry } from "./types";
 
 const app = express();
-app.use(express.json({ limit: "500kb" }));
+const JSON_BODY_LIMIT = process.env.VIEW_JSON_LIMIT || "10mb";
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 // 정적 자산 (마스코트 로고 등). Dockerfile이 public/ 를 /opt/view-server/public/ 로 복사.
 const STATIC_DIR = process.env.VIEW_STATIC_DIR || path.join(__dirname, "..", "public");
@@ -21,6 +22,7 @@ app.use(
 
 const ALLOWED_DATA_TYPES = new Set<ViewEntry["dataType"]>([
   "timetable",
+  "timetable-planner",
   "course-scores",
   "grades",
   "grade-history",

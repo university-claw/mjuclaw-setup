@@ -20,6 +20,7 @@ set -euo pipefail
 REAL_MJU="${MJU_REAL_BIN:-/opt/mju-cli/dist/main.js}"
 NODE_BIN="${MJU_NODE_BIN:-node}"
 CURL_BIN="${MJU_CURL_BIN:-curl}"
+PYTHON_BIN="${MJU_PYTHON_BIN:-python3}"
 VIEW_API="${VIEW_API_URL:-http://localhost:3001/api/view}"
 
 has_app_dir() {
@@ -89,12 +90,14 @@ if ! has_app_dir "$@" && ! is_allowed_without_app_dir "$@"; then
 fi
 
 STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-stderr.XXXXXX")
-trap 'rm -f "$STDERR_FILE"' EXIT
+STDOUT_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-stdout.XXXXXX")
+trap 'rm -f "$STDERR_FILE" "$STDOUT_FILE"' EXIT
 
 set +e
 STDOUT=$("$NODE_BIN" "$REAL_MJU" "$@" 2>"$STDERR_FILE")
 EXIT=$?
 set -e
+printf '%s' "$STDOUT" > "$STDOUT_FILE"
 
 STDERR=$(cat "$STDERR_FILE" 2>/dev/null || true)
 
@@ -124,11 +127,12 @@ case "$*" in
 esac
 TITLE=$(title_for_datatype "$DATA_TYPE")
 
-REQUEST_BODY=$(RAW_STDOUT="$STDOUT" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" python3 - <<'PY'
+REQUEST_BODY=$(PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
-raw = os.environ["RAW_STDOUT"]
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
 try:
     data = json.loads(raw)
 except Exception:
@@ -156,7 +160,7 @@ if [[ $CURL_EXIT -ne 0 ]]; then
   exit "$EXIT"
 fi
 
-VIEW_URL=$(VIEW_RESP="$VIEW_RESP" python3 - <<'PY'
+VIEW_URL=$(PYTHONIOENCODING=utf-8 VIEW_RESP="$VIEW_RESP" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
@@ -168,11 +172,12 @@ PY
 )
 
 if [[ -n "$VIEW_URL" ]]; then
-  RAW_STDOUT="$STDOUT" VIEW_URL="$VIEW_URL" python3 - <<'PY'
+  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" VIEW_URL="$VIEW_URL" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
-raw = os.environ["RAW_STDOUT"]
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
 view_url = os.environ["VIEW_URL"]
 
 try:

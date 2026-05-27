@@ -135,6 +135,63 @@ test("view API accepts the grade-history data type", async (t) => {
   });
 });
 
+test("view API accepts and renders the timetable-planner data type", async (t) => {
+  await withViewServer(t, async (port) => {
+    const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dataType: "timetable-planner",
+        title: "Planner",
+        rawData: {
+          majorCount: 1,
+          electiveCount: 1,
+          entries: [
+            { courseTitle: "Major A", category: "major", meetings: [{ dayOfWeek: 1, rawTime: "09:00-10:00" }] },
+            { courseTitle: "Liberal A", category: "liberal", meetings: [{ dayOfWeek: 2, rawTime: "09:00-10:00" }] },
+          ],
+        },
+      }),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
+
+    const viewRes = await fetchWithTimeout(body.url);
+    const html = await viewRes.text();
+
+    assert.equal(viewRes.status, 200);
+    assert.match(html, /시간표 설계/);
+    assert.match(html, /data-planner-generate/);
+    assert.match(html, /planner-calendar/);
+  });
+});
+
+test("view API accepts full course-catalog sized timetable planner payloads", async (t) => {
+  await withViewServer(t, async (port) => {
+    const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dataType: "timetable-planner",
+        title: "Planner",
+        rawData: {
+          query: { year: 2026, termCode: "10", department: "15611" },
+          entries: [
+            { courseTitle: "Major A", category: "major", meetings: [{ dayOfWeek: 1, rawTime: "09:00-10:00" }] },
+          ],
+          payloadPadding: "x".repeat(2_200_000),
+        },
+      }),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/view/`));
+  });
+});
+
 test("view API accepts and renders the course-scores data type", async (t) => {
   await withViewServer(t, async (port) => {
     const res = await fetchWithTimeout(`http://127.0.0.1:${port}/api/view`, {

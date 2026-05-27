@@ -6,13 +6,20 @@
 #   notices recent/search    → news
 #   notices get <id>         → news-detail
 #   cafeterias today/week    → cafeteria
+#   course-catalog list      → timetable-planner
+#   graduation-requirements list → graduation
+#   academic-planning timetable → timetable-planner
+#   academic-planning graduation-roadmap → graduation
 #   doctor / skills          → viewUrl 없음 (조회 대상 아님)
 #
 # view-server POST 실패해도 원본 출력은 그대로 반환 (에이전트 동작 방해 금지).
 
 set -euo pipefail
 
-REAL_MJU_NEWS="/opt/mju-news/dist/main.js"
+REAL_MJU_NEWS="${MJU_NEWS_REAL_BIN:-/opt/mju-news/dist/main.js}"
+NODE_BIN="${MJU_NEWS_NODE_BIN:-node}"
+CURL_BIN="${MJU_NEWS_CURL_BIN:-curl}"
+PYTHON_BIN="${MJU_NEWS_PYTHON_BIN:-${MJU_PYTHON_BIN:-python3}}"
 VIEW_API="${VIEW_API_URL:-http://localhost:3001/api/view}"
 
 detect_datatype() {
@@ -21,6 +28,10 @@ detect_datatype() {
     *"notices recent"*|*"notices search"*) echo "news" ;;
     *"notices get"*) echo "news-detail" ;;
     *"cafeterias today"*|*"cafeterias week"*) echo "cafeteria" ;;
+    *"course-catalog list"*) echo "timetable-planner" ;;
+    *"graduation-requirements list"*) echo "graduation" ;;
+    *"academic-planning timetable"*) echo "timetable-planner" ;;
+    *"academic-planning graduation-roadmap"*) echo "graduation" ;;
     *) echo "" ;;
   esac
 }
@@ -30,6 +41,10 @@ should_view() {
   case "$args" in
     *"notices recent"*|*"notices search"*|*"notices get"*) return 0 ;;
     *"cafeterias today"*|*"cafeterias week"*) return 0 ;;
+    *"course-catalog list"*) return 0 ;;
+    *"graduation-requirements list"*) return 0 ;;
+    *"academic-planning timetable"*) return 0 ;;
+    *"academic-planning graduation-roadmap"*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -55,17 +70,21 @@ title_for() {
         *) echo "오늘 학식" ;;
       esac
       ;;
+    "timetable-planner") echo "시간표 설계" ;;
+    "graduation") echo "졸업 로드맵" ;;
     *) echo "공개 정보" ;;
   esac
 }
 
 STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stderr.XXXXXX")
-trap 'rm -f "$STDERR_FILE"' EXIT
+STDOUT_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stdout.XXXXXX")
+trap 'rm -f "$STDERR_FILE" "$STDOUT_FILE"' EXIT
 
 set +e
-STDOUT=$(node "$REAL_MJU_NEWS" "$@" 2>"$STDERR_FILE")
+STDOUT=$("$NODE_BIN" "$REAL_MJU_NEWS" "$@" 2>"$STDERR_FILE")
 EXIT=$?
 set -e
+printf '%s' "$STDOUT" > "$STDOUT_FILE"
 
 STDERR=$(cat "$STDERR_FILE" 2>/dev/null || true)
 
@@ -95,11 +114,12 @@ fi
 
 TITLE=$(title_for "$DATA_TYPE" "$*")
 
-REQUEST_BODY=$(RAW_STDOUT="$STDOUT" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" python3 - <<'PY'
+REQUEST_BODY=$(PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
-raw = os.environ["RAW_STDOUT"]
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
 try:
     data = json.loads(raw)
 except Exception:
@@ -116,7 +136,7 @@ PY
 )
 
 set +e
-VIEW_RESP=$(curl -s --max-time 3 -X POST "$VIEW_API" \
+VIEW_RESP=$("$CURL_BIN" -s --max-time 3 -X POST "$VIEW_API" \
   -H "Content-Type: application/json" \
   -d "$REQUEST_BODY" 2>/dev/null)
 CURL_EXIT=$?
@@ -127,7 +147,7 @@ if [[ $CURL_EXIT -ne 0 ]]; then
   exit "$EXIT"
 fi
 
-VIEW_URL=$(VIEW_RESP="$VIEW_RESP" python3 - <<'PY'
+VIEW_URL=$(PYTHONIOENCODING=utf-8 VIEW_RESP="$VIEW_RESP" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
@@ -139,11 +159,12 @@ PY
 )
 
 if [[ -n "$VIEW_URL" ]]; then
-  RAW_STDOUT="$STDOUT" VIEW_URL="$VIEW_URL" python3 - <<'PY'
+  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" VIEW_URL="$VIEW_URL" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
-raw = os.environ["RAW_STDOUT"]
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
 view_url = os.environ["VIEW_URL"]
 
 try:
