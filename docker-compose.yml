@@ -20,7 +20,7 @@ services:
       # 직접 들어가 LLM이 잘못된 사용자 데이터로 응답하는 사고가 발생한다
       # (2026-05-03 운영 데이터 누출 사고). entrypoint.sh가 set이면 abort한다.
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-3.1-flash-lite-preview}
+      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-3.1-flash-lite}
       - DISCORD_SERVER_ID=${DISCORD_SERVER_ID:-1492100109997969499}
       - DISCORD_USER_ID=${DISCORD_USER_ID:-415349075274104832}
       - VIEW_PORT=${VIEW_PORT:-3001}

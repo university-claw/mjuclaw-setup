@@ -10,7 +10,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-3.1-flash-lite-preview}
+      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-gemini-3.1-flash-lite}
       - DISCORD_SERVER_ID=${DISCORD_SERVER_ID:-1492100109997969499}
       - DISCORD_USER_ID=${DISCORD_USER_ID:-415349075274104832}
       - VIEW_PORT=${VIEW_PORT:-3001}
