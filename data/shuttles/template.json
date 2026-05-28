@@ -1,0 +1,34 @@
+{
+  "termCode": "YYYY-N",
+  "termLabel": "YYYY학년도 N학기",
+  "campus": "natural",
+  "validFrom": "YYYY-MM-DD",
+  "validTo": "YYYY-MM-DD",
+  "timezone": "Asia/Seoul",
+  "source": {
+    "noticeId": "",
+    "noticeTitle": "",
+    "noticeUrl": "",
+    "attachmentUrl": "",
+    "reviewedAt": "YYYY-MM-DD"
+  },
+  "notes": [],
+  "holidayDates": [],
+  "routes": [
+    {
+      "campus": "자연",
+      "routeName": "",
+      "direction": "",
+      "stopName": "",
+      "dayTypes": ["weekday"],
+      "note": "",
+      "times": [
+        "HH:mm",
+        {
+          "time": "HH:mm",
+          "note": ""
+        }
+      ]
+    }
+  ]
+}
