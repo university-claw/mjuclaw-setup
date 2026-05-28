@@ -7,12 +7,13 @@ const test = require("node:test");
 
 const repoRoot = path.resolve(__dirname, "..");
 const shuttleAlert = path.join(repoRoot, "bin", "mju-shuttle-alert");
+const shuttleScriptTest = process.platform === "win32" ? test.skip : test;
 
 function writeExecutable(filePath, content) {
   fs.writeFileSync(filePath, content, { encoding: "utf8", mode: 0o755 });
 }
 
-test("mju-shuttle-alert check sends class-end candidates through router payload", () => {
+shuttleScriptTest("mju-shuttle-alert check sends class-end candidates through router payload", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mju-shuttle-alert-"));
   const fakeBin = path.join(tempDir, "bin");
   const dataRoot = path.join(tempDir, "users");
@@ -117,7 +118,7 @@ process.stdout.write("200");
   assert.match(payload.content, /18:40/);
 });
 
-test("mju-shuttle-alert subscribe registers crons from static timetable", () => {
+shuttleScriptTest("mju-shuttle-alert subscribe registers crons from static timetable", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mju-shuttle-alert-subscribe-"));
   const fakeBin = path.join(tempDir, "bin");
   const dataRoot = path.join(tempDir, "users");

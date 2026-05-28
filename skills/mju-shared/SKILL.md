@@ -71,6 +71,7 @@ metadata:
 - MSI: `mju msi ...`
 - UCheck: `mju ucheck ...`
 - Library: `mju library ...`
+- 공개 DB/academic-planning: `mju-news ...`
 - Skills catalog: `mju skills list`
 - 셔틀 알림: `mju-shuttle-alert subscribe|refresh|unsubscribe|status <DISCORD_USER_ID>`
 
