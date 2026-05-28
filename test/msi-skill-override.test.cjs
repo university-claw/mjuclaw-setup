@@ -11,6 +11,8 @@ test("local mju-msi skill overrides current-term grades to course-scores", () =>
   assert.match(skill, /현재 학기 성적\/점수: `mju .* msi course-scores`/);
   assert.match(skill, /"이번 학기 성적".*"현재 성적".*"수강점수"/);
   assert.match(skill, /기존 확정등급 조회 명령은 사용하지 않습니다/);
+  assert.match(skill, /msi lecture-evaluations submit/);
+  assert.match(skill, /msi \+last-class-times/);
   assert.doesNotMatch(skill, /current-grades/);
   assert.doesNotMatch(skill, /msi grades/);
 });
@@ -33,6 +35,7 @@ test("runtime instructions avoid removed current-grade commands", () => {
   const bootstrap = fs.readFileSync(path.join(root, "workspace", "BOOTSTRAP.md"), "utf8");
   assert.match(bootstrap, /이번 학기 성적.*mju msi course-scores/s);
   assert.match(bootstrap, /현재 학기 성적 관련 의도는[\s\S]*모두 `course-scores`/);
+  assert.match(bootstrap, /강의평가.*mju msi lecture-evaluations submit/s);
 });
 
 test("Dockerfile copies repo-local skills after upstream mju-cli skills", () => {
