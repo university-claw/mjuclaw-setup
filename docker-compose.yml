@@ -85,7 +85,7 @@ services:
       - HTTP_AUTH_TOKEN=${MJUCLAW_ROUTER_TOKEN}
       - LOG_LEVEL=${ROUTER_LOG_LEVEL:-info}
       - NODE_ENV=production
-      # ── Intent classifier (MVP-2) ──────────────────────────────
+      # ── Safety classifier (MVP-2) ──────────────────────────────
       # CLASSIFIER_ENABLED=false면 classifier 호출 없이 forward만 (MVP-1 동작).
       - CLASSIFIER_ENABLED=${CLASSIFIER_ENABLED:-true}
       - CLASSIFIER_URL=${CLASSIFIER_URL:-http://mjuclaw-classifier:3200}
@@ -108,14 +108,19 @@ services:
       - router-data:/home/router/.openclaw
     # host port 매핑 없음 — compose 내부 네트워크 전용 (3100은 agent → router만)
 
-  # ── mjuclaw-classifier (MVP-2 intent gate) ───────────────────────
-  # KcELECTRA-base 15-class 한국어 의도 분류 FastAPI. router가 사용자 메시지를
-  # forward하기 전에 호출하여 abuse 차단 + (향후) service 라우팅 분기.
+  # ── mjuclaw-classifier (MVP-2 safety gate) ───────────────────────
+  # KcELECTRA-base binary safety classifier. router가 사용자 메시지를
+  # forward하기 전에 호출하여 abuse 차단을 수행한다.
   # 모델 가중치(~500MB)가 이미지에 포함되므로 첫 빌드는 다소 무겁다.
   classifier:
     build:
-      context: ./intent-classifier
+      context: ./intent-classifier/v2
       dockerfile: serving/Dockerfile
+      args:
+        MODEL_REPO_ID: ${CLASSIFIER_MODEL_REPO_ID:-nullhyeon/mjuclaw-safety-classifier}
+        MODEL_REVISION: ${CLASSIFIER_MODEL_REVISION:-main}
+      secrets:
+        - hf_token
     container_name: mjuclaw-classifier
     restart: unless-stopped
     environment:
@@ -216,3 +221,7 @@ volumes:
   public-data-db:
   public-data-assets:
   public-data-paddle-models:
+
+secrets:
+  hf_token:
+    environment: HF_TOKEN

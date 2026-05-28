@@ -16,7 +16,7 @@
         ┌───────────▼───────────┐
         │   mjuclaw-router      │  ← Discord 봇 토큰 단독 소유
         │   (Node 22)           │     - 온보딩 modal/login
-        │                       │     - intent classifier 게이트
+        │                       │     - safety classifier 게이트
         │                       │     - cross-user session 격리
         └───┬───────────────────┘
             │ openclaw agent --json (gateway WS)
@@ -24,7 +24,7 @@
         ┌───────────────────────┐    ┌───────────────────────┐
         │   mjuclaw-agent       │←──▶│ mjuclaw-classifier    │
         │   (OpenClaw + LLM)    │HTTP│ (KcELECTRA-base FastAPI│
-        │   - mju-cli wrapper   │    │  abuse 차단 + 의도 분류) │
+        │   - mju-cli wrapper   │    │  abuse 차단)           │
         │   - mju-news Reader   │    └───────────────────────┘
         │   - view-server :3001 │
         │   - cron alert helpers│              ▲
@@ -48,7 +48,7 @@
 **docker-compose가 띄우는 컨테이너 (default):**
 - `mjuclaw-agent` — OpenClaw + view-server + LLM 호출 (Gemini)
 - `mjuclaw-router` — Discord WS 입구 + onboarding modal + cron alert HTTP
-- `mjuclaw-classifier` — 한국어 의도 분류 + abuse 차단 (KcELECTRA, HF Hub에서 모델 자동 download)
+- `mjuclaw-classifier` — 한국어 abuse 차단 safety classifier (KcELECTRA, HF Hub에서 모델 자동 download)
 - `mjuclaw-worker` — 공지/학식 정본 생성 worker (PaddleOCR)
 
 **옵션 profile (`--profile public-data`):**
@@ -414,7 +414,7 @@ git fetch --tags && git checkout v1.1.1   # 새 release 나오면
 - [mju-news](https://github.com/university-claw/mju-news) — Reader CLI (worker DB → JSON)
 - [mju-public-data-worker](https://github.com/university-claw/mju-public-data-worker) — 공지/학식 정본 worker (private)
 - [mjuclaw-router](https://github.com/university-claw/mjuclaw-router) — Discord WS 입구 + 온보딩 게이트
-- [intent-classifier](https://github.com/university-claw/intent-classifier) — KcELECTRA-base 한국어 의도 분류
+- [intent-classifier](https://github.com/university-claw/intent-classifier) — v1 intent classifier + v2 binary safety classifier
 
 ---
 

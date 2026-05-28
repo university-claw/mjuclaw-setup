@@ -100,8 +100,9 @@ clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.g
 # OCR은 PaddleOCR 기본 (PR #10/#12 머지 결과). public-data profile로 별도 분리 빌드도 가능.
 clone_or_pull mju-public-data-worker https://github.com/university-claw/mju-public-data-worker.git "$MJU_PUBLIC_DATA_WORKER_BRANCH"
 
-# intent-classifier : KcELECTRA-base 15-class 한국어 의도 분류 모델 + serving.
-# 모델 가중치(420MB)는 git이 아니라 HuggingFace Hub(kbsooo/mjuclaw-intent-classifier)에서
+# intent-classifier : KcELECTRA-base 한국어 safety classifier + serving.
+# v1 15-class intent classifier는 레포에 남기고, compose는 v2 binary abuse gate를 사용한다.
+# 모델 가중치(420MB)는 git이 아니라 HuggingFace Hub에서
 # Dockerfile이 빌드 시 huggingface_hub.snapshot_download 로 자동 download. 따라서
 # 다른 sub-repo와 동일한 clone_or_pull 패턴으로 충분하다 (호스트에 model/ 없어도 빌드 가능).
 clone_or_pull intent-classifier https://github.com/university-claw/intent-classifier.git "$INTENT_CLASSIFIER_BRANCH"
