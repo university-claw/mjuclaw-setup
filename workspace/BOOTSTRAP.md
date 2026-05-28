@@ -172,9 +172,25 @@ router가 `mju-login`을 호출하면 다음이 자동으로 따라붙습니다 
 
 `{DISCORD_USER_ID}`는 현재 대화하는 유저의 Discord ID입니다. 모든 mju-cli 명령에 이 플래그를 붙이세요.
 
+## 시간표 설계 / 졸업 로드맵 의도 매핑
+
+시간표 관련 의도는 서로 다른 기능이므로 반드시 아래처럼 구분하세요.
+
+| 유저 의도 | 사용할 명령 | dataType (자동) |
+|---|---|---|
+| "시간표 설계", "시간표 짜줘", "랜덤 시간표", "추천 시간표", "전공 3개 교양 2개", "요일/교시 제외", "시간 안 겹치게" | `mju-news academic-planning timetable --year <연도> --term-code <학기코드> --department "<학과>" --format json` | `timetable-planner` |
+| "내 현재 시간표", "이번 학기 수강 시간표", "지금 듣는 수업 시간표" | `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` | `timetable` |
+| "출석", "유체크", "결석", "출석 알림" | `mju ucheck lectures list --app-dir /data/users/{DISCORD_USER_ID} --format json` 또는 `mju ucheck attendance --course "<과목명>" --app-dir /data/users/{DISCORD_USER_ID} --format json` | `attendance` |
+| "졸업요건", "졸업 로드맵", "졸업까지 뭐 남았어", "내가 뭘 들었고 뭘 들어야 해", "영역별 졸업요건" | `mju-news academic-planning graduation-roadmap --department "<학과>" --format json` | `graduation` |
+| "MSI 졸업요건 원본", "학교 시스템 졸업사정 그대로", "MSI 원본만" | `mju msi graduation --app-dir /data/users/{DISCORD_USER_ID} --format json` | `graduation` |
+
+**시간표 설계와 졸업 로드맵은 `mju-news academic-planning` 기능입니다.** 공통 DB의 개설강좌/졸업요건을 읽어 웹뷰를 만들며, 필요하면 현재 유저의 MSI 데이터로 학과/학번/입학년도/이수 과목을 보조합니다. 일반적인 "졸업요건" 요청은 기존 MSI 원본 조회가 아니라 새 졸업 로드맵으로 처리하세요. DB import가 아직 안 됐거나 결과가 비어 있어도 `ucheck`나 현재 수강 시간표로 대체하지 말고, 데이터가 아직 준비되지 않았다고 짧게 안내하세요.
+
+시간표 설계 요청에서 `mju ucheck`를 호출하면 출석 웹뷰가 열립니다. "시간표"라는 단어가 있어도 설계/추천/랜덤/전공·교양 개수/요일 제외/교시 제외 맥락이면 절대 `ucheck`를 쓰지 마세요.
+
 ## 데이터 표시 — 3단계
 
-`mju lms`, `mju msi`, `mju ucheck`, `mju library` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
+`mju lms`, `mju msi`, `mju ucheck`, `mju library`, `mju-news` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
 
 ### 성적 조회 — 의도와 명령 매핑 (중요)
 
@@ -202,7 +218,7 @@ router가 `mju-login`을 호출하면 다음이 자동으로 따라붙습니다 
 
 **Step B. 필요한 경우에만 보조 AI 요약 주입**
 
-전문화된 웹뷰(`timetable`, `course-scores`, `grades`, `grade-history`, `graduation`, `action-items`, `unsubmitted`, `unread-notices`, `attendance`, `news`, `news-detail`, `cafeteria`)는 렌더러가 화면 구조와 브리핑을 직접 만들며 `aiResponse`를 화면에 표시하지 않을 수 있습니다. 이런 웹뷰의 본문을 바꾸려고 PATCH 요약을 쓰지 마세요.
+전문화된 웹뷰(`timetable`, `timetable-planner`, `course-scores`, `grades`, `grade-history`, `graduation`, `action-items`, `unsubmitted`, `unread-notices`, `attendance`, `news`, `news-detail`, `cafeteria`)는 렌더러가 화면 구조와 브리핑을 직접 만들며 `aiResponse`를 화면에 표시하지 않을 수 있습니다. 이런 웹뷰의 본문을 바꾸려고 PATCH 요약을 쓰지 마세요.
 
 범용/레거시 웹뷰에서 별도 "AI 요약" 카드가 필요한 경우에만 아래 PATCH를 사용합니다.
 
@@ -294,7 +310,7 @@ mju-news cafeterias week --start 2026-04-14 --format json
 4. **viewUrl은 항상 마스킹 링크로 응답에 포함** — 사용자가 원본 사진을 직접 볼 수 있게.
 
 **웹뷰 연동**
-`mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
+`mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week`, `academic-planning timetable`, `academic-planning graduation-roadmap` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
 
 ## 뉴스 정기 알림 구독 (푸시 알림)
 

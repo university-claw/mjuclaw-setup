@@ -38,17 +38,68 @@ test("runtime instructions avoid removed current-grade commands", () => {
   assert.match(bootstrap, /강의평가.*mju msi lecture-evaluations submit/s);
 });
 
+test("runtime instructions route academic planning away from legacy MSI and UCheck", () => {
+  const bootstrap = fs.readFileSync(path.join(root, "workspace", "BOOTSTRAP.md"), "utf8");
+  const soul = fs.readFileSync(path.join(root, "workspace", "SOUL.md"), "utf8");
+  const newsSkill = fs.readFileSync(path.join(root, "skills", "getting-mju-news", "SKILL.md"), "utf8");
+  const msiSkill = fs.readFileSync(path.join(root, "skills", "mju-msi", "SKILL.md"), "utf8");
+
+  assert.match(bootstrap, /시간표 설계[\s\S]*mju-news academic-planning timetable[\s\S]*timetable-planner/);
+  assert.match(bootstrap, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(bootstrap, /일반적인 "졸업요건" 요청[\s\S]*새 졸업 로드맵/);
+  assert.match(bootstrap, /MSI 원본만[\s\S]*mju msi graduation/);
+  assert.match(bootstrap, /시간표 설계 요청[\s\S]*mju ucheck[\s\S]*출석 웹뷰/);
+  assert.match(bootstrap, /DB import[\s\S]*ucheck[\s\S]*현재 수강 시간표로 대체하지 말고/);
+
+  assert.match(soul, /시간표 설계와 졸업 로드맵은 mju-news academic-planning/);
+
+  assert.match(newsSkill, /시간표 설계[\s\S]*mju-news academic-planning timetable/);
+  assert.match(newsSkill, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(newsSkill, /일반적인 "졸업요건" 요청도 이 기능으로 처리/);
+  assert.match(newsSkill, /기존 `mju msi graduation`[\s\S]*명시적인 MSI 원본 조회용/);
+  assert.doesNotMatch(newsSkill, /mju-news list|mju-news scrape/);
+
+  assert.match(msiSkill, /현재 수강 시간표 조회/);
+  assert.match(msiSkill, /MSI 원본 졸업요건 조회/);
+  assert.match(msiSkill, /원본 조회를 명시한 경우에만 사용/);
+  assert.match(msiSkill, /getting-mju-news[\s\S]*시간표 설계/);
+  assert.match(msiSkill, /getting-mju-news[\s\S]*졸업요건[\s\S]*졸업 로드맵/);
+  assert.match(msiSkill, /일반적인 "졸업요건" 요청도 새 졸업 로드맵으로 대체/);
+});
+
+test("webview wrappers keep academic planning separate from legacy MSI and UCheck views", () => {
+  const mjuNewsWrapper = fs.readFileSync(path.join(root, "bin", "mju-news"), "utf8");
+  const mjuWrapper = fs.readFileSync(path.join(root, "bin", "mju"), "utf8");
+
+  assert.match(mjuNewsWrapper, /academic-planning timetable"\*\) echo "timetable-planner"/);
+  assert.match(mjuNewsWrapper, /academic-planning graduation-roadmap"\*\) echo "graduation"/);
+  assert.match(mjuNewsWrapper, /"timetable-planner"\) echo "시간표 설계"/);
+  assert.match(mjuNewsWrapper, /"graduation"\) echo "졸업 로드맵"/);
+
+  assert.match(mjuWrapper, /msi timetable"\*\) echo "timetable"/);
+  assert.match(mjuWrapper, /msi graduation"\*\) echo "graduation"/);
+  assert.match(mjuWrapper, /ucheck"\*\) echo "attendance"/);
+  assert.match(mjuWrapper, /"graduation"\) echo "졸업요건"/);
+  assert.match(mjuWrapper, /"attendance"\) echo "출석"/);
+});
+
 test("Dockerfile copies repo-local skills after upstream mju-cli skills", () => {
   const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
   const templateUpstream = dockerfile.indexOf("COPY --chown=agent:agent mju-cli/skills/ /opt/mjuclaw-workspace-template/workspace/skills/");
+  const templateNews = dockerfile.indexOf("COPY --chown=agent:agent mju-news/skills/ /opt/mjuclaw-workspace-template/workspace/skills/");
   const templateOverride = dockerfile.indexOf("COPY --chown=agent:agent skills/ /opt/mjuclaw-workspace-template/workspace/skills/");
   const homeUpstream = dockerfile.indexOf("COPY --chown=agent:agent mju-cli/skills/ /home/agent/.openclaw/workspace/skills/");
+  const homeNews = dockerfile.indexOf("COPY --chown=agent:agent mju-news/skills/ /home/agent/.openclaw/workspace/skills/");
   const homeOverride = dockerfile.indexOf("COPY --chown=agent:agent skills/ /home/agent/.openclaw/workspace/skills/");
 
   assert.ok(templateUpstream >= 0, "template upstream skills copy should exist");
+  assert.ok(templateNews > templateUpstream, "template mju-news skills copy should follow upstream mju-cli skills");
   assert.ok(templateOverride > templateUpstream, "repo-local template skills should override upstream skills");
+  assert.ok(templateOverride > templateNews, "repo-local template skills should override upstream mju-news skills");
   assert.ok(homeUpstream >= 0, "home upstream skills copy should exist");
+  assert.ok(homeNews > homeUpstream, "home mju-news skills copy should follow upstream mju-cli skills");
   assert.ok(homeOverride > homeUpstream, "repo-local home skills should override upstream skills");
+  assert.ok(homeOverride > homeNews, "repo-local home skills should override upstream mju-news skills");
 });
 
 test("setup pins mju-cli to the deployment branch", () => {
