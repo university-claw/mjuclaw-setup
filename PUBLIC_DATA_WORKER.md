@@ -33,6 +33,32 @@ PADDLE_OCR_REC_MODEL_NAME=korean_PP-OCRv5_mobile_rec
 PUBLIC_DATA_WORKER_TICK_INTERVAL_SECONDS=600
 ```
 
+## Seed Release Import
+
+Large course catalog exports and graduation requirement JSON files are not
+committed to the PR. Put them in a private GitHub Release asset zip and let the
+worker import them into Postgres.
+
+Expected zip layout:
+
+```text
+course-catalog-2026-10.json
+graduation-requirements/*.json
+```
+
+To import on worker startup after migrations:
+
+```env
+PUBLIC_DATA_SEED_IMPORT_ON_START=1
+PUBLIC_DATA_SEED_RELEASE_REPO=university-claw/mju-public-data-worker
+PUBLIC_DATA_SEED_RELEASE_TAG=public-data-seeds-2026-10
+PUBLIC_DATA_SEED_ASSET_NAME=mju-public-data-seeds-2026-10.zip
+PUBLIC_DATA_SEED_GITHUB_TOKEN=<token-for-private-release>
+```
+
+The seed files are used only to populate DB tables. Reader and webview commands
+still read from Postgres at runtime.
+
 For branch-to-branch local verification from the parent `uniclaw` workspace, set:
 
 ```env

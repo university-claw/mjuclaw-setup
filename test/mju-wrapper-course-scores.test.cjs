@@ -8,12 +8,24 @@ const bashProbe = spawnSync("bash", ["-lc", "command -v node"], {
   encoding: "utf8",
   windowsHide: true,
 });
-const bashTest = bashProbe.status === 0 ? test : test.skip;
-const bashNodePath = bashProbe.stdout.trim();
+const bashNodePath = (bashProbe.stdout || "").trim();
+const bashPlatformProbe = spawnSync("bash", ["-lc", "uname -s"], {
+  encoding: "utf8",
+  windowsHide: true,
+});
+const bashPlatform = (bashPlatformProbe.stdout || "").trim();
+const isWindowsBash = /^(MINGW|MSYS|CYGWIN)/.test(bashPlatform);
+const bashPythonProbe = spawnSync("bash", ["-lc", isWindowsBash ? "command -v python" : "command -v python3 || command -v python"], {
+  encoding: "utf8",
+  windowsHide: true,
+});
+const bashPythonPath = (bashPythonProbe.stdout || "").trim();
+const bashTest = bashProbe.status === 0 && bashPythonProbe.status === 0 ? test : test.skip;
 
 function toBashPath(filePath) {
   const normalized = path.resolve(filePath).replace(/\\/g, "/");
   const driveMatch = normalized.match(/^([A-Za-z]):\/(.*)$/);
+  if (driveMatch && isWindowsBash) return `/${driveMatch[1].toLowerCase()}/${driveMatch[2]}`;
   if (driveMatch) return `/mnt/${driveMatch[1].toLowerCase()}/${driveMatch[2]}`;
   return normalized;
 }
@@ -70,7 +82,7 @@ printf '%s\\n' '{"url":"http://view.local/course-scores-test"}'
 console.log(${JSON.stringify(JSON.stringify(cliOutput))});
 `, "utf8");
 
-  return { root, realMju, curlStub, bashNode: bashNodePath, testDir, curlCapture };
+  return { root, realMju, curlStub, bashNode: bashNodePath, bashPython: bashPythonPath, testDir, curlCapture };
 }
 
 function wrapperCommand(fixture, args) {
@@ -79,6 +91,7 @@ function wrapperCommand(fixture, args) {
     `MJU_REAL_BIN=${shellQuote(toBashPath(fixture.realMju))}`,
     `MJU_NODE_BIN=${shellQuote(fixture.bashNode)}`,
     `MJU_CURL_BIN=${shellQuote(toBashPath(fixture.curlStub))}`,
+    `MJU_PYTHON_BIN=${shellQuote(fixture.bashPython)}`,
     `VIEW_API_URL=${shellQuote("http://127.0.0.1:1/api/view")}`,
     shellQuote(wrapper),
     ...args.map(shellQuote),
