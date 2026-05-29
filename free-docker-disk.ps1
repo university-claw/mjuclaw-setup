@@ -79,20 +79,53 @@ function Test-DockerEngine {
 }
 
 function Start-DockerDesktop {
-  $dockerDesktopPath = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
-  if (Test-Path -LiteralPath $dockerDesktopPath -PathType Leaf) {
-    Write-Host "Starting Docker Desktop: $dockerDesktopPath"
-    Start-Process -FilePath $dockerDesktopPath | Out-Null
+  $candidates = New-Object System.Collections.Generic.List[string]
+
+  if ($env:ProgramFiles) {
+    $candidates.Add((Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"))
   }
-  else {
-    Write-Warning "Docker Desktop executable not found: $dockerDesktopPath"
+  if (${env:ProgramFiles(x86)}) {
+    $candidates.Add((Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\Docker Desktop.exe"))
   }
+  if ($env:LOCALAPPDATA) {
+    $candidates.Add((Join-Path $env:LOCALAPPDATA "Docker\Docker Desktop.exe"))
+    $candidates.Add((Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\Docker Desktop.exe"))
+  }
+
+  $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+  if ($dockerCommand) {
+    Write-Host "Docker CLI path: $($dockerCommand.Source)"
+    $directory = Get-Item -LiteralPath (Split-Path -Parent $dockerCommand.Source)
+    while ($directory) {
+      $candidates.Add((Join-Path $directory.FullName "Docker Desktop.exe"))
+      $directory = $directory.Parent
+    }
+  }
+
+  $dockerDesktopPath = $candidates |
+    Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+    Select-Object -First 1
+
+  if (-not $dockerDesktopPath) {
+    Write-Warning "Docker Desktop executable was not found in known locations."
+    return
+  }
+
+  Write-Host "Starting Docker Desktop: $dockerDesktopPath"
+  Start-Process -FilePath $dockerDesktopPath | Out-Null
 }
 
 function Restart-DockerEngine {
   Write-Host "Restarting Docker engine before production Docker commands."
 
-  $service = Get-Service -Name "com.docker.service" -ErrorAction SilentlyContinue
+  $dockerServices = Get-Service -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "*docker*" -or $_.DisplayName -like "*docker*" }
+  if ($dockerServices) {
+    Write-Host "Docker-related services:"
+    $dockerServices | Format-Table -AutoSize | Out-String | Write-Host
+  }
+
+  $service = $dockerServices | Where-Object { $_.Name -eq "com.docker.service" } | Select-Object -First 1
   if ($service) {
     Restart-Service -Name "com.docker.service" -Force -ErrorAction Stop
   }
