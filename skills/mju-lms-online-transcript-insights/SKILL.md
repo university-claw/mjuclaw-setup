@@ -35,18 +35,20 @@ mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms courses list
 mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online list --course COURSE_NAME
 ```
 
+`list` 결과의 `weeks[].lectureWeeks`는 LMS 온라인 학습 주차의 내부 ID입니다. `week`나 `weekLabel`은 사용자에게 보여줄 주차 표시일 뿐이고, CLI의 `--lecture-weeks` 인자에는 절대 `9`, `10` 같은 주차 숫자를 넣지 않습니다. 사용자가 "9주차"처럼 말하면 `weeks[].week`/`weekLabel`로 후보를 찾고, 실제 명령에는 같은 행의 `lectureWeeks` 값을 넣습니다.
+
 3. 대상 주차 상세 확인:
 
 ```bash
-mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online get --course COURSE_NAME --lecture-weeks WEEK
+mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online get --course COURSE_NAME --lecture-weeks LECTURE_WEEKS_ID
 ```
 
-주차에 영상 항목이 여러 개면 `online get`의 `items`에서 `linkSeq`를 확인한 뒤 `--link-seq LINK_SEQ`를 붙입니다. 사용자가 "첫 번째 영상"처럼 순서로 말하면 `--item-index INDEX`를 사용할 수 있지만, 안정적인 재호출에는 `--link-seq`가 더 낫습니다.
+주차에 영상 항목이 여러 개면 `online get`의 `items`에서 `linkSeq`를 확인한 뒤 `--link-seq LINK_SEQ`를 붙입니다. `linkSeq`는 오직 `online get`의 `items[].linkSeq` 값만 사용합니다. 과제 `rtSeq`, 공지 `articleId`, `lectureWeeks`, 다른 LMS 목록의 id를 `linkSeq`로 재사용하지 마세요. 사용자가 "첫 번째 영상"처럼 순서로 말하면 `--item-index INDEX`를 사용할 수 있지만, 안정적인 재호출에는 `--link-seq`가 더 낫습니다. 사용자가 단순히 "영상 1개 요약"처럼 대상만 넓게 말하면 `online get`으로 항목을 확인한 뒤 첫 번째 항목부터 요약하거나, 여러 항목을 보여주고 고르게 합니다.
 
 ## LMS 제공 요약만 가져오기
 
 ```bash
-mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online summary --course COURSE_NAME --lecture-weeks WEEK --link-seq LINK_SEQ
+mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online summary --course COURSE_NAME --lecture-weeks LECTURE_WEEKS_ID --link-seq LINK_SEQ
 ```
 
 기대 출력:
@@ -59,7 +61,7 @@ mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online summary --c
 ## 자막 원문 plain text 가져오기
 
 ```bash
-mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online transcript --course COURSE_NAME --lecture-weeks WEEK --link-seq LINK_SEQ --language KO
+mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online transcript --course COURSE_NAME --lecture-weeks LECTURE_WEEKS_ID --link-seq LINK_SEQ --language KO
 ```
 
 기대 출력:
@@ -73,7 +75,7 @@ mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online transcript 
 ## 중요한 구간만 rule-based로 가져오기
 
 ```bash
-mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online insights --course COURSE_NAME --lecture-weeks WEEK --link-seq LINK_SEQ --language KO
+mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online insights --course COURSE_NAME --lecture-weeks LECTURE_WEEKS_ID --link-seq LINK_SEQ --language KO
 ```
 
 기대 출력:
@@ -90,7 +92,7 @@ mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online insights --
 필요한 유형만 좁힐 수 있습니다.
 
 ```bash
-mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online insights --course COURSE_NAME --lecture-weeks WEEK --link-seq LINK_SEQ --types exam-candidate,assignment --max-items 3
+mju --app-dir /data/users/<DISCORD_USER_ID> --format json lms online insights --course COURSE_NAME --lecture-weeks LECTURE_WEEKS_ID --link-seq LINK_SEQ --types exam-candidate,assignment --max-items 3
 ```
 
 `--show-score`는 디버깅용입니다. 일반 사용자 응답에는 점수를 노출하지 않습니다.

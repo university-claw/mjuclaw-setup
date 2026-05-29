@@ -188,11 +188,11 @@ router가 `mju-login`을 호출하면 다음이 자동으로 따라붙습니다 
 | 유저 의도 | 사용할 명령 | 응답 기준 |
 |---|---|---|
 | "연구실안전교육 들어줘", "안전교육 완료해줘", "연구실 안전교육 남은 거 처리해줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json safety education run-incomplete-videos` | 완료/미완료 개수와 남은 과목을 요약하고, 결과에 링크가 있으면 마스킹 링크로 안내 |
-| "LMS 영상 요약해줘", "강의 영상 핵심 알려줘", "온라인 강의 중요한 구간 찾아줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json lms online insights --course "<과목명>" --lecture-weeks <주차> --link-seq <LINK_SEQ> --language KO` | 시험/과제/실습/중요 후보를 요약. `linkSeq`가 불명확하면 먼저 `lms online list`와 `lms online get`으로 대상 영상을 확인 |
-| "LMS에 있는 제공 요약만 보여줘", "강의 영상 LMS 요약 보여줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json lms online summary --course "<과목명>" --lecture-weeks <주차> --link-seq <LINK_SEQ>` | LMS가 제공한 요약문만 사용자용으로 정리 |
-| "강의 영상 자막 원문 보여줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json lms online transcript --course "<과목명>" --lecture-weeks <주차> --link-seq <LINK_SEQ> --language KO` | 사용자가 원문을 명시적으로 요청한 경우에만 자막 원문을 요약 또는 필요한 범위로 제공 |
+| "LMS 영상 요약해줘", "강의 영상 핵심 알려줘", "온라인 강의 중요한 구간 찾아줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json lms online insights --course "<과목명>" --lecture-weeks <LECTURE_WEEKS_ID> --link-seq <LINK_SEQ> --language KO` | 시험/과제/실습/중요 후보를 요약. `<LECTURE_WEEKS_ID>`는 `lms online list`의 `weeks[].lectureWeeks` 값이고, `<LINK_SEQ>`는 `lms online get`의 `items[].linkSeq` 값만 사용 |
+| "LMS에 있는 제공 요약만 보여줘", "강의 영상 LMS 요약 보여줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json lms online summary --course "<과목명>" --lecture-weeks <LECTURE_WEEKS_ID> --link-seq <LINK_SEQ>` | LMS가 제공한 요약문만 사용자용으로 정리. 주차 숫자나 다른 LMS id를 `lecture-weeks`/`link-seq`로 쓰지 않음 |
+| "강의 영상 자막 원문 보여줘" | `mju --app-dir /data/users/{DISCORD_USER_ID} --format json lms online transcript --course "<과목명>" --lecture-weeks <LECTURE_WEEKS_ID> --link-seq <LINK_SEQ> --language KO` | 사용자가 원문을 명시적으로 요청한 경우에만 자막 원문을 요약 또는 필요한 범위로 제공 |
 
-LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하면 임의로 없다고 답하지 말고 `lms courses list`, `lms online list`, `lms online get`으로 후보를 확인하거나 사용자에게 필요한 값을 짧게 물어보세요.
+LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하면 임의로 없다고 답하지 말고 `lms courses list`, `lms online list`, `lms online get`으로 후보를 확인하거나 사용자에게 필요한 값을 짧게 물어보세요. 사용자가 "9주차"처럼 말하면 `lms online list` 결과의 `week`/`weekLabel`로 대상을 찾고, 실제 명령에는 해당 행의 `lectureWeeks` 내부 ID를 넣으세요. `linkSeq`는 반드시 `lms online get` 결과의 `items[].linkSeq`에서만 가져오고, 과제 `rtSeq`, 공지 `articleId`, `lectureWeeks` 값을 재사용하지 마세요.
 
 ## 시간표 설계 / 졸업 로드맵 의도 매핑
 
