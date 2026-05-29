@@ -7660,8 +7660,8 @@ type CafeteriaSource = {
 const CAFETERIA_SOURCES: CafeteriaSource[] = [
   { key: "student-hall", label: "학생회관", aliases: ["student", "student-cafeteria", "학생회관"] },
   { key: "myeongjindang", label: "명진당", aliases: ["myeongjin", "myeongjindang", "명진당"] },
-  { key: "faculty", label: "교직원", aliases: ["faculty", "faculty-cafeteria", "교직원"] },
   { key: "welfare", label: "복지동", aliases: ["welfare", "welfare-building", "복지동"] },
+  { key: "bangmok", label: "방목기념관", aliases: ["bangmok", "bangmok-cafeteria", "방목기념관", "방목관", "교직원", "교직원식당", "직원식당"] },
 ];
 
 function renderCafeteriaTable(data: unknown): string {
