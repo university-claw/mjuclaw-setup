@@ -14,6 +14,7 @@
 FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip curl git openssh-client \
@@ -53,6 +54,8 @@ RUN groupadd -r agent && useradd -r -g agent -m -d /home/agent agent
 COPY mju-cli/package.json mju-cli/package-lock.json /opt/mju-cli/
 WORKDIR /opt/mju-cli
 RUN npm ci --include=dev
+RUN npx playwright install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
 COPY mju-cli/ /opt/mju-cli/
 RUN npx tsc
 # skill의 requires.bins: ["mju"]에 매핑 — view-server 자동 연동 wrapper
