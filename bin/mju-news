@@ -7,7 +7,7 @@
 #   notices get <id>         → news-detail
 #   cafeterias today/week    → cafeteria
 #   course-catalog list      → timetable-planner
-#   graduation-requirements list → graduation
+#   graduation-requirements list → disabled while graduation roadmap is the only user-facing graduation view
 #   academic-planning timetable → timetable-planner
 #   academic-planning graduation-roadmap → graduation
 #   doctor / skills          → viewUrl 없음 (조회 대상 아님)
@@ -29,7 +29,6 @@ detect_datatype() {
     *"notices get"*) echo "news-detail" ;;
     *"cafeterias today"*|*"cafeterias week"*) echo "cafeteria" ;;
     *"course-catalog list"*) echo "timetable-planner" ;;
-    *"graduation-requirements list"*) echo "graduation" ;;
     *"academic-planning timetable"*) echo "timetable-planner" ;;
     *"academic-planning graduation-roadmap"*) echo "graduation" ;;
     *) echo "" ;;
@@ -42,7 +41,6 @@ should_view() {
     *"notices recent"*|*"notices search"*|*"notices get"*) return 0 ;;
     *"cafeterias today"*|*"cafeterias week"*) return 0 ;;
     *"course-catalog list"*) return 0 ;;
-    *"graduation-requirements list"*) return 0 ;;
     *"academic-planning timetable"*) return 0 ;;
     *"academic-planning graduation-roadmap"*) return 0 ;;
     *) return 1 ;;

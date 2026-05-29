@@ -133,7 +133,7 @@ bashTest("mju-news wrapper routes course catalog reads to the timetable planner 
   assert.equal(output.viewUrl, "http://view.local/timetable-planner");
 });
 
-bashTest("mju-news wrapper routes official graduation requirements to the graduation webview", async (t) => {
+bashTest("mju-news wrapper leaves standalone graduation requirements unviewed", async (t) => {
   const fixture = await createWrapperFixture(t, {
     total: 1,
     items: [{
@@ -158,13 +158,11 @@ bashTest("mju-news wrapper routes official graduation requirements to the gradua
   ])], { cwd: fixture.root });
 
   assert.equal(result.status, 0, result.stderr);
-  const requestBody = JSON.parse(await fs.readFile(fixture.curlCapture, "utf8"));
-  assert.equal(requestBody.dataType, "graduation");
-  assert.equal(requestBody.title, "졸업 로드맵");
-  assert.equal(requestBody.rawData.items[0].rules[0].requiredCredits, 74);
+  assert.equal(await fileExists(fixture.curlCapture), false);
 
   const output = JSON.parse(result.stdout);
-  assert.equal(output.viewUrl, "http://view.local/graduation");
+  assert.equal(output.viewUrl, undefined);
+  assert.equal(output.items[0].rules[0].requiredCredits, 74);
 });
 
 bashTest("mju-news wrapper routes academic-planning timetable to the timetable planner webview", async (t) => {
@@ -232,3 +230,12 @@ bashTest("mju-news wrapper routes academic-planning graduation-roadmap to the gr
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/academic-graduation");
 });
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
