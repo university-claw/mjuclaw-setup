@@ -159,11 +159,8 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
-          docker system df
-          docker builder prune -af
-          docker image prune -af
-          docker container prune -f
-          docker system df
+          Set-Location $env:DEPLOY_WORKDIR
+          .\free-docker-disk.ps1
 
       - name: Pull production images
         shell: powershell
