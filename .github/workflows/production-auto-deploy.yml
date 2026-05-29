@@ -150,6 +150,17 @@ jobs:
           Set-Location $env:DEPLOY_WORKDIR
           .\deploy.ps1 -CheckOnly
 
+      - name: Free Docker disk before pull
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          docker system df
+          docker builder prune -af
+          docker image prune -af
+          docker container prune -f
+          docker system df
+
       - name: Pull production images
         shell: powershell
         run: |
