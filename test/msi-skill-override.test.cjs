@@ -46,8 +46,11 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
 
   assert.match(bootstrap, /시간표 설계[\s\S]*mju-news academic-planning timetable[\s\S]*timetable-planner/);
   assert.match(bootstrap, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(bootstrap, /"내 졸업요건"[\s\S]*"졸업학점"[\s\S]*"졸업까지"[\s\S]*mju-news academic-planning graduation-roadmap/);
   assert.match(bootstrap, /일반적인 "졸업요건" 요청[\s\S]*새 졸업 로드맵/);
   assert.match(bootstrap, /MSI 원본만[\s\S]*mju msi graduation/);
+  assert.doesNotMatch(bootstrap, /\|\s*"내 졸업요건",\s*"졸업까지"\s*\|\s*`mju msi graduation`/);
+  assert.match(bootstrap, /"내 졸업요건 원본"[\s\S]*mju msi graduation/);
   assert.match(bootstrap, /시간표 설계 요청[\s\S]*mju ucheck[\s\S]*출석 웹뷰/);
   assert.match(bootstrap, /DB import[\s\S]*ucheck[\s\S]*현재 수강 시간표로 대체하지 말고/);
 
