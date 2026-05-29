@@ -164,7 +164,7 @@ Show-DiskUsage
 
 if (-not (Test-DockerEngine)) {
   Restart-DockerEngine
-  Wait-DockerEngine -TimeoutSeconds 180
+  Wait-DockerEngine -TimeoutSeconds 420
 }
 
 Invoke-NativeWithTimeout -FilePath "docker" -Arguments @("builder", "prune", "-af") -TimeoutSeconds 120
