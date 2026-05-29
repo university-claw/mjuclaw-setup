@@ -12,6 +12,9 @@ test("local mju-msi skill overrides current-term grades to course-scores", () =>
   assert.match(skill, /"이번 학기 성적".*"현재 성적".*"수강점수"/);
   assert.match(skill, /기존 확정등급 조회 명령은 사용하지 않습니다/);
   assert.match(skill, /msi lecture-evaluations submit/);
+  assert.match(skill, /scope.*department.*교육만족도/);
+  assert.match(skill, /scope.*course.*강의별 강의평가/);
+  assert.match(skill, /아무 과목이나[\s\S]*scope: "course"/);
   assert.match(skill, /msi \+last-class-times/);
   assert.doesNotMatch(skill, /current-grades/);
   assert.doesNotMatch(skill, /msi grades/);
@@ -36,6 +39,7 @@ test("runtime instructions avoid removed current-grade commands", () => {
   assert.match(bootstrap, /이번 학기 성적.*mju msi course-scores/s);
   assert.match(bootstrap, /현재 학기 성적 관련 의도는[\s\S]*모두 `course-scores`/);
   assert.match(bootstrap, /강의평가.*mju msi lecture-evaluations submit/s);
+  assert.match(bootstrap, /target `scope`가 `department`[\s\S]*`course`[\s\S]*강의별 강의평가/);
 });
 
 test("runtime instructions route academic planning away from legacy MSI and UCheck", () => {

@@ -28,11 +28,14 @@ metadata:
 - MSI 원본 졸업요건 조회: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi graduation`
   - 사용자가 "MSI 원본", "학교 시스템 그대로"처럼 원본 조회를 명시한 경우에만 사용합니다.
 - 강의평가 대상 조회: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi lecture-evaluations list`
+  - 결과 target의 `scope`가 `department`이면 교육만족도/재학생 만족도 조사이고, `course`이면 강의별 강의평가입니다.
+  - 사용자가 "아무 과목이나"처럼 특정 과목을 정하지 않으면 `scope: "course"`인 미제출 target 중 첫 번째 사용 가능한 과목을 고릅니다.
 - 강의평가 미리보기: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi lecture-evaluations preview --instruction "보통으로 ㄱㄱ"`
   - 대상이 여러 개면 `--target <id-or-title>` 또는 `--all` 이 필요합니다.
 - 강의평가 제출: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi lecture-evaluations submit --instruction "보통으로 ㄱㄱ" --target TARGET`
   - 유저가 처음에 "강의평가 해줘"라고 요청한 것은 제출 실행 승인으로 봅니다.
   - 만족도는 `--satisfaction 매우만족|만족|보통|불만족|매우불만족`로 명시할 수 있고, 별도 신호가 없으면 `보통`입니다.
+  - 사용자가 "강의평가 전부"처럼 모든 미제출 대상을 요청하면 `--all`을 사용하고, 특정 과목명이나 `target.id`가 있으면 `--target`으로 좁힙니다.
 
 현재 학기 성적 관련 의도는 최종 학점/등급이 아직 없을 수 있으므로 모두 `msi course-scores`로 처리하세요. 기존 확정등급 조회 명령은 사용하지 않습니다.
 
