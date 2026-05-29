@@ -52,9 +52,11 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   assert.match(bootstrap, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
   assert.match(bootstrap, /"내 졸업요건"[\s\S]*"졸업학점"[\s\S]*"졸업까지"[\s\S]*mju-news academic-planning graduation-roadmap/);
   assert.match(bootstrap, /일반적인 "졸업요건" 요청[\s\S]*새 졸업 로드맵/);
-  assert.match(bootstrap, /MSI 원본만[\s\S]*mju msi graduation/);
+  assert.match(bootstrap, /MSI 원본만[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(bootstrap, /기존 MSI 졸업요건 웹뷰는 임시 비활성화/);
+  assert.doesNotMatch(bootstrap, /\|\s*"MSI 졸업요건 원본"[^|\n]*\|\s*`mju msi graduation/);
   assert.doesNotMatch(bootstrap, /\|\s*"내 졸업요건",\s*"졸업까지"\s*\|\s*`mju msi graduation`/);
-  assert.match(bootstrap, /"내 졸업요건 원본"[\s\S]*mju msi graduation/);
+  assert.doesNotMatch(bootstrap, /\|\s*"내 졸업요건 원본"[^|\n]*\|\s*`mju msi graduation`/);
   assert.match(bootstrap, /시간표 설계 요청[\s\S]*mju ucheck[\s\S]*출석 웹뷰/);
   assert.match(bootstrap, /DB import[\s\S]*ucheck[\s\S]*현재 수강 시간표로 대체하지 말고/);
 
@@ -63,15 +65,15 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   assert.match(newsSkill, /시간표 설계[\s\S]*mju-news academic-planning timetable/);
   assert.match(newsSkill, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
   assert.match(newsSkill, /일반적인 "졸업요건" 요청도 이 기능으로 처리/);
-  assert.match(newsSkill, /기존 `mju msi graduation`[\s\S]*명시적인 MSI 원본 조회용/);
+  assert.match(newsSkill, /기존 `mju msi graduation`[\s\S]*임시 비활성화/);
   assert.doesNotMatch(newsSkill, /mju-news list|mju-news scrape/);
 
   assert.match(msiSkill, /현재 수강 시간표 조회/);
-  assert.match(msiSkill, /MSI 원본 졸업요건 조회/);
-  assert.match(msiSkill, /원본 조회를 명시한 경우에만 사용/);
+  assert.match(msiSkill, /MSI 원본 졸업요건 조회[\s\S]*임시 비활성화/);
+  assert.doesNotMatch(msiSkill, /원본 조회를 명시한 경우에만 사용/);
   assert.match(msiSkill, /getting-mju-news[\s\S]*시간표 설계/);
   assert.match(msiSkill, /getting-mju-news[\s\S]*졸업요건[\s\S]*졸업 로드맵/);
-  assert.match(msiSkill, /일반적인 "졸업요건" 요청도 새 졸업 로드맵으로 대체/);
+  assert.match(msiSkill, /일반적인 "졸업요건" 요청과 명시적인 원본 요청 모두 새 졸업 로드맵으로 대체/);
 });
 
 test("webview wrappers keep academic planning separate from legacy MSI and UCheck views", () => {
@@ -80,13 +82,14 @@ test("webview wrappers keep academic planning separate from legacy MSI and UChec
 
   assert.match(mjuNewsWrapper, /academic-planning timetable"\*\) echo "timetable-planner"/);
   assert.match(mjuNewsWrapper, /academic-planning graduation-roadmap"\*\) echo "graduation"/);
+  assert.doesNotMatch(mjuNewsWrapper, /graduation-requirements list"\*\) echo "graduation"/);
   assert.match(mjuNewsWrapper, /"timetable-planner"\) echo "시간표 설계"/);
   assert.match(mjuNewsWrapper, /"graduation"\) echo "졸업 로드맵"/);
 
   assert.match(mjuWrapper, /msi timetable"\*\) echo "timetable"/);
-  assert.match(mjuWrapper, /msi graduation"\*\) echo "graduation"/);
+  assert.doesNotMatch(mjuWrapper, /msi graduation"\*\) echo "graduation"/);
   assert.match(mjuWrapper, /ucheck"\*\) echo "attendance"/);
-  assert.match(mjuWrapper, /"graduation"\) echo "졸업요건"/);
+  assert.doesNotMatch(mjuWrapper, /"graduation"\) echo "졸업요건"/);
   assert.match(mjuWrapper, /"attendance"\) echo "출석"/);
 });
 

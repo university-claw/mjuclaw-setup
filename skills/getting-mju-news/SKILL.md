@@ -19,7 +19,7 @@ metadata:
 
 - 현재 내가 수강 중인 시간표 조회: `mju-msi`의 `mju msi timetable`
 - 출석/결석/UCheck 조회: `mju-ucheck` 또는 `mju ucheck ...`
-- MSI 원본 졸업요건 조회: 사용자가 "MSI 원본", "학교 시스템 그대로"를 명시한 경우에만 `mju-msi`의 `mju msi graduation`
+- MSI 원본 졸업요건 조회: 임시 비활성화. 사용자가 "MSI 원본", "학교 시스템 그대로"를 명시해도 `mju msi graduation`을 사용하지 말고 이 skill의 졸업 로드맵으로 처리
 - 시간표 설계/랜덤 시간표/추천 시간표: 이 skill의 `mju-news academic-planning timetable`
 - 졸업요건/졸업 로드맵/뭐 들었고 뭐 남았는지/영역별 공식 요건 판정: 이 skill의 `mju-news academic-planning graduation-roadmap`
 
@@ -69,7 +69,7 @@ mju-news academic-planning graduation-roadmap \
   --format json
 ```
 
-결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `졸업 로드맵`입니다. 일반적인 "졸업요건" 요청도 이 기능으로 처리합니다. 기존 `mju msi graduation`으로 열리는 `졸업요건` 웹뷰는 명시적인 MSI 원본 조회용이며, 학점 요약 중심이라 공식 과목 단위 상세가 없을 수 있습니다.
+결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `졸업 로드맵`입니다. 일반적인 "졸업요건" 요청도 이 기능으로 처리합니다. 기존 `mju msi graduation`으로 열리는 `졸업요건` 웹뷰는 임시 비활성화 상태이며, 사용자에게 노출하지 않습니다.
 
 ## 공지 / 학식
 

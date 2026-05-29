@@ -1,7 +1,7 @@
 ---
 name: mju-msi
 version: 1.1.0
-description: "현재 수강 시간표, 현재 학기 수강점수, 성적 이력, MSI 원본 졸업요건, 강의평가를 다루는 MSI skill."
+description: "현재 수강 시간표, 현재 학기 수강점수, 성적 이력, 강의평가를 다루는 MSI skill."
 metadata:
   openclaw:
     category: "service"
@@ -25,8 +25,7 @@ metadata:
   - 선택 옵션: `--year <연도> --term-code <학기코드>`
 - 전체 성적 이력: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi grade-history`
   - "지난 학기 성적", "성적 이력", "누적 평점" 요청에 사용합니다.
-- MSI 원본 졸업요건 조회: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi graduation`
-  - 사용자가 "MSI 원본", "학교 시스템 그대로"처럼 원본 조회를 명시한 경우에만 사용합니다.
+- MSI 원본 졸업요건 조회: 임시 비활성화 상태입니다. `mju msi graduation`을 사용자-facing 응답에 사용하지 말고, `getting-mju-news`의 졸업 로드맵을 사용합니다.
 - 강의평가 대상 조회: `mju --app-dir /data/users/<DISCORD_USER_ID> --format json msi lecture-evaluations list`
   - 결과 target의 `scope`가 `department`이면 교육만족도/재학생 만족도 조사이고, `course`이면 강의별 강의평가입니다.
   - 사용자가 "아무 과목이나"처럼 특정 과목을 정하지 않으면 `scope: "course"`인 미제출 target 중 첫 번째 사용 가능한 과목을 고릅니다.
@@ -46,4 +45,4 @@ metadata:
 - 시간표 설계, 랜덤 시간표, 추천 시간표, 전공/교양 개수 조합, 요일/교시 제외
 - 졸업요건, 졸업 로드맵, 졸업까지 남은 것, 들은 과목과 들어야 할 과목, 영역별 공식 요건 판정
 
-이 경우 `mju msi timetable`, `mju msi graduation`, `mju ucheck`를 사용하지 마세요. 일반적인 "졸업요건" 요청도 새 졸업 로드맵으로 대체합니다. 기존 MSI 명령은 이미 신청된 현재 상태나 학교 시스템 원본 요약을 명시적으로 조회할 때만 사용합니다.
+이 경우 `mju msi timetable`, `mju msi graduation`, `mju ucheck`를 사용하지 마세요. 일반적인 "졸업요건" 요청과 명시적인 원본 요청 모두 새 졸업 로드맵으로 대체합니다. 기존 MSI 졸업요건 명령은 임시 비활성화 상태입니다.

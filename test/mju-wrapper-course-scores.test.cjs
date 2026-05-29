@@ -136,7 +136,7 @@ bashTest("mju wrapper routes course-scores to the view API and injects viewUrl",
   assert.equal(output.courses[0].title, "0752 - 시스템클라우드보안");
 });
 
-for (const legacyCommand of ["current-grades", "grades"]) {
+for (const legacyCommand of ["current-grades", "grades", "graduation"]) {
   bashTest(`mju wrapper leaves msi ${legacyCommand} output unviewed`, async (t) => {
     const fixture = await createWrapperFixture(t, {
       items: [{ courseTitle: "시스템클라우드보안", grade: "A+" }],

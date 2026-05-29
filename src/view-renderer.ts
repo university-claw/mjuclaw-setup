@@ -18,7 +18,7 @@ const DATA_TYPE_META: Record<string, { kicker: string; detail: string }> = {
   "course-scores": { kicker: "COURSE SCORES", detail: "수강점수" },
   grades: { kicker: "GRADES", detail: "성적" },
   "grade-history": { kicker: "GRADE HISTORY", detail: "학기별 성적" },
-  graduation: { kicker: "졸업요건", detail: "졸업요건" },
+  graduation: { kicker: "졸업 로드맵", detail: "공식 요건 기반 로드맵" },
   "action-items": { kicker: "TODAY'S BRIEFING", detail: "지금 할 일" },
   unsubmitted: { kicker: "ASSIGNMENTS", detail: "미제출 과제" },
   "unread-notices": { kicker: "NOTICES", detail: "LMS 공지" },

@@ -9,7 +9,7 @@
 #   msi timetable      → timetable
 #   msi course-scores  → course-scores
 #   msi grade-history  → grade-history
-#   msi graduation     → graduation
+#   msi graduation     → disabled while graduation roadmap is the only user-facing graduation view
 #   ucheck ...         → attendance
 #   그 외              → generic
 #
@@ -64,7 +64,6 @@ detect_datatype() {
     *"msi timetable"*) echo "timetable" ;;
     *"msi course-scores"*) echo "course-scores" ;;
     *"msi grade-history"*) echo "grade-history" ;;
-    *"msi graduation"*) echo "graduation" ;;
     *"ucheck"*) echo "attendance" ;;
     *) echo "" ;;
   esac
@@ -78,7 +77,6 @@ title_for_datatype() {
     "timetable") echo "시간표" ;;
     "course-scores") echo "수강점수" ;;
     "grade-history") echo "학기별 성적" ;;
-    "graduation") echo "졸업요건" ;;
     "attendance") echo "출석" ;;
     *) echo "학사 데이터" ;;
   esac

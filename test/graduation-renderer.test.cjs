@@ -105,6 +105,13 @@ test("graduation keeps the total ring and inserts shortages before expandable ar
   assert.match(bodyHtml, /Free Elective/);
 });
 
+test("graduation chrome labels the shared view as the roadmap", () => {
+  const html = renderViewHtml(graduationEntry());
+
+  assert.match(html, /<span class="kicker">졸업 로드맵<\/span>/);
+  assert.match(html, /<div class="hero-eyebrow">공식 요건 기반 로드맵<\/div>/);
+});
+
 test("graduation keeps 0 of 0 credit meta but uses a neutral empty detail", () => {
   const creditLabel = "\uD559\uC810";
   const neutralEmpty = "\uC120\uD0DD \uC774\uC218 \uACFC\uC815\uC774\uB77C \uD604\uC7AC \uD45C\uC2DC\uD560 \uC138\uBD80 \uACFC\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
