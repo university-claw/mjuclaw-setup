@@ -27,7 +27,7 @@ jobs:
     if: ${{ github.event.inputs.mode == 'dry-run' }}
     environment: production
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     env:
       DEPLOY_WORKDIR: 'C:\Users\yoonh\Desktop\mjuclaw-setup'

@@ -25,9 +25,9 @@ jobs:
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.event == 'push'
-      )
+    )
     runs-on: [self-hosted, Windows, mjuclaw-prod-windows]
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     env:
       DEPLOY_WORKDIR: 'C:\Users\yoonh\Desktop\mjuclaw-setup'
