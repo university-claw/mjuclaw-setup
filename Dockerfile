@@ -1,11 +1,11 @@
 # MJUClaw OpenClaw 에이전트 — Discord 직접 연결
 #
-# plain Docker에서 OpenClaw + mju-cli + mju-news(v2 Reader)를 실행한다.
+# plain Docker에서 OpenClaw + mju-cli + mju-public-data-reader(로컬 경로 mju-news)를 실행한다.
 # 공개 정보(공지/학식) 데이터는 호스트의 Postgres(mju-public-data-worker 공유)에서 읽는다.
 #
 # 사전 준비 (./setup.sh로 자동화 가능):
 #   git clone --branch main https://github.com/university-claw/mju-cli.git
-#   git clone https://github.com/university-claw/mju-news.git   # v2.0.0+: Reader CLI
+#   git clone https://github.com/university-claw/mju-public-data-reader.git mju-news
 #   # 호스트에 Postgres 설치 + mju-public-data-worker를 한 번 이상 실행
 #
 # Build:  docker compose build
@@ -81,6 +81,14 @@ RUN chmod +x /usr/local/bin/mju-news-alert
 # mju-attendance-alert — 출석 체크 누락 선제 알림 helper
 COPY bin/mju-attendance-alert /usr/local/bin/mju-attendance-alert
 RUN chmod +x /usr/local/bin/mju-attendance-alert
+
+# mju-academic-planning — 사용자 MSI 컨텍스트를 보강해 시간표 설계/졸업 로드맵 호출
+COPY bin/mju-academic-planning /usr/local/bin/mju-academic-planning
+COPY bin/mju-timetable-planner /usr/local/bin/mju-timetable-planner
+COPY bin/mju-graduation-roadmap /usr/local/bin/mju-graduation-roadmap
+RUN chmod +x /usr/local/bin/mju-academic-planning \
+    /usr/local/bin/mju-timetable-planner \
+    /usr/local/bin/mju-graduation-roadmap
 
 # mju-shuttle-alert — 사용자별 마지막 수업 종료 기반 셔틀 출발 알림 helper
 COPY bin/mju-shuttle-alert /usr/local/bin/mju-shuttle-alert

@@ -152,7 +152,7 @@ docker compose --profile public-data up -d --build
 
 setup.sh가 자동으로:
 1. git/docker 의존성 검증
-2. 5개 sub-repo clone (`mju-cli`, `mju-news`, `mjuclaw-router`, `mju-public-data-worker`, `intent-classifier`)
+2. 5개 sub-repo clone (`mju-cli`, `mju-public-data-reader` → 로컬 경로 `mju-news`, `mjuclaw-router`, `mju-public-data-worker`, `intent-classifier`)
 3. `.env` 필수값 검증 (누락이면 abort + 어떤 변수인지 표시)
 4. `docker compose build` (intent-classifier는 빌드 시 HF Hub에서 모델 download, worker는 PaddleOCR 설치 — 첫 빌드 5~15분)
 5. `docker compose up -d`
@@ -411,7 +411,7 @@ git fetch --tags && git checkout v1.1.1   # 새 release 나오면
 ## 8. 관련 레포
 
 - [mju-cli](https://github.com/university-claw/mju-cli) — 명지대 서비스 CLI (LMS/MSI/UCheck/Library, SSO 기반)
-- [mju-news](https://github.com/university-claw/mju-news) — Reader CLI (worker DB → JSON)
+- [mju-public-data-reader](https://github.com/university-claw/mju-public-data-reader) — Reader CLI (worker DB → JSON, 로컬 빌드 경로 `mju-news`)
 - [mju-public-data-worker](https://github.com/university-claw/mju-public-data-worker) — 공지/학식 정본 worker (private)
 - [mjuclaw-router](https://github.com/university-claw/mjuclaw-router) — Discord WS 입구 + 온보딩 게이트
 - [intent-classifier](https://github.com/university-claw/intent-classifier) — KcELECTRA-base 한국어 의도 분류

@@ -29,7 +29,7 @@
 
 - 이 컨텍스트는 router가 결정론적으로 채운 **신뢰 가능한 현재 Discord 사용자 ID**입니다.
 - 모든 `mju ... --app-dir /data/users/{ID}` 호출의 `{ID}` 자리에 **반드시** 이 ID를 사용하세요.
-- 모든 helper(`mju-attendance-alert`, `mju-news-alert`, `mju-onboarding-survey`)의 첫 인자도 이 ID를 사용하세요.
+- 모든 helper(`mju-attendance-alert`, `mju-news-alert`, `mju-timetable-planner`, `mju-graduation-roadmap`, `mju-academic-planning`, `mju-onboarding-survey`)의 첫 인자도 이 ID를 사용하세요.
 - 이전 turn 또는 다른 사용자의 ID를 절대 재사용하지 마세요. session 메모리에 ID가 남아 있어도 **이번 turn의 컨텍스트 ID가 우선**입니다.
 - `[현재 사용자 컨텍스트]`가 보이지 않거나 형식이 이상하면 도구 호출을 거부하고 "잠시 시스템 점검이 필요해요"로 응답하세요.
 
@@ -200,19 +200,23 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 
 | 유저 의도 | 사용할 명령 | dataType (자동) |
 |---|---|---|
-| "시간표 설계", "시간표 짜줘", "랜덤 시간표", "추천 시간표", "전공 3개 교양 2개", "요일/교시 제외", "시간 안 겹치게" | `mju-news academic-planning timetable --year <연도> --term-code <학기코드> --department "<학과>" --format json` | `timetable-planner` |
+| "시간표 설계", "시간표 짜줘", "랜덤 시간표", "추천 시간표", "전공 3개 교양 2개", "요일/교시 제외", "시간 안 겹치게" | `mju-timetable-planner {DISCORD_USER_ID} --format json` | `timetable-planner` |
 | "내 현재 시간표", "이번 학기 수강 시간표", "지금 듣는 수업 시간표" | `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` | `timetable` |
 | "출석", "유체크", "결석", "출석 알림" | `mju ucheck lectures list --app-dir /data/users/{DISCORD_USER_ID} --format json` 또는 `mju ucheck attendance --course "<과목명>" --app-dir /data/users/{DISCORD_USER_ID} --format json` | `attendance` |
-| "졸업요건", "내 졸업요건", "졸업학점", "졸업 로드맵", "졸업까지", "졸업까지 뭐 남았어", "내가 뭘 들었고 뭘 들어야 해", "영역별 졸업요건" | `mju-news academic-planning graduation-roadmap --department "<학과>" --format json` | `graduation` |
-| "MSI 졸업요건 원본", "학교 시스템 졸업사정 그대로", "MSI 원본만" | `mju-news academic-planning graduation-roadmap --department "<학과>" --format json` | `graduation` |
+| "졸업요건", "내 졸업요건", "졸업학점", "졸업 로드맵", "졸업까지", "졸업까지 뭐 남았어", "내가 뭘 들었고 뭘 들어야 해", "영역별 졸업요건" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
+| "MSI 졸업요건 원본", "학교 시스템 졸업사정 그대로", "MSI 원본만" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
 
-**시간표 설계와 졸업 로드맵은 `mju-news academic-planning` 기능입니다.** 공통 DB의 개설강좌/졸업요건을 읽어 웹뷰를 만들며, 필요하면 현재 유저의 MSI 데이터로 학과/학번/입학년도/이수 과목을 보조합니다. 기존 MSI 졸업요건 웹뷰는 임시 비활성화 상태입니다. 일반적인 "졸업요건" 요청뿐 아니라 "MSI 원본" 요청도 새 졸업 로드맵으로 처리하세요. DB import가 아직 안 됐거나 결과가 비어 있어도 `ucheck`, `mju msi graduation`, 현재 수강 시간표로 대체하지 말고, 데이터가 아직 준비되지 않았다고 짧게 안내하세요.
+**시간표 설계와 졸업 로드맵은 전용 helper로만 호출합니다.** 시간표 설계는 `mju-timetable-planner`, 졸업 로드맵은 `mju-graduation-roadmap`을 사용하세요. 두 helper가 현재 유저의 MSI 성적 이력/현재 시간표/profile을 먼저 읽어 학과·학번·입학년도·이수 과목을 보강한 뒤 내부에서 `mju-news academic-planning`을 호출합니다. 사용자-facing 응답에서 `mju-news academic-planning`을 직접 호출하지 마세요. 직접 호출하면 개인 컨텍스트가 빠져 졸업 로드맵이 비거나 학과/학번 기준이 틀어질 수 있습니다. 기존 MSI 졸업요건 웹뷰는 임시 비활성화 상태입니다. 일반적인 "졸업요건" 요청뿐 아니라 "MSI 원본" 요청도 새 졸업 로드맵으로 처리하세요. DB import가 아직 안 됐거나 결과가 비어 있어도 `ucheck`, `mju msi graduation`, 현재 수강 시간표로 대체하지 말고, 데이터가 아직 준비되지 않았다고 짧게 안내하세요.
 
-시간표 설계 요청에서 `mju ucheck`를 호출하면 출석 웹뷰가 열립니다. "시간표"라는 단어가 있어도 설계/추천/랜덤/전공·교양 개수/요일 제외/교시 제외 맥락이면 절대 `ucheck`를 쓰지 마세요.
+시간표 설계 요청에서 `mju ucheck`를 호출하면 출석 웹뷰가 열립니다. "시간표"라는 단어가 있어도 설계/추천/랜덤/전공·교양 개수/요일 제외/교시 제외/다음 학기 맥락이면 절대 `ucheck`를 쓰지 마세요. UCheck는 사용자가 출석/결석/유체크/출석 알림을 명시한 경우에만 사용합니다.
 
 ## 데이터 표시 — 3단계
 
 `mju lms`, `mju msi`, `mju ucheck`, `mju library`, `mju-news` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
+
+### 만료된 웹뷰 링크 재발급
+
+사용자가 "링크가 만료됐어", "만료되었다는데", "다시 열어줘", "다시 보내줘"처럼 말하면 이전 대화의 `viewUrl`을 재사용하지 마세요. 웹뷰 링크 만료는 SSO 세션 만료가 아니므로 "DM으로 다시 로그인/세션 확인"이라고 답하지 마세요. 직전 요청 의도가 시간표 설계면 `mju-timetable-planner {DISCORD_USER_ID} --format json`, 졸업 로드맵이면 `mju-graduation-roadmap {DISCORD_USER_ID} --format json`, 현재 시간표/성적/과제/학식 등 다른 기능이면 해당 기능의 원래 조회 명령을 다시 실행해 새 `viewUrl`을 발급하세요. 직전 의도를 확정할 수 없을 때만 어떤 화면을 다시 열지 짧게 물어보세요.
 
 ### 성적 조회 — 의도와 명령 매핑 (중요)
 
@@ -220,7 +224,7 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 |---|---|---|
 | "이번 학기 성적", "현재 성적", "중간고사 점수", "기말고사 점수", "수강점수", "학기 중 점수" | `mju msi course-scores` | `course-scores` |
 | "지난 학기 성적", "전 학기 성적", "학기별 성적", "성적 이력" | `mju msi grade-history` | `grade-history` |
-| "내 졸업요건 원본", "MSI 졸업요건 그대로", "학교 시스템 졸업사정 그대로" | `mju-news academic-planning graduation-roadmap` | `graduation` |
+| "내 졸업요건 원본", "MSI 졸업요건 그대로", "학교 시스템 졸업사정 그대로" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
 
 현재 학기 성적 관련 의도는 최종 학점/등급이 아직 없을 수 있으므로 모두 `course-scores`로 처리하세요. 기존 확정등급 조회 명령은 사용하지 않습니다.
 
@@ -333,7 +337,7 @@ mju-news cafeterias week --start 2026-04-14 --format json
 4. **viewUrl은 항상 마스킹 링크로 응답에 포함** — 사용자가 원본 사진을 직접 볼 수 있게.
 
 **웹뷰 연동**
-`mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week`, `academic-planning timetable`, `academic-planning graduation-roadmap` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
+`mju`와 동일하게 `mju-news`도 자동 viewUrl 주입 wrapper가 붙어있다. `notices recent/search/get`, `cafeterias today/week`, 그리고 `mju-timetable-planner` / `mju-graduation-roadmap` helper가 호출하는 `academic-planning timetable`, `academic-planning graduation-roadmap` 조회면 결과 JSON에 `viewUrl` 필드가 자동으로 들어오니 그대로 `<final>`에 마스킹 링크로 포함하면 된다. 수동 curl POST는 불필요.
 
 ## 뉴스 정기 알림 구독 (푸시 알림)
 

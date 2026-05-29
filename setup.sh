@@ -5,7 +5,7 @@
 #   ./setup.sh
 #
 # 동작:
-#   1. mju-cli, mju-news, mju-public-data-worker를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
+#   1. mju-cli, mju-public-data-reader(로컬 경로 mju-news), mju-public-data-worker를 gitignore된 디렉토리에 clone (또는 이미 있으면 pull)
 #   2. .env 파일이 없으면 .env.example을 복사하고 유저에게 편집 안내
 #   3. docker compose build + up
 #
@@ -89,8 +89,9 @@ clone_or_pull() {
 }
 
 clone_or_pull mju-cli https://github.com/university-claw/mju-cli.git "$MJU_CLI_BRANCH"
-# mju-news v2.0.0+ : Reader CLI (worker DB 읽어서 JSON 제공).
-clone_or_pull mju-news https://github.com/university-claw/mju-news.git "$MJU_NEWS_BRANCH"
+# mju-public-data-reader : Reader CLI (worker DB 읽어서 JSON 제공).
+# Dockerfile 빌드 컨텍스트 호환을 위해 로컬 디렉토리명은 mju-news로 유지한다.
+clone_or_pull mju-news https://github.com/university-claw/mju-public-data-reader.git "$MJU_NEWS_BRANCH"
 # mjuclaw-router : Discord WS 입구 + 온보딩 게이트 + cron alert 우회 HTTP 서버.
 # OpenClaw 측 Discord 채널은 비활성화되며, 봇 토큰은 router가 단독 소유한다.
 clone_or_pull mjuclaw-router https://github.com/university-claw/mjuclaw-router.git "$MJUCLAW_ROUTER_BRANCH"

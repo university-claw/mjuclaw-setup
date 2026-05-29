@@ -48,22 +48,27 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   const newsSkill = fs.readFileSync(path.join(root, "skills", "getting-mju-news", "SKILL.md"), "utf8");
   const msiSkill = fs.readFileSync(path.join(root, "skills", "mju-msi", "SKILL.md"), "utf8");
 
-  assert.match(bootstrap, /시간표 설계[\s\S]*mju-news academic-planning timetable[\s\S]*timetable-planner/);
-  assert.match(bootstrap, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
-  assert.match(bootstrap, /"내 졸업요건"[\s\S]*"졸업학점"[\s\S]*"졸업까지"[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(bootstrap, /시간표 설계[\s\S]*mju-timetable-planner \{DISCORD_USER_ID\} --format json[\s\S]*timetable-planner/);
+  assert.match(bootstrap, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-graduation-roadmap \{DISCORD_USER_ID\} --format json/);
+  assert.match(bootstrap, /"내 졸업요건"[\s\S]*"졸업학점"[\s\S]*"졸업까지"[\s\S]*mju-graduation-roadmap \{DISCORD_USER_ID\} --format json/);
   assert.match(bootstrap, /일반적인 "졸업요건" 요청[\s\S]*새 졸업 로드맵/);
-  assert.match(bootstrap, /MSI 원본만[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(bootstrap, /MSI 원본만[\s\S]*mju-graduation-roadmap \{DISCORD_USER_ID\} --format json/);
+  assert.match(bootstrap, /mju-news academic-planning[\s\S]*직접 호출하지 마세요/);
   assert.match(bootstrap, /기존 MSI 졸업요건 웹뷰는 임시 비활성화/);
+  assert.match(bootstrap, /만료된 웹뷰 링크 재발급[\s\S]*이전 대화의 `viewUrl`을 재사용하지 마세요/);
+  assert.match(bootstrap, /웹뷰 링크 만료는 SSO 세션 만료가 아니므로[\s\S]*DM으로 다시 로그인\/세션 확인/);
   assert.doesNotMatch(bootstrap, /\|\s*"MSI 졸업요건 원본"[^|\n]*\|\s*`mju msi graduation/);
   assert.doesNotMatch(bootstrap, /\|\s*"내 졸업요건",\s*"졸업까지"\s*\|\s*`mju msi graduation`/);
   assert.doesNotMatch(bootstrap, /\|\s*"내 졸업요건 원본"[^|\n]*\|\s*`mju msi graduation`/);
   assert.match(bootstrap, /시간표 설계 요청[\s\S]*mju ucheck[\s\S]*출석 웹뷰/);
   assert.match(bootstrap, /DB import[\s\S]*ucheck[\s\S]*현재 수강 시간표로 대체하지 말고/);
 
-  assert.match(soul, /시간표 설계와 졸업 로드맵은 mju-news academic-planning/);
+  assert.match(soul, /시간표 설계와 졸업 로드맵은 전용 helper mju-timetable-planner \/ mju-graduation-roadmap/);
 
-  assert.match(newsSkill, /시간표 설계[\s\S]*mju-news academic-planning timetable/);
-  assert.match(newsSkill, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-news academic-planning graduation-roadmap/);
+  assert.match(newsSkill, /시간표 설계[\s\S]*mju-timetable-planner <DISCORD_USER_ID> --format json/);
+  assert.match(newsSkill, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-graduation-roadmap <DISCORD_USER_ID> --format json/);
+  assert.match(newsSkill, /mju-news academic-planning`을 직접 호출하지 말고 전용 helper/);
+  assert.match(newsSkill, /만료된 웹뷰 링크[\s\S]*이전 응답의 URL을 다시 보내지 않습니다/);
   assert.match(newsSkill, /일반적인 "졸업요건" 요청도 이 기능으로 처리/);
   assert.match(newsSkill, /기존 `mju msi graduation`[\s\S]*임시 비활성화/);
   assert.doesNotMatch(newsSkill, /mju-news list|mju-news scrape/);
@@ -73,7 +78,8 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   assert.doesNotMatch(msiSkill, /원본 조회를 명시한 경우에만 사용/);
   assert.match(msiSkill, /getting-mju-news[\s\S]*시간표 설계/);
   assert.match(msiSkill, /getting-mju-news[\s\S]*졸업요건[\s\S]*졸업 로드맵/);
-  assert.match(msiSkill, /일반적인 "졸업요건" 요청과 명시적인 원본 요청 모두 새 졸업 로드맵으로 대체/);
+  assert.match(msiSkill, /시간표 설계는 `mju-timetable-planner <DISCORD_USER_ID> --format json`/);
+  assert.match(msiSkill, /일반적인 "졸업요건" 요청과 명시적인 원본 요청은 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`으로 대체/);
 });
 
 test("webview wrappers keep academic planning separate from legacy MSI and UCheck views", () => {
@@ -87,6 +93,7 @@ test("webview wrappers keep academic planning separate from legacy MSI and UChec
   assert.match(mjuNewsWrapper, /"graduation"\) echo "졸업 로드맵"/);
 
   assert.match(mjuWrapper, /msi timetable"\*\) echo "timetable"/);
+  assert.match(mjuWrapper, /MJU_SKIP_VIEW/);
   assert.doesNotMatch(mjuWrapper, /msi graduation"\*\) echo "graduation"/);
   assert.match(mjuWrapper, /ucheck"\*\) echo "attendance"/);
   assert.doesNotMatch(mjuWrapper, /"graduation"\) echo "졸업요건"/);
@@ -112,6 +119,17 @@ test("Dockerfile copies repo-local skills after upstream mju-cli skills", () => 
   assert.ok(homeOverride > homeNews, "repo-local home skills should override upstream mju-news skills");
 });
 
+test("Dockerfile installs academic planning helper", () => {
+  const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
+
+  assert.match(dockerfile, /COPY bin\/mju-academic-planning \/usr\/local\/bin\/mju-academic-planning/);
+  assert.match(dockerfile, /COPY bin\/mju-timetable-planner \/usr\/local\/bin\/mju-timetable-planner/);
+  assert.match(dockerfile, /COPY bin\/mju-graduation-roadmap \/usr\/local\/bin\/mju-graduation-roadmap/);
+  assert.match(dockerfile, /chmod \+x \/usr\/local\/bin\/mju-academic-planning/);
+  assert.match(dockerfile, /\/usr\/local\/bin\/mju-timetable-planner/);
+  assert.match(dockerfile, /\/usr\/local\/bin\/mju-graduation-roadmap/);
+});
+
 test("setup pins mju-cli to the deployment branch", () => {
   const setup = fs.readFileSync(path.join(root, "setup.sh"), "utf8");
   const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
@@ -122,6 +140,9 @@ test("setup pins mju-cli to the deployment branch", () => {
   assert.match(setup, /MJU_CLI_BRANCH="\$\{MJU_CLI_BRANCH:-main\}"/);
   assert.match(setup, /git clone --branch "\$BRANCH" "\$REPO" "\$DIR"/);
   assert.match(setup, /clone_or_pull mju-cli https:\/\/github\.com\/university-claw\/mju-cli\.git "\$MJU_CLI_BRANCH"/);
+  assert.match(setup, /clone_or_pull mju-news https:\/\/github\.com\/university-claw\/mju-public-data-reader\.git "\$MJU_NEWS_BRANCH"/);
   assert.match(dockerfile, /git clone --branch main https:\/\/github\.com\/university-claw\/mju-cli\.git/);
+  assert.match(dockerfile, /git clone https:\/\/github\.com\/university-claw\/mju-public-data-reader\.git mju-news/);
   assert.match(readme, /git clone --branch main https:\/\/github\.com\/university-claw\/mju-cli\.git/);
+  assert.match(readme, /mju-public-data-reader/);
 });
