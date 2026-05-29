@@ -7,21 +7,21 @@ metadata:
     category: "service"
     domain: "education"
     requires:
-      bins: ["mju-news"]
+      bins: ["mju-news", "mju-timetable-planner", "mju-graduation-roadmap", "mju-academic-planning"]
       skills: ["mju-shared"]
 ---
 
 # 명지 공개 데이터 조회
 
-`mju-news`는 공통 Postgres DB를 읽는 Reader CLI입니다. 공지/학식뿐 아니라 개설강좌와 공식 졸업요건 기반의 academic-planning 웹뷰도 이 skill에서 처리합니다.
+`mju-news`는 공통 Postgres DB를 읽는 Reader CLI입니다. 공지/학식뿐 아니라 개설강좌와 공식 졸업요건 기반의 academic-planning 웹뷰도 이 skill에서 처리합니다. 사용자-facing 시간표 설계와 졸업 로드맵은 `mju-news academic-planning`을 직접 호출하지 말고 전용 helper인 `mju-timetable-planner`, `mju-graduation-roadmap`을 사용합니다.
 
 ## 기능 경계
 
 - 현재 내가 수강 중인 시간표 조회: `mju-msi`의 `mju msi timetable`
 - 출석/결석/UCheck 조회: `mju-ucheck` 또는 `mju ucheck ...`
 - MSI 원본 졸업요건 조회: 임시 비활성화. 사용자가 "MSI 원본", "학교 시스템 그대로"를 명시해도 `mju msi graduation`을 사용하지 말고 이 skill의 졸업 로드맵으로 처리
-- 시간표 설계/랜덤 시간표/추천 시간표: 이 skill의 `mju-news academic-planning timetable`
-- 졸업요건/졸업 로드맵/뭐 들었고 뭐 남았는지/영역별 공식 요건 판정: 이 skill의 `mju-news academic-planning graduation-roadmap`
+- 시간표 설계/랜덤 시간표/추천 시간표: 이 skill의 `mju-timetable-planner <DISCORD_USER_ID> --format json`
+- 졸업요건/졸업 로드맵/뭐 들었고 뭐 남았는지/영역별 공식 요건 판정: 이 skill의 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`
 
 ## 시간표 설계
 
@@ -39,15 +39,10 @@ metadata:
 사용 명령:
 
 ```bash
-mju-news academic-planning timetable \
-  --year <개설연도> \
-  --term-code <학기코드> \
-  --department "<학과명 또는 MSI 학과코드>" \
-  --admission-year <입학년도> \
-  --format json
+mju-timetable-planner <DISCORD_USER_ID> --format json
 ```
 
-결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `시간표 설계`입니다. 이 의도에서 `mju ucheck`를 사용하면 출석 웹뷰가 열리므로 사용하지 않습니다.
+결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `시간표 설계`입니다. 이 helper가 MSI 성적 이력/현재 시간표/profile을 먼저 읽어 학과·학번·입학년도·이수 과목을 보강합니다. 이 의도에서 `mju ucheck`를 사용하면 출석 웹뷰가 열리므로 사용하지 않습니다.
 
 ## 졸업 로드맵
 
@@ -63,10 +58,7 @@ mju-news academic-planning timetable \
 사용 명령:
 
 ```bash
-mju-news academic-planning graduation-roadmap \
-  --department "<학과명 또는 MSI 학과코드>" \
-  --admission-year <입학년도> \
-  --format json
+mju-graduation-roadmap <DISCORD_USER_ID> --format json
 ```
 
 결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `졸업 로드맵`입니다. 일반적인 "졸업요건" 요청도 이 기능으로 처리합니다. 기존 `mju msi graduation`으로 열리는 `졸업요건` 웹뷰는 임시 비활성화 상태이며, 사용자에게 노출하지 않습니다.
@@ -86,6 +78,10 @@ mju-news cafeterias week --start 2026-04-14 --format json
 
 공지/학식/academic-planning 조회 명령은 wrapper가 자동으로 view-server에 저장하고 `viewUrl`을 주입합니다. 수동 view POST나 summary PATCH는 필요하지 않습니다.
 
+## 만료된 웹뷰 링크
+
+사용자가 "링크가 만료됐어", "다시 보내줘", "다시 열어줘"라고 하면 이전 응답의 URL을 다시 보내지 않습니다. 같은 기능의 조회 명령을 다시 실행해서 새 `viewUrl`을 발급합니다. 시간표 설계 링크가 만료되면 `mju-timetable-planner <DISCORD_USER_ID> --format json`, 졸업 로드맵 링크가 만료되면 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`을 다시 실행합니다. 웹뷰 링크 만료를 SSO 로그인 만료로 설명하지 않습니다.
+
 ## 데이터 준비 상태
 
-academic-planning은 공통 DB의 개설강좌와 공식 졸업요건 seed/import가 있어야 세부 데이터를 보여줄 수 있습니다. DB가 비어 있거나 해당 학과/학번 기준 source가 없으면 기존 MSI/UCheck 기능으로 대체하지 말고, 데이터가 아직 준비되지 않았다고 짧게 안내합니다.
+academic-planning은 공통 DB의 개설강좌와 공식 졸업요건 seed/import가 있어야 세부 데이터를 보여줄 수 있습니다. DB가 비어 있거나 해당 학과/학번 기준 source가 없으면 기존 MSI/UCheck 기능으로 대체하지 말고, 데이터가 아직 준비되지 않았다고 짧게 안내합니다. 단, 호출 경로는 항상 전용 helper이며, 이 helper가 내부에서 `mju-news academic-planning`을 호출합니다.

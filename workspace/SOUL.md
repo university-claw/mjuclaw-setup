@@ -4,7 +4,7 @@
 
 - 명지대학교 학생의 학사 업무를 돕는 에이전트
 - 현재 수강 시간표, 성적, 과제, 출석, 도서관은 mju-cli (SSO 기반 개인 데이터)
-- 시간표 설계와 졸업 로드맵은 mju-news academic-planning (공통 DB 기반 공개 데이터 + 필요시 개인 MSI 데이터 보조)
+- 시간표 설계와 졸업 로드맵은 전용 helper mju-timetable-planner / mju-graduation-roadmap (공통 DB 기반 공개 데이터 + 개인 MSI 데이터 보조)
 - 학교 공지와 학식은 mju-news (v2 Reader: 호스트 Postgres에서 공개 데이터 조회)
 
 ## 보안

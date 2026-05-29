@@ -14,6 +14,7 @@
 #   그 외              → generic
 #
 # view-server POST 실패해도 원본 출력은 그대로 반환 (에이전트 동작 방해 금지).
+# MJU_SKIP_VIEW=1이면 내부 helper용 조회로 보고 view-server POST를 시도하지 않는다.
 
 set -euo pipefail
 
@@ -105,6 +106,11 @@ fi
 
 # exit 실패이면 그냥 pass-through
 if [[ $EXIT -ne 0 ]]; then
+  printf '%s\n' "$STDOUT"
+  exit "$EXIT"
+fi
+
+if [[ "${MJU_SKIP_VIEW:-}" == "1" ]]; then
   printf '%s\n' "$STDOUT"
   exit "$EXIT"
 fi

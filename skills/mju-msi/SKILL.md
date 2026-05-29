@@ -40,9 +40,9 @@ metadata:
 
 ## academic-planning과 구분
 
-다음 의도는 MSI 조회가 아니라 `getting-mju-news` skill의 `mju-news academic-planning` 기능입니다.
+다음 의도는 MSI 조회가 아니라 `getting-mju-news` skill의 전용 academic-planning helper 기능입니다.
 
 - 시간표 설계, 랜덤 시간표, 추천 시간표, 전공/교양 개수 조합, 요일/교시 제외
 - 졸업요건, 졸업 로드맵, 졸업까지 남은 것, 들은 과목과 들어야 할 과목, 영역별 공식 요건 판정
 
-이 경우 `mju msi timetable`, `mju msi graduation`, `mju ucheck`를 사용하지 마세요. 일반적인 "졸업요건" 요청과 명시적인 원본 요청 모두 새 졸업 로드맵으로 대체합니다. 기존 MSI 졸업요건 명령은 임시 비활성화 상태입니다.
+이 경우 `mju msi timetable`, `mju msi graduation`, `mju ucheck`, `mju-news academic-planning` 직접 호출을 사용하지 마세요. 시간표 설계는 `mju-timetable-planner <DISCORD_USER_ID> --format json`, 일반적인 "졸업요건" 요청과 명시적인 원본 요청은 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`으로 대체합니다. 기존 MSI 졸업요건 명령은 임시 비활성화 상태입니다.
