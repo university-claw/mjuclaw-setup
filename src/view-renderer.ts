@@ -6816,6 +6816,105 @@ function graduationSectionsFromRequirementSources(
   return [...sections.values()];
 }
 
+function graduationCompletedCoursesFromData(d: { completedCourses?: GraduationCourseRef[] }): GraduationCourseRef[] {
+  if (!Array.isArray(d.completedCourses)) return [];
+  return d.completedCourses.map((course) => {
+    if (typeof course === "string") return course;
+    return { ...course, status: course.status || "completed" };
+  });
+}
+
+function graduationCourseCredit(course: GraduationCourseRef): number {
+  if (typeof course === "string") return 0;
+  return graduationCreditNumber(course.credits ?? course.credit) ?? 0;
+}
+
+function graduationCourseCategory(course: GraduationCourseRef): string {
+  return typeof course === "string" ? "" : stringFrom(course.category);
+}
+
+function graduationCourseLooksLikeLiberal(course: GraduationCourseRef): boolean {
+  return /교양|liberal/i.test(graduationCourseCategory(course));
+}
+
+function graduationCourseMatchesSectionScore(course: GraduationCourseRef, section: GraduationRequirementSection): number {
+  const categoryKey = graduationCourseMatchKey(graduationCourseCategory(course));
+  const sectionKey = graduationCourseMatchKey(section.label);
+  if (!categoryKey || !sectionKey) return 0;
+  if (categoryKey === sectionKey) return 100;
+  if (/^전공|major/i.test(graduationCourseCategory(course)) && /전공|major/i.test(section.label)) return 80;
+  if (/교양|liberal/i.test(graduationCourseCategory(course)) && /교양학점|liberal credits/i.test(section.label)) return 40;
+  if (/자유선택|free elective/i.test(section.label)) return 5;
+  return 0;
+}
+
+function graduationApplyCompletedCourses(
+  creditGaps: GraduationRequirementSection[],
+  completedCourses: GraduationCourseRef[],
+): GraduationRequirementSection[] {
+  if (!completedCourses.length || !creditGaps.length) return creditGaps;
+
+  // Graduation roadmap readers can provide official requirements and taken-course history
+  // as separate top-level payloads. The view must merge them before rendering area cards.
+  const sections = creditGaps.map((section) => ({
+    ...section,
+    completedCourses: [...(section.completedCourses ?? [])],
+  }));
+  const assignments = new Map<number, GraduationCourseRef[]>();
+
+  completedCourses.forEach((course) => {
+    let bestIndex = -1;
+    let bestScore = 0;
+    sections.forEach((section, index) => {
+      if (graduationSectionLooksLikeTotal(section)) return;
+      const score = graduationCourseMatchesSectionScore(course, section);
+      if (score > bestScore) {
+        bestIndex = index;
+        bestScore = score;
+      }
+    });
+    if (bestIndex < 0 || bestScore <= 0) return;
+    assignments.set(bestIndex, [...(assignments.get(bestIndex) ?? []), course]);
+  });
+
+  sections.forEach((section, index) => {
+    const completed = assignments.get(index) ?? [];
+    if (completed.length) {
+      section.completedCourses = graduationAppendUniqueCourses(section.completedCourses ?? [], completed);
+      const completedCredits = completed.reduce((sum, course) => sum + graduationCourseCredit(course), 0);
+      const currentEarned = graduationCreditNumber(section.earned) ?? 0;
+      if (completedCredits > currentEarned) section.earned = completedCredits;
+    }
+    const required = graduationCreditNumber(section.required);
+    const earned = graduationCreditNumber(section.earned);
+    if (required != null && earned != null) section.gap = Math.max(0, required - earned);
+  });
+
+  const liberalCreditSection = sections.find(graduationSectionLooksLikeLiberalCreditRollup);
+  if (liberalCreditSection) {
+    const liberalCredits = completedCourses
+      .filter(graduationCourseLooksLikeLiberal)
+      .reduce((sum, course) => sum + graduationCourseCredit(course), 0);
+    const currentEarned = graduationCreditNumber(liberalCreditSection.earned) ?? 0;
+    if (liberalCredits > currentEarned) liberalCreditSection.earned = liberalCredits;
+    const required = graduationCreditNumber(liberalCreditSection.required);
+    const earned = graduationCreditNumber(liberalCreditSection.earned);
+    if (required != null && earned != null) liberalCreditSection.gap = Math.max(0, required - earned);
+  }
+
+  const totalSection = sections.find(graduationSectionLooksLikeTotal);
+  if (totalSection) {
+    const totalCompletedCredits = completedCourses.reduce((sum, course) => sum + graduationCourseCredit(course), 0);
+    const currentEarned = graduationCreditNumber(totalSection.earned) ?? 0;
+    if (totalCompletedCredits > currentEarned) totalSection.earned = totalCompletedCredits;
+    const required = graduationCreditNumber(totalSection.required);
+    const earned = graduationCreditNumber(totalSection.earned);
+    if (required != null && earned != null) totalSection.gap = Math.max(0, required - earned);
+  }
+
+  return sections;
+}
+
 function mergeGraduationRequirementSources(
   creditGaps: GraduationRequirementSection[],
   sources: GraduationRequirementSource[],
@@ -6958,6 +7057,14 @@ function graduationTotalSection(creditGaps: GraduationRequirementSection[]): Gra
   return creditGaps.find((section) => /총|최소/.test(section.label));
 }
 
+function graduationSectionLooksLikeTotal(section: GraduationRequirementSection): boolean {
+  return section === graduationTotalSection([section]) || /총|최소|total/i.test(section.label);
+}
+
+function graduationSectionLooksLikeLiberalCreditRollup(section: GraduationRequirementSection): boolean {
+  return /교양학점|liberal credits/i.test(section.label);
+}
+
 function renderGraduation(data: unknown): string {
   const d = (data && typeof data === "object" && !Array.isArray(data) ? data : {}) as {
     creditGaps?: GraduationRequirementSection[];
@@ -6977,6 +7084,7 @@ function renderGraduation(data: unknown): string {
     requiredCourses?: GraduationCourseRef[];
     missingRequiredCourses?: GraduationCourseRef[];
     completedRequiredCourses?: GraduationCourseRef[];
+    completedCourses?: GraduationCourseRef[];
     overall?: { earned?: unknown; required?: unknown; pct?: unknown };
   };
   const choiceGroups = normalizeRequirementChoiceGroups(d as Record<string, unknown>, "graduation");
@@ -6988,8 +7096,11 @@ function renderGraduation(data: unknown): string {
   }
 
   const queryMeta = graduationQueryMeta(graduationQueryContext(d, requirementSources));
-  const creditGaps = normalizeGraduationChapelSections(mergeGraduationRequirementSources(rawCreditGaps, requirementSources));
-  const totalSection = graduationTotalSection(creditGaps);
+  const mergedCreditGaps = mergeGraduationRequirementSources(rawCreditGaps, requirementSources);
+  const creditGaps = normalizeGraduationChapelSections(
+    graduationApplyCompletedCourses(mergedCreditGaps, graduationCompletedCoursesFromData(d)),
+  );
+  const totalSection = creditGaps.find(graduationSectionLooksLikeTotal);
   const rollupSections = totalSection ? creditGaps.filter((section) => section !== totalSection) : creditGaps;
   const totalEarned = graduationCreditNumber(d.overall?.earned, "총 취득학점") ?? graduationCreditNumber(totalSection?.earned) ?? rollupSections.reduce((a, g) => a + (graduationCreditNumber(g.earned) ?? 0), 0);
   const totalReq = graduationCreditNumber(d.overall?.required, "총 취득학점") ?? graduationCreditNumber(totalSection?.required) ?? rollupSections.reduce((a, g) => a + (graduationCreditNumber(g.required) ?? 0), 0);

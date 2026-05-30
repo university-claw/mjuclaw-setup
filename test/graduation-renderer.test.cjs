@@ -641,6 +641,98 @@ test("graduation renders official requirements-only output without the removed c
   assert.match(html, /href="https:\/\/cs\.mju\.ac\.kr\/cs\/10763\/subview\.do"/);
 });
 
+test("graduation applies top-level completed courses to official requirement sections", () => {
+  const html = renderViewHtml({
+    ...graduationEntry(),
+    title: "Graduation Roadmap",
+    rawData: {
+      query: {
+        department: "Computer Engineering",
+        admissionYear: 2024,
+      },
+      completedCourses: [
+        {
+          courseTitle: "English 1",
+          courseCode: "ENG101",
+          credits: 2,
+          category: "Common Liberal",
+          termLabel: "2024 1",
+        },
+        {
+          courseTitle: "Data Structures",
+          courseCode: "CSE201",
+          credits: 3,
+          category: "Major Stage 1",
+          termLabel: "2024 2",
+        },
+        {
+          courseTitle: "Critical Thinking",
+          courseCode: "LIB201",
+          credits: 3,
+          category: "Core Liberal",
+          termLabel: "2024 2",
+        },
+      ],
+      items: [
+        {
+          department: "Computer Engineering",
+          admissionYear: 2024,
+          sourceTitle: "Computer Engineering requirements",
+          sourceUrl: "https://example.test/cse",
+          rules: [
+            {
+              requirementKey: "common-liberal",
+              label: "Common Liberal",
+              category: "Common Liberal",
+              requiredCredits: 4,
+              requiredCourseTitles: ["English 1"],
+              status: "confirmed",
+            },
+            {
+              requirementKey: "major",
+              label: "Major",
+              category: "Major",
+              requiredCredits: 6,
+              requiredCourseTitles: ["Data Structures"],
+              status: "confirmed",
+            },
+            {
+              requirementKey: "core-liberal",
+              label: "Core Liberal",
+              category: "Core Liberal",
+              requiredCredits: 3,
+              requiredCourseTitles: ["Critical Thinking"],
+              status: "confirmed",
+            },
+            {
+              requirementKey: "liberal-credits",
+              label: "Liberal Credits",
+              category: "Liberal Credits",
+              requiredCredits: 5,
+              status: "confirmed",
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  const commonCard = graduationAreaCardHtml(html, "Common Liberal");
+  const majorCard = graduationAreaCardHtml(html, "Major");
+  const coreCard = graduationAreaCardHtml(html, "Core Liberal");
+  const liberalCreditsCard = graduationAreaCardHtml(html, "Liberal Credits");
+
+  assert.match(commonCard, /2 \/ 4/);
+  assert.match(majorCard, /3 \/ 6/);
+  assert.match(coreCard, /3 \/ 3/);
+  assert.match(liberalCreditsCard, /5 \/ 5/);
+  assert.match(graduationCourseRowHtml(html, "ENG101 - English 1"), /data-grad-status="completed"/);
+  assert.match(graduationCourseRowHtml(html, "CSE201 - Data Structures"), /data-grad-status="completed"/);
+  assert.match(graduationCourseRowHtml(html, "LIB201 - Critical Thinking"), /data-grad-status="completed"/);
+  assert.doesNotMatch(commonCard, /data-grad-name="English 1"[\s\S]*data-grad-status="missing"/);
+  assert.doesNotMatch(majorCard, /data-grad-name="Data Structures"[\s\S]*data-grad-status="missing"/);
+});
+
 test("graduation keeps official requirements query context in the roadmap", () => {
   const html = renderViewHtml({
     ...graduationEntry(),
