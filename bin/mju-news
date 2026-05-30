@@ -76,8 +76,9 @@ title_for() {
 
 STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stderr.XXXXXX")
 STDOUT_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stdout.XXXXXX")
+ENRICHED_STDOUT_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-enriched-stdout.XXXXXX")
 REQUEST_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-view-body.XXXXXX")
-trap 'rm -f "$STDERR_FILE" "$STDOUT_FILE" "$REQUEST_BODY_FILE"' EXIT
+trap 'rm -f "$STDERR_FILE" "$STDOUT_FILE" "$ENRICHED_STDOUT_FILE" "$REQUEST_BODY_FILE"' EXIT
 
 set +e
 STDOUT=$("$NODE_BIN" "$REAL_MJU_NEWS" "$@" 2>"$STDERR_FILE")
@@ -113,9 +114,97 @@ fi
 
 TITLE=$(title_for "$DATA_TYPE" "$*")
 
+COMMAND_FAMILY="${1:-}"
+if [[ -n "${2:-}" ]]; then
+  COMMAND_FAMILY="$COMMAND_FAMILY ${2:-}"
+fi
+
+PYTHONIOENCODING=utf-8 \
+  RAW_STDOUT_FILE="$STDOUT_FILE" \
+  ENRICHED_STDOUT_FILE="$ENRICHED_STDOUT_FILE" \
+  DATA_TYPE="$DATA_TYPE" \
+  COMMAND_FAMILY="$COMMAND_FAMILY" \
+  REAL_MJU_NEWS="$REAL_MJU_NEWS" \
+  NODE_BIN="$NODE_BIN" \
+  "$PYTHON_BIN" - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+
+
+def source_lengths(data):
+    result = {}
+    for key in ("entries", "items", "courses", "catalog"):
+        value = data.get(key)
+        result[key] = len(value) if isinstance(value, list) else 0
+    return result
+
+
+def first_source_key(lengths):
+    for key in ("entries", "items", "courses", "catalog"):
+        if lengths.get(key, 0) > 0:
+            return key
+    return "none"
+
+
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
+
+try:
+    data = json.loads(raw)
+except Exception:
+    data = None
+
+if isinstance(data, dict):
+    lengths = source_lengths(data)
+    payload_diagnostics = data.get("payloadDiagnostics")
+    catalog_diagnostics = data.get("courseCatalogDiagnostics") or data.get("catalogDiagnostics")
+    wrapper_diagnostics = data.get("wrapperDiagnostics")
+    if not isinstance(wrapper_diagnostics, dict):
+        wrapper_diagnostics = {}
+
+    wrapper_diagnostics.update({
+        "diagnosticVersion": 1,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "producer": "mju-news-wrapper",
+        "dataType": os.environ.get("DATA_TYPE", ""),
+        "commandFamily": os.environ.get("COMMAND_FAMILY", "").strip(),
+        "runtime": {
+            "realMjuNews": os.environ.get("REAL_MJU_NEWS", ""),
+            "nodeBin": os.environ.get("NODE_BIN", ""),
+        },
+        "output": {
+            "hasPayloadDiagnostics": isinstance(payload_diagnostics, dict),
+            "hasCourseCatalogDiagnostics": isinstance(catalog_diagnostics, dict),
+            "hasDataReadiness": isinstance(data.get("dataReadiness"), list),
+            "topLevelKeyCount": len(data.keys()),
+            "sourceKey": first_source_key(lengths),
+            **{f"{key}Count": count for key, count in lengths.items()},
+        },
+        "topLevelKeys": sorted(str(key) for key in data.keys())[:64],
+    })
+
+    hints = []
+    if os.environ.get("COMMAND_FAMILY", "").strip().startswith("academic-planning"):
+        if not isinstance(payload_diagnostics, dict):
+            hints.append("academic-planning output has no payloadDiagnostics; reader build/path may be stale or this view may be an older saved payload.")
+        if os.environ.get("DATA_TYPE") == "timetable-planner" and not isinstance(catalog_diagnostics, dict):
+            hints.append("academic-planning timetable output has no courseCatalogDiagnostics; DB/department-filter diagnosis is not available from this payload.")
+    if hints:
+        wrapper_diagnostics["hints"] = hints
+
+    data["wrapperDiagnostics"] = wrapper_diagnostics
+    enriched = json.dumps(data, ensure_ascii=False)
+else:
+    enriched = raw
+
+with open(os.environ["ENRICHED_STDOUT_FILE"], "w", encoding="utf-8") as handle:
+    handle.write(enriched)
+PY
+
 # academic-planning 결과처럼 큰 JSON은 shell argv 제한을 넘을 수 있으므로
 # view-server 요청 body는 temp file로 넘긴다.
-PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" REQUEST_BODY_FILE="$REQUEST_BODY_FILE" "$PYTHON_BIN" - <<'PY'
+PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$ENRICHED_STDOUT_FILE" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" REQUEST_BODY_FILE="$REQUEST_BODY_FILE" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
@@ -160,7 +249,7 @@ PY
 )
 
 if [[ -n "$VIEW_URL" ]]; then
-  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" VIEW_URL="$VIEW_URL" "$PYTHON_BIN" - <<'PY'
+  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$ENRICHED_STDOUT_FILE" VIEW_URL="$VIEW_URL" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
@@ -179,7 +268,8 @@ except Exception:
     print(raw)
 PY
 else
-  printf '%s\n' "$STDOUT"
+  cat "$ENRICHED_STDOUT_FILE"
+  printf '\n'
 fi
 
 exit "$EXIT"
