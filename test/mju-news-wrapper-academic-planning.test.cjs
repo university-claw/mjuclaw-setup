@@ -145,6 +145,7 @@ bashTest("mju-news wrapper routes course catalog reads to the timetable planner 
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/timetable-planner");
+  assert.equal(output.viewDataType, "timetable-planner");
 });
 
 bashTest("mju-news wrapper leaves standalone graduation requirements unviewed", async (t) => {
@@ -212,6 +213,7 @@ bashTest("mju-news wrapper routes academic-planning timetable to the timetable p
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/academic-timetable");
+  assert.equal(output.viewDataType, "timetable-planner");
 });
 
 bashTest("mju-news wrapper posts large academic-planning payload through a body file", async (t) => {
@@ -286,6 +288,7 @@ bashTest("mju-news wrapper routes academic-planning graduation-roadmap to the gr
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/academic-graduation");
+  assert.equal(output.viewDataType, "graduation");
 });
 
 async function fileExists(filePath) {

@@ -138,7 +138,33 @@ bashTest("mju wrapper routes course-scores to the view API and injects viewUrl",
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/course-scores-test");
+  assert.equal(output.viewDataType, "course-scores");
   assert.equal(output.courses[0].title, "0752 - 시스템클라우드보안");
+});
+
+bashTest("mju wrapper routes current MSI timetable to timetable webview metadata", async (t) => {
+  const fixture = await createWrapperFixture(t, {
+    entries: [{ courseTitle: "Capstone Design", classroom: "Y5441" }],
+  });
+
+  const result = await run("bash", ["-lc", wrapperCommand(fixture, [
+    "msi",
+    "timetable",
+    "--app-dir",
+    toBashPath(path.join(fixture.testDir, "app")),
+    "--format",
+    "json",
+  ])], { cwd: fixture.root });
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const requestBody = JSON.parse(await fs.readFile(fixture.curlCapture, "utf8"));
+  assert.equal(requestBody.dataType, "timetable");
+  assert.notEqual(requestBody.dataType, "attendance");
+
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.viewDataType, "timetable");
+  assert.equal(output.entries[0].courseTitle, "Capstone Design");
 });
 
 for (const legacyCommand of ["current-grades", "grades", "graduation"]) {

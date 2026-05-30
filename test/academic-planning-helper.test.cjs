@@ -57,7 +57,7 @@ function run(command, args, options) {
   });
 }
 
-async function createFixture(t) {
+async function createFixture(t, options = {}) {
   const testDir = path.join(root, ".tmp", `academic-planning-helper-${process.pid}-${Math.random().toString(16).slice(2)}`);
   await fs.rm(testDir, { recursive: true, force: true });
   await fs.mkdir(testDir, { recursive: true });
@@ -67,6 +67,8 @@ async function createFixture(t) {
   await fs.mkdir(stubBin, { recursive: true });
   const mjuCalls = path.join(testDir, "mju-calls.txt");
   const mjuNewsArgs = path.join(testDir, "mju-news-args.txt");
+  const gradeHistoryFails = Boolean(options.gradeHistoryFails);
+  const mjuNewsViewDataType = options.mjuNewsViewDataType ?? "";
 
   const python3Stub = path.join(stubBin, "python3");
   await fs.writeFile(python3Stub, `#!/usr/bin/env bash
@@ -91,6 +93,10 @@ case "$joined" in
 JSON
     ;;
   *" msi grade-history"*)
+    if [[ "${gradeHistoryFails ? "1" : "0"}" == "1" ]]; then
+      echo "grade history boom for 123456789012345678" >&2
+      exit 42
+    fi
     cat <<'JSON'
 {"studentInfo":{"학과":"컴퓨터공학과","학번":"202112345"},"termRecords":[{"year":2021,"termLabel":"1학기","courses":[{"courseTitle":"미적분학1","courseCode":"KME02101","credit":3,"categoryLabel":"학문기초교양"}]}]}
 JSON
@@ -117,18 +123,29 @@ esac
   await fs.writeFile(mjuNewsStub, `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$@" > "${toBashPath(mjuNewsArgs)}"
-printf '{"viewUrl":"http://view.local/%s","ok":true}\\n' "\${2:-unknown}"
+mode="\${2:-unknown}"
+case "$mode" in
+  timetable) dtype="timetable-planner" ;;
+  graduation-roadmap) dtype="graduation" ;;
+  *) dtype="unknown" ;;
+esac
+if [[ -n "${mjuNewsViewDataType}" ]]; then
+  dtype="${mjuNewsViewDataType}"
+fi
+printf '{"viewUrl":"http://view.local/%s","viewDataType":"%s","ok":true}\\n' "$mode" "$dtype"
 `, "utf8");
   await fs.chmod(mjuNewsStub, 0o755);
 
   return { stubBin, mjuCalls, mjuNewsArgs };
 }
 
-async function runHelper(fixture, args) {
+async function runHelper(fixture, args, env = {}) {
   const helper = toBashPath(path.join(root, "bin", "mju-academic-planning"));
+  const envAssignments = Object.entries(env).map(([key, value]) => `${key}=${shellQuote(value)}`);
   const command = [
     `PATH=${shellQuote(toBashPath(fixture.stubBin))}:$PATH`,
     "MJU_ACADEMIC_PLANNING_KEEP_TMP=1",
+    ...envAssignments,
     shellQuote(helper),
     ...args.map(shellQuote),
   ].join(" ");
@@ -145,6 +162,14 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
+function diagnosticEvents(stderr) {
+  const prefix = "MJU_ACADEMIC_PLANNING_DIAG ";
+  return stderr
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith(prefix))
+    .map((line) => JSON.parse(line.slice(prefix.length)));
+}
+
 bashTest("academic planning helper enriches graduation roadmap calls with MSI context", async (t) => {
   const fixture = await createFixture(t);
   const result = await runHelper(fixture, [
@@ -156,6 +181,7 @@ bashTest("academic planning helper enriches graduation roadmap calls with MSI co
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /"viewUrl":"http:\/\/view\.local\/graduation-roadmap"/);
+  assert.match(result.stdout, /"viewDataType":"graduation"/);
 
   const args = await readArgs(fixture.mjuNewsArgs);
   assert.deepEqual(args.slice(0, 2), ["academic-planning", "graduation-roadmap"]);
@@ -188,6 +214,7 @@ bashTest("academic planning helper routes timetable generation without UCheck", 
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /"viewUrl":"http:\/\/view\.local\/timetable"/);
+  assert.match(result.stdout, /"viewDataType":"timetable-planner"/);
 
   const args = await readArgs(fixture.mjuNewsArgs);
   assert.deepEqual(args.slice(0, 2), ["academic-planning", "timetable"]);
@@ -202,4 +229,64 @@ bashTest("academic planning helper routes timetable generation without UCheck", 
   assert.match(mjuCalls, /msi grade-history/);
   assert.match(mjuCalls, /msi department-timetable/);
   assert.doesNotMatch(mjuCalls, /ucheck/);
+});
+
+bashTest("academic planning helper defaults timetable planning to the published first semester in May", async (t) => {
+  const fixture = await createFixture(t);
+  const result = await runHelper(fixture, [
+    "timetable",
+    "123456789012345678",
+    "--format",
+    "json",
+  ], { MJU_ACADEMIC_PLANNING_NOW: "2026-05-30T12:00:00" });
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const args = await readArgs(fixture.mjuNewsArgs);
+  assert.deepEqual(args.slice(0, 2), ["academic-planning", "timetable"]);
+  assert.equal(valueAfter(args, "--year"), "2026");
+  assert.equal(valueAfter(args, "--term-code"), "10");
+});
+
+bashTest("academic planning helper emits structured diagnostics when required MSI context fails", async (t) => {
+  const fixture = await createFixture(t, { gradeHistoryFails: true });
+  const result = await runHelper(fixture, [
+    "graduation-roadmap",
+    "123456789012345678",
+    "--format",
+    "json",
+  ]);
+
+  assert.equal(result.status, 42);
+  assert.doesNotMatch(result.stderr, /123456789012345678/);
+  const events = diagnosticEvents(result.stderr);
+  const failure = events.find((event) => event.stage === "msi.grade-history");
+  assert.ok(failure, result.stderr);
+  assert.equal(failure.feature, "academic-planning");
+  assert.equal(failure.mode, "graduation-roadmap");
+  assert.equal(failure.status, "failed");
+  assert.equal(failure.exitCode, 42);
+  assert.match(failure.stderrTail, /grade history boom/);
+});
+
+bashTest("academic planning helper rejects mismatched webview data types", async (t) => {
+  const fixture = await createFixture(t, { mjuNewsViewDataType: "attendance" });
+  const result = await runHelper(fixture, [
+    "timetable",
+    "123456789012345678",
+    "--year",
+    "2026",
+    "--term-code",
+    "20",
+    "--format",
+    "json",
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /"viewDataType":"attendance"/);
+  const events = diagnosticEvents(result.stderr);
+  const failure = events.find((event) => event.stage === "view.validate");
+  assert.ok(failure, result.stderr);
+  assert.equal(failure.status, "failed");
+  assert.match(failure.stderrTail, /expected=timetable-planner/);
 });
