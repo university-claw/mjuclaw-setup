@@ -31,6 +31,12 @@ test("dedicated academic planning commands delegate to the shared helper modes",
   assert.match(graduationRoadmap, /exec mju-academic-planning graduation-roadmap "\$@"/);
 });
 
+test("academic planning helper defaults timetable planning to the available first-term catalog window", async () => {
+  const helper = await fs.readFile(path.join(root, "bin", "mju-academic-planning"), "utf8");
+
+  assert.match(helper, /elif month <= 8:\n    print\(f"\{year\} 10"\)/);
+});
+
 function toBashPath(filePath) {
   const normalized = path.resolve(filePath).replace(/\\/g, "/");
   const driveMatch = normalized.match(/^([A-Za-z]):\/(.*)$/);

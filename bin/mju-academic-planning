@@ -87,7 +87,7 @@ month = now.month
 if month <= 2:
     print(f"{year} 10")
 elif month <= 8:
-    print(f"{year} 20")
+    print(f"{year} 10")
 else:
     print(f"{year + 1} 10")
 PY

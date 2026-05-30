@@ -67,6 +67,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         mju-cli: ./mju-cli
+        mju-news: ./mju-news
     container_name: mjuclaw-router
     restart: unless-stopped
     extra_hosts:
@@ -77,6 +78,7 @@ services:
       - USER_DATA_ROOT=/data/users
       - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://mjuclaw-agent:18789}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - VIEW_SERVER_URL=${VIEW_SERVER_URL:-http://mjuclaw-agent:3001}
       # docker-compose 내부 네트워크(trusted private)에서만 접근하므로 plaintext ws://
       # 허용. 외부 노출 시 wss:// + 인증서로 전환할 것.
       - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
@@ -91,6 +93,13 @@ services:
       - CLASSIFIER_URL=${CLASSIFIER_URL:-http://mjuclaw-classifier:3200}
       - CLASSIFIER_AUTH_TOKEN=${CLASSIFIER_AUTH_TOKEN}
       - CLASSIFIER_TIMEOUT_MS=${CLASSIFIER_TIMEOUT_MS:-2500}
+      # 공개 데이터 Reader(mju-news)가 시간표 설계/졸업 로드맵 공통 DB를 읽는다.
+      - PGHOST=${PGHOST:-host.docker.internal}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-mjuclaw}
+      - PGUSER=${PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSCHEMA=${PGSCHEMA:-public_data}
       # mju-cli postgres 백엔드 (vault read/write를 router도 동일 ROLE로 수행)
       - MJU_STORAGE=${MJU_STORAGE:-postgres}
       - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
