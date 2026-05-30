@@ -142,9 +142,13 @@ bashTest("mju-news wrapper routes course catalog reads to the timetable planner 
   assert.equal(requestBody.dataType, "timetable-planner");
   assert.equal(requestBody.title, "시간표 설계");
   assert.equal(requestBody.rawData.items[0].meetings[0].location, "Y5441");
+  assert.equal(requestBody.rawData.wrapperDiagnostics.producer, "mju-news-wrapper");
+  assert.equal(requestBody.rawData.wrapperDiagnostics.dataType, "timetable-planner");
+  assert.equal(requestBody.rawData.wrapperDiagnostics.output.itemsCount, 1);
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/timetable-planner");
+  assert.equal(output.wrapperDiagnostics.output.sourceKey, "items");
 });
 
 bashTest("mju-news wrapper leaves standalone graduation requirements unviewed", async (t) => {
@@ -212,6 +216,8 @@ bashTest("mju-news wrapper routes academic-planning timetable to the timetable p
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/academic-timetable");
+  assert.equal(output.wrapperDiagnostics.commandFamily, "academic-planning timetable");
+  assert.equal(output.wrapperDiagnostics.output.hasPayloadDiagnostics, false);
 });
 
 bashTest("mju-news wrapper posts large academic-planning payload through a body file", async (t) => {
