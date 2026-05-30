@@ -102,6 +102,7 @@ done
 need_bin mju
 need_bin mju-news
 need_bin python3
+need_bin curl
 
 default_term() {
   python3 - <<'PY'
@@ -397,6 +398,8 @@ INFO_JSON="$TMP_DIR/info.json"
 CONTEXT_STDERR="$TMP_DIR/context.stderr"
 MJU_NEWS_STDOUT="$TMP_DIR/mju-news.stdout"
 MJU_NEWS_STDERR="$TMP_DIR/mju-news.stderr"
+MJU_NEWS_ENRICHED_JSON="$TMP_DIR/mju-news.enriched.json"
+VIEW_REQUEST_BODY="$TMP_DIR/view-request-body.json"
 
 SKIP_VIEW_ENV="${MJU_ACADEMIC_PLANNING_SKIP_VIEW:-1}"
 
@@ -637,8 +640,10 @@ fi
 MJU_NEWS_ARGS+=("--personal-msi-json" "$PERSONAL_JSON")
 MJU_NEWS_ARGS+=("--completed-courses-json" "$GRADE_HISTORY_JSON")
 
+MJU_NEWS_PATH="$(command -v mju-news || true)"
+
 diag "public_data" "academic_planning_run"
-if ! mju-news "${MJU_NEWS_ARGS[@]}" > "$MJU_NEWS_STDOUT" 2> "$MJU_NEWS_STDERR"; then
+if ! MJU_NEWS_SKIP_VIEW=1 mju-news "${MJU_NEWS_ARGS[@]}" > "$MJU_NEWS_STDOUT" 2> "$MJU_NEWS_STDERR"; then
   DETAIL=$(classify_public_data_failure "$MJU_NEWS_STDOUT" "$MJU_NEWS_STDERR")
   diag "public_data" "$DETAIL"
   echo "ERR: failed to build academic planning payload" >&2
@@ -646,6 +651,209 @@ if ! mju-news "${MJU_NEWS_ARGS[@]}" > "$MJU_NEWS_STDOUT" 2> "$MJU_NEWS_STDERR"; 
   cat "$MJU_NEWS_STDOUT" >&2 2>/dev/null || true
   exit 1
 fi
-cat "$MJU_NEWS_STDOUT"
+
+case "$MODE" in
+  timetable)
+    VIEW_DATA_TYPE="timetable-planner"
+    VIEW_TITLE="시간표 설계"
+    ;;
+  graduation-roadmap)
+    VIEW_DATA_TYPE="graduation"
+    VIEW_TITLE="졸업 로드맵"
+    ;;
+  *)
+    VIEW_DATA_TYPE="academic-planning"
+    VIEW_TITLE="학사 계획"
+    ;;
+esac
+
+diag "public_data" "academic_planning_enrich"
+if ! PYTHONIOENCODING=utf-8 \
+  RAW_STDOUT_FILE="$MJU_NEWS_STDOUT" \
+  ENRICHED_STDOUT_FILE="$MJU_NEWS_ENRICHED_JSON" \
+  MODE="$MODE" \
+  VIEW_DATA_TYPE="$VIEW_DATA_TYPE" \
+  MJU_NEWS_PATH="$MJU_NEWS_PATH" \
+  DEPARTMENT="$DEPARTMENT" \
+  YEAR="$YEAR" \
+  TERM_CODE="$TERM_CODE" \
+  ADMISSION_YEAR="$ADMISSION_YEAR" \
+  STUDENT_NUMBER_PROVIDED="$([[ -n "$STUDENT_NUMBER" ]] && echo true || echo false)" \
+  STUDENT_TYPE="$STUDENT_TYPE" \
+  GRADUATION_TERM="$GRADUATION_TERM" \
+  python3 - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+
+
+def source_lengths(data):
+    result = {}
+    for key in ("entries", "items", "courses", "catalog"):
+        value = data.get(key)
+        result[key] = len(value) if isinstance(value, list) else 0
+    return result
+
+
+def first_source_key(lengths):
+    for key in ("entries", "items", "courses", "catalog"):
+        if lengths.get(key, 0) > 0:
+            return key
+    return "none"
+
+
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
+
+try:
+    parsed = json.loads(raw)
+except Exception:
+    parsed = None
+
+if isinstance(parsed, dict):
+    data = parsed
+else:
+    data = {"rawOutput": raw}
+
+existing_view_url = data.pop("viewUrl", None)
+lengths = source_lengths(data)
+payload_diagnostics = data.get("payloadDiagnostics")
+catalog_diagnostics = data.get("courseCatalogDiagnostics") or data.get("catalogDiagnostics")
+wrapper_diagnostics = data.get("wrapperDiagnostics")
+data_readiness = data.get("dataReadiness")
+top_level_keys = sorted(str(key) for key in data.keys())
+
+hints = []
+if existing_view_url:
+    hints.append("mju-news output already had a viewUrl; helper replaced it with a fresh helper-owned webview.")
+if not isinstance(wrapper_diagnostics, dict):
+    hints.append("mju-news wrapperDiagnostics is missing; helper-owned diagnostics were attached after the reader call.")
+if not isinstance(payload_diagnostics, dict):
+    hints.append("reader payloadDiagnostics is missing from academic-planning output.")
+if os.environ.get("MODE") == "timetable" and not isinstance(catalog_diagnostics, dict):
+    hints.append("courseCatalogDiagnostics is missing, so DB/filter/category stages are not visible yet.")
+
+data["academicPlanningHelperDiagnostics"] = {
+    "diagnosticVersion": 1,
+    "generatedAt": datetime.now(timezone.utc).isoformat(),
+    "producer": "mju-academic-planning-helper",
+    "mode": os.environ.get("MODE", ""),
+    "dataType": os.environ.get("VIEW_DATA_TYPE", ""),
+    "runtime": {
+        "script": "mju-academic-planning",
+        "mjuNewsPath": os.environ.get("MJU_NEWS_PATH", ""),
+        "skipNestedMjuNewsView": True,
+    },
+    "context": {
+        "department": os.environ.get("DEPARTMENT", ""),
+        "year": os.environ.get("YEAR", ""),
+        "termCode": os.environ.get("TERM_CODE", ""),
+        "admissionYear": os.environ.get("ADMISSION_YEAR", ""),
+        "studentNumberProvided": os.environ.get("STUDENT_NUMBER_PROVIDED", ""),
+        "studentType": os.environ.get("STUDENT_TYPE", ""),
+        "graduationTerm": os.environ.get("GRADUATION_TERM", ""),
+    },
+    "mjuNewsOutput": {
+        "hadViewUrl": bool(existing_view_url),
+        "hasWrapperDiagnostics": isinstance(wrapper_diagnostics, dict),
+        "hasPayloadDiagnostics": isinstance(payload_diagnostics, dict),
+        "hasCourseCatalogDiagnostics": isinstance(catalog_diagnostics, dict),
+        "hasDataReadiness": isinstance(data_readiness, list),
+        "topLevelKeyCount": len(top_level_keys),
+        "sourceKey": first_source_key(lengths),
+        **{f"{key}Count": count for key, count in lengths.items()},
+    },
+    "topLevelKeys": top_level_keys[:80],
+    "hints": hints,
+}
+
+with open(os.environ["ENRICHED_STDOUT_FILE"], "w", encoding="utf-8") as handle:
+    json.dump(data, handle, ensure_ascii=False)
+PY
+then
+  fail_stage "public_data" "academic_planning_enrich_failed"
+fi
+
+diag "view" "request_build"
+if ! PYTHONIOENCODING=utf-8 \
+  RAW_STDOUT_FILE="$MJU_NEWS_ENRICHED_JSON" \
+  VIEW_DATA_TYPE="$VIEW_DATA_TYPE" \
+  VIEW_TITLE="$VIEW_TITLE" \
+  VIEW_REQUEST_BODY="$VIEW_REQUEST_BODY" \
+  python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
+
+try:
+    data = json.loads(raw)
+except Exception:
+    data = {"rawOutput": raw}
+
+with open(os.environ["VIEW_REQUEST_BODY"], "w", encoding="utf-8") as handle:
+    json.dump({
+        "dataType": os.environ["VIEW_DATA_TYPE"],
+        "title": os.environ["VIEW_TITLE"],
+        "summary": "",
+        "rawData": data,
+        "aiResponse": "",
+    }, handle, ensure_ascii=False)
+PY
+then
+  fail_stage "view" "request_build_failed"
+fi
+
+diag "view" "post"
+set +e
+VIEW_RESP=$(curl -s --max-time 3 -X POST "${VIEW_API_URL:-http://localhost:3001/api/view}" \
+  -H "Content-Type: application/json" \
+  --data-binary @"$VIEW_REQUEST_BODY" 2>/dev/null)
+CURL_EXIT=$?
+set -e
+
+if [[ $CURL_EXIT -ne 0 ]]; then
+  diag "view" "post_failed"
+  cat "$MJU_NEWS_ENRICHED_JSON"
+  printf '\n'
+  exit 0
+fi
+
+VIEW_URL=$(PYTHONIOENCODING=utf-8 VIEW_RESP="$VIEW_RESP" python3 - <<'PY'
+import json
+import os
+
+try:
+    print(json.loads(os.environ["VIEW_RESP"]).get("url", ""))
+except Exception:
+    pass
+PY
+)
+
+if [[ -n "$VIEW_URL" ]]; then
+  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$MJU_NEWS_ENRICHED_JSON" VIEW_URL="$VIEW_URL" python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
+    raw = handle.read()
+view_url = os.environ["VIEW_URL"]
+
+try:
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        data["viewUrl"] = view_url
+        print(json.dumps(data, ensure_ascii=False))
+    else:
+        print(json.dumps({"data": data, "viewUrl": view_url}, ensure_ascii=False))
+except Exception:
+    print(raw)
+PY
+else
+  diag "view" "post_response_missing_url"
+  cat "$MJU_NEWS_ENRICHED_JSON"
+  printf '\n'
+fi
 
 diag "success" "output_written"
