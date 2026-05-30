@@ -52,6 +52,7 @@ services:
       - USER_DATA_ROOT=/data/users
       - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://mjuclaw-agent:18789}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - VIEW_SERVER_URL=${VIEW_SERVER_URL:-http://mjuclaw-agent:3001}
       - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
       - HTTP_PORT=3100
       - HTTP_BIND_HOST=0.0.0.0
@@ -62,6 +63,12 @@ services:
       - CLASSIFIER_URL=${CLASSIFIER_URL:-http://mjuclaw-classifier:3200}
       - CLASSIFIER_AUTH_TOKEN=${CLASSIFIER_AUTH_TOKEN}
       - CLASSIFIER_TIMEOUT_MS=${CLASSIFIER_TIMEOUT_MS:-2500}
+      - PGHOST=${PGHOST:-host.docker.internal}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-mjuclaw}
+      - PGUSER=${PGUSER:-mjuclaw_app}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSCHEMA=${PGSCHEMA:-public_data}
       - MJU_STORAGE=${MJU_STORAGE:-postgres}
       - MJU_PGHOST=${MJU_PGHOST:-${PGHOST:-host.docker.internal}}
       - MJU_PGPORT=${MJU_PGPORT:-${PGPORT:-5432}}
