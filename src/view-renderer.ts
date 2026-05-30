@@ -3153,6 +3153,11 @@ type PlannerDiagnosticStage = {
   message?: string;
 };
 
+type PlannerDiagnosticSample = {
+  title: string;
+  meta: string;
+};
+
 type PlannerReaderDiagnostics = {
   source: string;
   scope: string;
@@ -3168,6 +3173,28 @@ type PlannerReaderDiagnostics = {
     departmentMatched: PlannerDiagnosticBucket[];
     readerOutput: PlannerDiagnosticBucket[];
   };
+  samples: {
+    allTerm: PlannerDiagnosticSample[];
+    departmentMatched: PlannerDiagnosticSample[];
+    readerOutput: PlannerDiagnosticSample[];
+  };
+  hints: string[];
+};
+
+type PlannerPayloadDiagnostics = {
+  producer: string;
+  diagnosticVersion?: string;
+  topLevelKeys: string[];
+  sourceKey: string;
+  sourceLengths: PlannerDiagnosticStage[];
+  payloadCounts: PlannerDiagnosticStage[];
+  dataReadiness: PlannerDiagnosticStage[];
+  query: PlannerDiagnosticBucket[];
+  rawCategoryCounts: PlannerDiagnosticBucket[];
+  rawCategoryLabelCounts: PlannerDiagnosticBucket[];
+  rawDepartmentCounts: PlannerDiagnosticBucket[];
+  rawGradeCounts: PlannerDiagnosticBucket[];
+  rawSamples: PlannerDiagnosticSample[];
   hints: string[];
 };
 
@@ -3188,8 +3215,14 @@ type PlannerUiDiagnostics = {
 };
 
 type TimetablePlannerDiagnostics = {
+  payload: PlannerPayloadDiagnostics;
   reader?: PlannerReaderDiagnostics;
   ui: PlannerUiDiagnostics;
+};
+
+type CatalogCourseExtraction = {
+  sourceKey: string;
+  courses: CatalogCourseInput[];
 };
 
 type CatalogMeetingInput = {
@@ -3377,6 +3410,7 @@ function renderPlannerSearchPanel(): string {
 
 function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): string {
   const reader = diagnostics.reader;
+  const payload = diagnostics.payload;
   const readerStages = reader?.stages.length
     ? reader.stages.map(renderPlannerDiagnosticStage).join("")
     : `<div class="planner-diag-empty">reader 진단 payload가 없습니다.</div>`;
@@ -3389,6 +3423,7 @@ function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): str
     { key: "ui.initialSchedule", label: "초기 시간표", count: diagnostics.ui.initialSchedule, status: diagnostics.ui.initialSchedule ? "ok" as const : "empty" as const },
   ].map(renderPlannerDiagnosticStage).join("");
   const hints = [
+    ...payload.hints,
     ...(reader?.hints ?? []),
     ...diagnostics.ui.hints,
   ].filter(Boolean);
@@ -3396,18 +3431,41 @@ function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): str
   return `<div class="planner-diagnostics" data-planner-diagnostics>
     <div class="planner-diag-head">
       <div><strong>임시 진단 카드</strong><span>시간표 누락 원인을 찾기 위한 숫자입니다. 확인 후 제거할 수 있습니다.</span></div>
-      ${reader ? `<small>${esc(joinMeta([reader.source, reader.scope]))}</small>` : ""}
+      <small>${esc(joinMeta([payload.producer, reader?.source, reader?.scope]))}</small>
     </div>
+    <div class="planner-diag-section"><h3>payload 경로</h3><div class="planner-diag-grid">
+      ${renderPlannerDiagnosticStage({ key: "payload.producer", label: payload.producer || "producer 없음", count: payload.diagnosticVersion ? Number(payload.diagnosticVersion) || 1 : 0, status: payload.producer ? "ok" : "empty" })}
+      ${renderPlannerDiagnosticStage({ key: "payload.sourceKey", label: `강의 배열: ${payload.sourceKey}`, count: diagnostics.ui.rawCourses, status: diagnostics.ui.rawCourses ? "ok" : "empty" })}
+      ${renderPlannerDiagnosticStage({ key: "payload.keys", label: "rawData top-level keys", count: payload.topLevelKeys.length, status: payload.topLevelKeys.length ? "ok" : "empty", message: payload.topLevelKeys.slice(0, 18).join(", ") })}
+    </div></div>
+    <div class="planner-diag-section"><h3>payload count/source</h3><div class="planner-diag-grid">${[...payload.payloadCounts, ...payload.sourceLengths].map(renderPlannerDiagnosticStage).join("")}</div></div>
+    <div class="planner-diag-section"><h3>dataReadiness</h3><div class="planner-diag-grid">${payload.dataReadiness.length ? payload.dataReadiness.map(renderPlannerDiagnosticStage).join("") : `<div class="planner-diag-empty">dataReadiness 배열이 없습니다.</div>`}</div></div>
+    <div class="planner-diag-section"><h3>query</h3><div class="planner-diag-buckets">${renderPlannerDiagnosticBuckets("query", payload.query, 14)}</div></div>
     <div class="planner-diag-section"><h3>reader 단계</h3><div class="planner-diag-grid">${readerStages}</div></div>
     <div class="planner-diag-section"><h3>웹뷰 단계</h3><div class="planner-diag-grid">${uiStages}</div></div>
     <div class="planner-diag-section"><h3>분류 카운트</h3><div class="planner-diag-buckets">
+      ${renderPlannerDiagnosticBuckets("raw category", payload.rawCategoryCounts)}
+      ${renderPlannerDiagnosticBuckets("raw categoryLabel", payload.rawCategoryLabelCounts)}
+      ${renderPlannerDiagnosticBuckets("raw department", payload.rawDepartmentCounts)}
+      ${renderPlannerDiagnosticBuckets("raw grade", payload.rawGradeCounts)}
+      ${renderPlannerDiagnosticBuckets("reader 전체", reader?.categoryCounts.allTerm)}
+      ${renderPlannerDiagnosticBuckets("reader 학과필터", reader?.categoryCounts.departmentMatched)}
       ${renderPlannerDiagnosticBuckets("reader 출력", reader?.categoryCounts.readerOutput)}
+      ${renderPlannerDiagnosticBuckets("UI 전체", diagnostics.ui.allCategoryCounts)}
+      ${renderPlannerDiagnosticBuckets("이수 제외 후", diagnostics.ui.afterCompletedCategoryCounts)}
       ${renderPlannerDiagnosticBuckets("선택 가능", diagnostics.ui.selectableCategoryCounts)}
       ${renderPlannerDiagnosticBuckets("학년", diagnostics.ui.selectableGradeCounts)}
     </div></div>
     <div class="planner-diag-section"><h3>학과 필터</h3><div class="planner-diag-buckets">
       ${renderPlannerDiagnosticBuckets("학과 후보", (reader?.departmentCandidates ?? []).map((key) => ({ key, count: 1 })))}
       ${renderPlannerDiagnosticBuckets("DB/JSON 학과", reader?.departmentCounts.departmentMatched)}
+      ${renderPlannerDiagnosticBuckets("reader output 학과", reader?.departmentCounts.readerOutput)}
+    </div></div>
+    <div class="planner-diag-section"><h3>샘플</h3><div class="planner-diag-buckets">
+      ${renderPlannerDiagnosticSamples("raw sample", payload.rawSamples)}
+      ${renderPlannerDiagnosticSamples("reader allTerm sample", reader?.samples.allTerm)}
+      ${renderPlannerDiagnosticSamples("reader department sample", reader?.samples.departmentMatched)}
+      ${renderPlannerDiagnosticSamples("reader output sample", reader?.samples.readerOutput)}
     </div></div>
     ${hints.length ? `<div class="planner-diag-hints">${hints.map((hint) => `<p>${esc(hint)}</p>`).join("")}</div>` : ""}
   </div>`;
@@ -3420,11 +3478,22 @@ function renderPlannerDiagnosticStage(stage: PlannerDiagnosticStage): string {
 function renderPlannerDiagnosticBuckets(
   label: string,
   buckets: PlannerDiagnosticBucket[] | undefined,
+  limit = 8,
 ): string {
   if (!buckets?.length) {
     return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><span>없음</span></div>`;
   }
-  return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><div>${buckets.slice(0, 8).map((bucket) => `<span>${esc(bucket.key)} <em>${bucket.count}</em></span>`).join("")}</div></div>`;
+  return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><div>${buckets.slice(0, limit).map((bucket) => `<span>${esc(bucket.key)} <em>${bucket.count}</em></span>`).join("")}</div></div>`;
+}
+
+function renderPlannerDiagnosticSamples(
+  label: string,
+  samples: PlannerDiagnosticSample[] | undefined,
+): string {
+  if (!samples?.length) {
+    return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><span>없음</span></div>`;
+  }
+  return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><div>${samples.slice(0, 8).map((sample) => `<span>${esc(sample.title)}${sample.meta ? ` <em>${esc(sample.meta)}</em>` : ""}</span>`).join("")}</div></div>`;
 }
 
 function renderPlannerAvailabilityControls(model: TimetablePlannerModel): string {
@@ -3592,7 +3661,8 @@ export function buildTimetablePlannerModel(data: unknown): TimetablePlannerModel
   const choiceMissing = choiceSelectionMissing(choiceGroups, selectedChoiceKeys);
   const choiceBlocked = choiceMissing.length > 0;
   const requirementTargets = buildPlannerRequirementTargets(d);
-  const allCourses = extractCatalogCourses(d)
+  const extraction = extractCatalogCourseInputs(d);
+  const allCourses = extraction.courses
     .map(normalizePlannerCourse)
     .filter((course): course is PlannerCourse => Boolean(course))
     .map((course) => attachPlannerRequirementTargets(course, requirementTargets));
@@ -3619,6 +3689,8 @@ export function buildTimetablePlannerModel(data: unknown): TimetablePlannerModel
       : generateTimetableSchedule(selectableCourses, majorCount, electiveCount, 0);
   const noSolution = !choiceBlocked && !showAllCourses && initialSchedule.length !== majorCount + electiveCount;
   const diagnostics = buildTimetablePlannerDiagnostics(d, {
+    rawCourses: extraction.courses,
+    rawSourceKey: extraction.sourceKey,
     allCourses,
     completedKeys,
     courses,
@@ -3652,6 +3724,8 @@ export function buildTimetablePlannerModel(data: unknown): TimetablePlannerModel
 function buildTimetablePlannerDiagnostics(
   rawData: Record<string, unknown>,
   args: {
+    rawCourses: CatalogCourseInput[];
+    rawSourceKey: string;
     allCourses: PlannerCourse[];
     completedKeys: Set<string>;
     courses: PlannerCourse[];
@@ -3683,6 +3757,7 @@ function buildTimetablePlannerDiagnostics(
   }
 
   return {
+    payload: buildPlannerPayloadDiagnostics(rawData, args.rawCourses, args.rawSourceKey),
     reader: normalizePlannerReaderDiagnostics(rawData.courseCatalogDiagnostics ?? rawData.catalogDiagnostics),
     ui: {
       rawCourses: args.allCourses.length,
@@ -3700,6 +3775,167 @@ function buildTimetablePlannerDiagnostics(
       hints: uiHints,
     },
   };
+}
+
+function buildPlannerPayloadDiagnostics(
+  rawData: Record<string, unknown>,
+  rawCourses: CatalogCourseInput[],
+  rawSourceKey: string,
+): PlannerPayloadDiagnostics {
+  const payload = unknownRecord(rawData.payloadDiagnostics ?? rawData.academicPlanningDiagnostics);
+  const payloadOutput = unknownRecord(payload.output);
+  const payloadSource = unknownRecord(payload.source);
+  const payloadQuery = unknownRecord(payload.query);
+  const rawQuery = unknownRecord(rawData.query);
+  const query = Object.keys(payloadQuery).length ? payloadQuery : rawQuery;
+  const topLevelKeys = Object.keys(rawData).sort();
+  const sourceLengths = ["entries", "items", "courses", "catalog"].map((key) => {
+    const value = rawData[key];
+    const count = Array.isArray(value) ? value.length : 0;
+    return {
+      key: `source.${key}`,
+      label: key,
+      count,
+      status: count > 0 ? "ok" as const : "empty" as const,
+    };
+  });
+  const payloadCounts = [
+    ...plannerPayloadOutputStages(payloadOutput),
+    ...plannerPayloadOutputStages(payloadSource, "source"),
+  ];
+  const dataReadiness = unknownArray(rawData.dataReadiness).map((value, index) => {
+    const record = unknownRecord(value);
+    const target = stringFrom(record.target) || `target ${index + 1}`;
+    const statusText = stringFrom(record.status);
+    const count = numberFrom(record.count) ?? 0;
+    const scope = plannerInlineObject(record.scope);
+    const message = stringFrom(record.message);
+    return {
+      key: `dataReadiness.${target}`,
+      label: statusText ? `${target}: ${statusText}` : target,
+      count,
+      status: statusText === "ready" || count > 0 ? "ok" as const : "empty" as const,
+      ...(message || scope ? { message: joinMeta([message, scope]) } : {}),
+    };
+  });
+  const hints: string[] = unknownStringArray(payload.hints);
+  if (!Object.keys(payload).length) {
+    hints.push("(여기 1) payloadDiagnostics가 없습니다. reader CLI 출력 또는 wrapper 전달 단계에서 진단 표식이 빠졌습니다.");
+  }
+  if (!rawData.courseCatalogDiagnostics && !rawData.catalogDiagnostics) {
+    hints.push("(여기 2) courseCatalogDiagnostics가 rawData에 없습니다. academic-planning 출력이 오래된 reader이거나 다른 경로(course-catalog list 등)를 탔는지 확인해야 합니다.");
+  }
+  if (rawSourceKey === "none") {
+    hints.push("(여기 3) entries/items/courses/catalog 중 강의 배열을 찾지 못했습니다. wrapper가 웹뷰 rawData를 잘못 매핑했을 가능성이 큽니다.");
+  }
+  if (rawCourses.length && !rawCourses.some((course) => plannerRawCourseLooksMajor(course))) {
+    hints.push("(여기 4) raw 강의 배열 단계부터 전공 분류가 보이지 않습니다. DB 수집 category/categoryLabel 또는 reader 학과 필터가 전공을 잃고 있습니다.");
+  }
+  if (rawCourses.length && rawCourses.every((course) => !stringFrom((course as Record<string, unknown>).department))) {
+    hints.push("(여기 5) raw 강의 배열에 department 값이 없습니다. 학과 필터 원인 분석에는 DB/reader 샘플이 필요합니다.");
+  }
+
+  return {
+    producer: stringFrom(payload.producer) || "unknown-producer",
+    diagnosticVersion: plannerScalarString(payload.diagnosticVersion),
+    topLevelKeys,
+    sourceKey: rawSourceKey,
+    sourceLengths,
+    payloadCounts,
+    dataReadiness,
+    query: plannerDiagnosticBucketsFromRecord(query),
+    rawCategoryCounts: plannerDiagnosticBucketsFromRawCourses(rawCourses, "category"),
+    rawCategoryLabelCounts: plannerDiagnosticBucketsFromRawCourses(rawCourses, "categoryLabel"),
+    rawDepartmentCounts: plannerDiagnosticBucketsFromRawCourses(rawCourses, "department"),
+    rawGradeCounts: plannerDiagnosticBucketsFromRawCourses(rawCourses, "grade"),
+    rawSamples: rawCourses.slice(0, 8).map(plannerDiagnosticSampleFromRawCourse),
+    hints,
+  };
+}
+
+function plannerPayloadOutputStages(
+  record: Record<string, unknown>,
+  prefix = "output",
+): PlannerDiagnosticStage[] {
+  return Object.entries(record)
+    .filter(([, value]) => typeof value === "number" || typeof value === "boolean" || typeof value === "string")
+    .slice(0, 16)
+    .map(([key, value]) => {
+      const numeric = typeof value === "boolean"
+        ? value ? 1 : 0
+        : numberFrom(value) ?? (plannerScalarString(value) ? 1 : 0);
+      return {
+        key: `payload.${prefix}.${key}`,
+        label: `${prefix}.${key}${plannerScalarString(value) && typeof value !== "number" && typeof value !== "boolean" ? `=${plannerScalarString(value)}` : ""}`,
+        count: numeric,
+        status: numeric > 0 ? "ok" as const : "empty" as const,
+      };
+    });
+}
+
+function plannerDiagnosticBucketsFromRecord(record: Record<string, unknown>): PlannerDiagnosticBucket[] {
+  return Object.entries(record)
+    .filter(([, value]) => value != null && plannerScalarString(value))
+    .slice(0, 20)
+    .map(([key, value]) => ({ key: `${key}=${plannerScalarString(value)}`, count: 1 }));
+}
+
+function plannerDiagnosticBucketsFromRawCourses(
+  courses: CatalogCourseInput[],
+  field: "category" | "categoryLabel" | "department" | "grade",
+): PlannerDiagnosticBucket[] {
+  const counts = new Map<string, number>();
+  for (const course of courses) {
+    const key = field === "category"
+      ? stringFrom(course.category)
+      : field === "categoryLabel"
+        ? stringFrom(course.categoryLabel)
+        : field === "department"
+          ? stringFrom((course as Record<string, unknown>).department)
+          : stringFrom(course.gradeLevel ?? course.grade);
+    const normalized = key || "(empty)";
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"))
+    .slice(0, field === "department" ? 12 : 20)
+    .map(([key, count]) => ({ key, count }));
+}
+
+function plannerDiagnosticSampleFromRawCourse(course: CatalogCourseInput): PlannerDiagnosticSample {
+  const title = stringFrom(course.courseTitle ?? course.title) || "(title missing)";
+  const code = stringFrom(course.courseCode ?? course.curriculumNumber ?? course.curiNum);
+  const meta = joinMeta([
+    code,
+    stringFrom(course.category),
+    stringFrom(course.categoryLabel),
+    stringFrom((course as Record<string, unknown>).department),
+    stringFrom(course.gradeLevel ?? course.grade),
+    stringFrom(course.professor),
+  ]);
+  return { title, meta };
+}
+
+function plannerRawCourseLooksMajor(course: CatalogCourseInput): boolean {
+  const category = stringFrom(course.category).toLowerCase();
+  const label = stringFrom(course.categoryLabel).toLowerCase();
+  return category === "major" || category.includes("major") || label.includes("전공") || label.includes("major");
+}
+
+function plannerInlineObject(value: unknown): string {
+  const record = unknownRecord(value);
+  return Object.entries(record)
+    .slice(0, 8)
+    .map(([key, item]) => `${key}=${plannerScalarString(item)}`)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function plannerScalarString(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return "";
 }
 
 function normalizePlannerReaderDiagnostics(value: unknown): PlannerReaderDiagnostics | undefined {
@@ -3737,6 +3973,11 @@ function normalizePlannerReaderDiagnostics(value: unknown): PlannerReaderDiagnos
       departmentMatched: normalizePlannerDiagnosticBuckets(departmentCounts.departmentMatched),
       readerOutput: normalizePlannerDiagnosticBuckets(departmentCounts.readerOutput),
     },
+    samples: {
+      allTerm: normalizePlannerDiagnosticSamples(unknownRecord(record.samples).allTerm),
+      departmentMatched: normalizePlannerDiagnosticSamples(unknownRecord(record.samples).departmentMatched),
+      readerOutput: normalizePlannerDiagnosticSamples(unknownRecord(record.samples).readerOutput),
+    },
     hints: unknownStringArray(record.hints),
   };
 }
@@ -3765,6 +4006,23 @@ function normalizePlannerDiagnosticBuckets(value: unknown): PlannerDiagnosticBuc
   }).filter((bucket) => bucket.key || bucket.count);
 }
 
+function normalizePlannerDiagnosticSamples(value: unknown): PlannerDiagnosticSample[] {
+  return unknownArray(value).map((item) => {
+    const record = unknownRecord(item);
+    const title = stringFrom(record.courseTitle ?? record.title) || "(title missing)";
+    const meta = joinMeta([
+      stringFrom(record.courseCode),
+      stringFrom(record.category),
+      stringFrom(record.categoryLabel),
+      stringFrom(record.department),
+      stringFrom(record.gradeLevel),
+      stringFrom(record.section),
+      stringFrom(record.professor),
+    ]);
+    return { title, meta };
+  }).filter((sample) => sample.title);
+}
+
 function plannerDiagnosticBucketsFromCourses(
   courses: PlannerCourse[],
   field: "category" | "grade",
@@ -3788,8 +4046,20 @@ function plannerDiagnosticCategoryLabel(category: PlannerCategory): string {
 }
 
 function extractCatalogCourses(d: Record<string, unknown>): CatalogCourseInput[] {
-  const source = d.entries ?? d.items ?? d.courses ?? d.catalog;
-  return Array.isArray(source) ? source.filter((item): item is CatalogCourseInput => Boolean(item) && typeof item === "object") : [];
+  return extractCatalogCourseInputs(d).courses;
+}
+
+function extractCatalogCourseInputs(d: Record<string, unknown>): CatalogCourseExtraction {
+  for (const key of ["entries", "items", "courses", "catalog"]) {
+    const source = d[key];
+    if (Array.isArray(source)) {
+      return {
+        sourceKey: key,
+        courses: source.filter((item): item is CatalogCourseInput => Boolean(item) && typeof item === "object"),
+      };
+    }
+  }
+  return { sourceKey: "none", courses: [] };
 }
 
 function normalizeRequirementChoiceGroups(rawData: Record<string, unknown>, view: RequirementChoiceView): RequirementChoiceGroup[] {
