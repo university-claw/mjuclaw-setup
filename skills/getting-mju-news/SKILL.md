@@ -20,7 +20,7 @@ metadata:
 - 현재 내가 수강 중인 시간표 조회: `mju-msi`의 `mju msi timetable`
 - 출석/결석/UCheck 조회: `mju-ucheck` 또는 `mju ucheck ...`
 - MSI 원본 졸업요건 조회: 임시 비활성화. 사용자가 "MSI 원본", "학교 시스템 그대로"를 명시해도 `mju msi graduation`을 사용하지 말고 이 skill의 졸업 로드맵으로 처리
-- 시간표 설계/랜덤 시간표/추천 시간표: 이 skill의 `mju-timetable-planner <DISCORD_USER_ID> --format json`
+- 시간표 설계/랜덤 시간표/추천 시간표: 이 skill의 `mju-timetable-planner <DISCORD_USER_ID> --format json`. 사용자가 연도/학기를 명시하면 `--year YYYY --term-code 10|20`을 반드시 추가합니다.
 - 졸업요건/졸업 로드맵/뭐 들었고 뭐 남았는지/영역별 공식 요건 판정: 이 skill의 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`
 
 ## 시간표 설계
@@ -42,7 +42,19 @@ metadata:
 mju-timetable-planner <DISCORD_USER_ID> --format json
 ```
 
-결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `시간표 설계`입니다. 이 helper가 MSI 성적 이력/현재 시간표/profile을 먼저 읽어 학과·학번·입학년도·이수 과목을 보강합니다. 이 의도에서 `mju ucheck`를 사용하면 출석 웹뷰가 열리므로 사용하지 않습니다.
+연도/학기 명시 요청:
+
+```bash
+# 2026년 1학기, 2026-1, 2026학년도 1학기
+mju-timetable-planner <DISCORD_USER_ID> --year 2026 --term-code 10 --format json
+
+# 2026년 2학기, 2026-2, 2026학년도 2학기
+mju-timetable-planner <DISCORD_USER_ID> --year 2026 --term-code 20 --format json
+```
+
+사용자가 연도와 학기를 명시했는데 기본 명령만 실행하면 helper가 현재 날짜 기준 다음 학기를 선택할 수 있습니다. 이 경우 사용자 요청과 웹뷰 기준 학기가 달라지므로 반드시 `--year`와 `--term-code`를 붙입니다. `1학기`는 `10`, `2학기`는 `20`입니다.
+
+결과 JSON의 `viewUrl`을 그대로 마스킹 링크로 전달합니다. 정상 웹뷰 제목은 `시간표 설계`입니다. 이 helper가 MSI 성적 이력/현재 시간표/profile을 먼저 읽어 학과·학번·입학년도·이수 과목을 보강합니다. 이 의도에서 `mju ucheck`를 사용하면 출석 웹뷰가 열리므로 사용하지 않습니다. 최종 답변 전에는 결과 JSON의 `query.year`, `query.termCode`, `query.termLabel`, `studentStanding`이 사용자 요청과 일치하는지 확인합니다. 요청은 1학기인데 결과가 `termCode: "20"`이면 그 링크를 전달하지 말고 올바른 인자로 다시 실행합니다.
 
 ## 졸업 로드맵
 
@@ -80,7 +92,7 @@ mju-news cafeterias week --start 2026-04-14 --format json
 
 ## 만료된 웹뷰 링크
 
-사용자가 "링크가 만료됐어", "다시 보내줘", "다시 열어줘"라고 하면 이전 응답의 URL을 다시 보내지 않습니다. 같은 기능의 조회 명령을 다시 실행해서 새 `viewUrl`을 발급합니다. 시간표 설계 링크가 만료되면 `mju-timetable-planner <DISCORD_USER_ID> --format json`, 졸업 로드맵 링크가 만료되면 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`을 다시 실행합니다. 웹뷰 링크 만료를 SSO 로그인 만료로 설명하지 않습니다.
+사용자가 "링크가 만료됐어", "다시 보내줘", "다시 열어줘"라고 하면 이전 응답의 URL을 다시 보내지 않습니다. 같은 기능의 조회 명령을 다시 실행해서 새 `viewUrl`을 발급합니다. 시간표 설계 링크가 만료되면 `mju-timetable-planner <DISCORD_USER_ID> --format json`, 졸업 로드맵 링크가 만료되면 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`을 다시 실행합니다. 단, 직전 시간표 설계 요청에 연도/학기가 명시되어 있었다면 동일한 `--year`와 `--term-code`를 유지합니다. 웹뷰 링크 만료를 SSO 로그인 만료로 설명하지 않습니다.
 
 ## 데이터 준비 상태
 

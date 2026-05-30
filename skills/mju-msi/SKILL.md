@@ -45,4 +45,4 @@ metadata:
 - 시간표 설계, 랜덤 시간표, 추천 시간표, 전공/교양 개수 조합, 요일/교시 제외
 - 졸업요건, 졸업 로드맵, 졸업까지 남은 것, 들은 과목과 들어야 할 과목, 영역별 공식 요건 판정
 
-이 경우 `mju msi timetable`, `mju msi graduation`, `mju ucheck`, `mju-news academic-planning` 직접 호출을 사용하지 마세요. 시간표 설계는 `mju-timetable-planner <DISCORD_USER_ID> --format json`, 일반적인 "졸업요건" 요청과 명시적인 원본 요청은 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`으로 대체합니다. 기존 MSI 졸업요건 명령은 임시 비활성화 상태입니다.
+이 경우 `mju msi timetable`, `mju msi graduation`, `mju ucheck`, `mju-news academic-planning` 직접 호출을 사용하지 마세요. 시간표 설계는 `mju-timetable-planner <DISCORD_USER_ID> --format json`, 일반적인 "졸업요건" 요청과 명시적인 원본 요청은 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`으로 대체합니다. 단, 시간표 설계에서 사용자가 `2026년 1학기`처럼 연도/학기를 명시하면 `mju-timetable-planner <DISCORD_USER_ID> --year 2026 --term-code 10 --format json`처럼 해당 학기 인자를 유지해야 합니다. 기존 MSI 졸업요건 명령은 임시 비활성화 상태입니다.

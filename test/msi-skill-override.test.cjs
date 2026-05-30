@@ -49,6 +49,9 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   const msiSkill = fs.readFileSync(path.join(root, "skills", "mju-msi", "SKILL.md"), "utf8");
 
   assert.match(bootstrap, /시간표 설계[\s\S]*mju-timetable-planner \{DISCORD_USER_ID\} --format json[\s\S]*timetable-planner/);
+  assert.match(bootstrap, /YYYY년 1학기[\s\S]*--year YYYY --term-code 10/);
+  assert.match(bootstrap, /YYYY년 2학기[\s\S]*--year YYYY --term-code 20/);
+  assert.match(bootstrap, /query\.year[\s\S]*query\.termCode[\s\S]*studentStanding[\s\S]*다시 실행/);
   assert.match(bootstrap, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-graduation-roadmap \{DISCORD_USER_ID\} --format json/);
   assert.match(bootstrap, /"내 졸업요건"[\s\S]*"졸업학점"[\s\S]*"졸업까지"[\s\S]*mju-graduation-roadmap \{DISCORD_USER_ID\} --format json/);
   assert.match(bootstrap, /일반적인 "졸업요건" 요청[\s\S]*새 졸업 로드맵/);
@@ -66,6 +69,9 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   assert.match(soul, /시간표 설계와 졸업 로드맵은 전용 helper mju-timetable-planner \/ mju-graduation-roadmap/);
 
   assert.match(newsSkill, /시간표 설계[\s\S]*mju-timetable-planner <DISCORD_USER_ID> --format json/);
+  assert.match(newsSkill, /2026년 1학기[\s\S]*--year 2026 --term-code 10/);
+  assert.match(newsSkill, /2026년 2학기[\s\S]*--year 2026 --term-code 20/);
+  assert.match(newsSkill, /query\.year[\s\S]*query\.termCode[\s\S]*studentStanding[\s\S]*다시 실행/);
   assert.match(newsSkill, /졸업요건[\s\S]*졸업 로드맵[\s\S]*mju-graduation-roadmap <DISCORD_USER_ID> --format json/);
   assert.match(newsSkill, /mju-news academic-planning`을 직접 호출하지 말고 전용 helper/);
   assert.match(newsSkill, /만료된 웹뷰 링크[\s\S]*이전 응답의 URL을 다시 보내지 않습니다/);
@@ -79,6 +85,7 @@ test("runtime instructions route academic planning away from legacy MSI and UChe
   assert.match(msiSkill, /getting-mju-news[\s\S]*시간표 설계/);
   assert.match(msiSkill, /getting-mju-news[\s\S]*졸업요건[\s\S]*졸업 로드맵/);
   assert.match(msiSkill, /시간표 설계는 `mju-timetable-planner <DISCORD_USER_ID> --format json`/);
+  assert.match(msiSkill, /연도\/학기를 명시하면[\s\S]*--year 2026 --term-code 10 --format json/);
   assert.match(msiSkill, /일반적인 "졸업요건" 요청과 명시적인 원본 요청은 `mju-graduation-roadmap <DISCORD_USER_ID> --format json`으로 대체/);
 });
 

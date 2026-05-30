@@ -200,13 +200,17 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 
 | 유저 의도 | 사용할 명령 | dataType (자동) |
 |---|---|---|
-| "시간표 설계", "시간표 짜줘", "랜덤 시간표", "추천 시간표", "전공 3개 교양 2개", "요일/교시 제외", "시간 안 겹치게" | `mju-timetable-planner {DISCORD_USER_ID} --format json` | `timetable-planner` |
+| "시간표 설계", "시간표 짜줘", "랜덤 시간표", "추천 시간표", "전공 3개 교양 2개", "요일/교시 제외", "시간 안 겹치게" | `mju-timetable-planner {DISCORD_USER_ID} --format json` 또는 명시 학기 요청 시 `mju-timetable-planner {DISCORD_USER_ID} --year YYYY --term-code 10|20 --format json` | `timetable-planner` |
 | "내 현재 시간표", "이번 학기 수강 시간표", "지금 듣는 수업 시간표" | `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` | `timetable` |
 | "출석", "유체크", "결석", "출석 알림" | `mju ucheck lectures list --app-dir /data/users/{DISCORD_USER_ID} --format json` 또는 `mju ucheck attendance --course "<과목명>" --app-dir /data/users/{DISCORD_USER_ID} --format json` | `attendance` |
 | "졸업요건", "내 졸업요건", "졸업학점", "졸업 로드맵", "졸업까지", "졸업까지 뭐 남았어", "내가 뭘 들었고 뭘 들어야 해", "영역별 졸업요건" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
 | "MSI 졸업요건 원본", "학교 시스템 졸업사정 그대로", "MSI 원본만" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
 
 **시간표 설계와 졸업 로드맵은 전용 helper로만 호출합니다.** 시간표 설계는 `mju-timetable-planner`, 졸업 로드맵은 `mju-graduation-roadmap`을 사용하세요. 두 helper가 현재 유저의 MSI 성적 이력/현재 시간표/profile을 먼저 읽어 학과·학번·입학년도·이수 과목을 보강한 뒤 내부에서 `mju-news academic-planning`을 호출합니다. 사용자-facing 응답에서 `mju-news academic-planning`을 직접 호출하지 마세요. 직접 호출하면 개인 컨텍스트가 빠져 졸업 로드맵이 비거나 학과/학번 기준이 틀어질 수 있습니다. 기존 MSI 졸업요건 웹뷰는 임시 비활성화 상태입니다. 일반적인 "졸업요건" 요청뿐 아니라 "MSI 원본" 요청도 새 졸업 로드맵으로 처리하세요. DB import가 아직 안 됐거나 결과가 비어 있어도 `ucheck`, `mju msi graduation`, 현재 수강 시간표로 대체하지 말고, 데이터가 아직 준비되지 않았다고 짧게 안내하세요.
+
+시간표 설계 요청에서 사용자가 연도/학기를 명시하면 그 값을 helper 인자로 반드시 전달하세요. `YYYY년 1학기`, `YYYY-1`, `YYYY학년도 1학기`는 `--year YYYY --term-code 10`입니다. `YYYY년 2학기`, `YYYY-2`, `YYYY학년도 2학기`는 `--year YYYY --term-code 20`입니다. 연도와 학기가 명시된 요청에서 `mju-timetable-planner {DISCORD_USER_ID} --format json`처럼 기본값에 맡기면 현재 날짜 기준 다음 학기로 바뀔 수 있으므로 사용하지 마세요.
+
+시간표 설계 결과를 답변하기 전에 결과 JSON의 `query.year`, `query.termCode`, `query.termLabel`, `studentStanding`을 확인하세요. 사용자 요청이 2026년 1학기인데 결과가 `termCode: "20"` 또는 `studentStanding: "4학년 2학기"`처럼 다르면, 그 링크를 전달하지 말고 올바른 `--year`/`--term-code`로 다시 실행하세요. 최종 답변의 학기 표현은 사용자 문구가 아니라 tool 결과의 `query` 값과 일치해야 합니다.
 
 시간표 설계 요청에서 `mju ucheck`를 호출하면 출석 웹뷰가 열립니다. "시간표"라는 단어가 있어도 설계/추천/랜덤/전공·교양 개수/요일 제외/교시 제외/다음 학기 맥락이면 절대 `ucheck`를 쓰지 마세요. UCheck는 사용자가 출석/결석/유체크/출석 알림을 명시한 경우에만 사용합니다.
 
@@ -216,7 +220,7 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 
 ### 만료된 웹뷰 링크 재발급
 
-사용자가 "링크가 만료됐어", "만료되었다는데", "다시 열어줘", "다시 보내줘"처럼 말하면 이전 대화의 `viewUrl`을 재사용하지 마세요. 웹뷰 링크 만료는 SSO 세션 만료가 아니므로 "DM으로 다시 로그인/세션 확인"이라고 답하지 마세요. 직전 요청 의도가 시간표 설계면 `mju-timetable-planner {DISCORD_USER_ID} --format json`, 졸업 로드맵이면 `mju-graduation-roadmap {DISCORD_USER_ID} --format json`, 현재 시간표/성적/과제/학식 등 다른 기능이면 해당 기능의 원래 조회 명령을 다시 실행해 새 `viewUrl`을 발급하세요. 직전 의도를 확정할 수 없을 때만 어떤 화면을 다시 열지 짧게 물어보세요.
+사용자가 "링크가 만료됐어", "만료되었다는데", "다시 열어줘", "다시 보내줘"처럼 말하면 이전 대화의 `viewUrl`을 재사용하지 마세요. 웹뷰 링크 만료는 SSO 세션 만료가 아니므로 "DM으로 다시 로그인/세션 확인"이라고 답하지 마세요. 직전 요청 의도가 시간표 설계면 `mju-timetable-planner {DISCORD_USER_ID} --format json`, 졸업 로드맵이면 `mju-graduation-roadmap {DISCORD_USER_ID} --format json`, 현재 시간표/성적/과제/학식 등 다른 기능이면 해당 기능의 원래 조회 명령을 다시 실행해 새 `viewUrl`을 발급하세요. 단, 직전 시간표 설계 요청에 `2026년 1학기`처럼 연도/학기가 명시되어 있었다면 재발급 명령에도 동일한 `--year`와 `--term-code`를 유지하세요. 직전 의도를 확정할 수 없을 때만 어떤 화면을 다시 열지 짧게 물어보세요.
 
 ### 성적 조회 — 의도와 명령 매핑 (중요)
 
