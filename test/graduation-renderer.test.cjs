@@ -693,7 +693,7 @@ test("graduation applies top-level completed courses to official requirement sec
               label: "Major",
               category: "Major",
               requiredCredits: 6,
-              requiredCourseTitles: ["Data Structures"],
+              requiredCourseTitles: ["Data-Structures"],
               status: "confirmed",
             },
             {
@@ -730,7 +730,7 @@ test("graduation applies top-level completed courses to official requirement sec
   assert.match(graduationCourseRowHtml(html, "CSE201 - Data Structures"), /data-grad-status="completed"/);
   assert.match(graduationCourseRowHtml(html, "LIB201 - Critical Thinking"), /data-grad-status="completed"/);
   assert.doesNotMatch(commonCard, /data-grad-name="English 1"[\s\S]*data-grad-status="missing"/);
-  assert.doesNotMatch(majorCard, /data-grad-name="Data Structures"[\s\S]*data-grad-status="missing"/);
+  assert.doesNotMatch(majorCard, /data-grad-name="Data-Structures"[\s\S]*data-grad-status="missing"/);
 });
 
 test("graduation keeps official requirements query context in the roadmap", () => {

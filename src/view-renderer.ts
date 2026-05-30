@@ -3711,8 +3711,16 @@ function plannerCourseIsCompleted(course: PlannerCourse, completedKeys: Set<stri
     (course.courseCode ? completedKeys.has(plannerCourseMatchKey(course.courseCode)) : false);
 }
 
+function academicCourseMatchKey(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
 function plannerCourseMatchKey(value: string): string {
-  return value.replace(/\s+/g, "").trim().toLowerCase();
+  return academicCourseMatchKey(value);
 }
 
 function plannerCourseMatchKeys(course: Pick<PlannerCourse, "title" | "courseCode">): string[] {
@@ -6364,7 +6372,7 @@ syncChoices(false);
 }
 
 function graduationCourseMatchKey(value: string): string {
-  return value.replace(/\s+/g, "").trim().toLowerCase();
+  return academicCourseMatchKey(value);
 }
 
 function graduationCreditNumber(value: unknown, preferredLabel?: string): number | undefined {
