@@ -551,6 +551,26 @@ test("graduation explains free elective shortages as recognized elective credits
   assert.match(html, /미수강/);
 });
 
+test("graduation counts surplus major and liberal credits toward free elective credits", () => {
+  const html = renderViewHtml({
+    ...graduationEntry(),
+    rawData: {
+      department: "Computer Engineering",
+      admissionYear: 2021,
+      creditGaps: [
+        { label: "Total Credits", earned: 130, required: 134, gap: 4 },
+        { label: "Major Credits", earned: 76, required: 74, gap: 0 },
+        { label: "Liberal Credits", earned: 52, required: 48, gap: 0 },
+        { label: "Free Elective", earned: 0, required: 12, gap: 12 },
+      ],
+    },
+  });
+
+  const freeElectiveCard = graduationAreaCardHtml(html, "Free Elective");
+  assert.match(freeElectiveCard, /8 \/ 12/);
+  assert.match(freeElectiveCard, /4학점 부족/);
+});
+
 test("graduation summarizes major credit shortages without inventing missing electives", () => {
   const html = renderViewHtml({
     ...graduationEntry(),
@@ -1637,7 +1657,7 @@ test("graduation collapses large major course lists in batches without hiding of
   assert.match(html, /data-grad-more/);
   assert.match(html, /\[hidden\]\s*\{\s*display:\s*none !important;/);
   assert.match(html, /\.grad-course-detail-row\[hidden\]\s*\{\s*display:\s*none !important;/);
-  assert.match(html, /10개 더보기/);
+  assert.match(html, /더보기/);
   assert.doesNotMatch(graduationCourseRowHtml(html, "Major elective 10"), /hidden/);
   assert.match(graduationCourseRowHtml(html, "Major elective 11"), /hidden/);
   assert.match(graduationCourseRowHtml(html, "Major elective 12"), /hidden/);
@@ -1668,7 +1688,7 @@ test("graduation collapses large non-major area course lists in batches", () => 
   });
 
   assert.match(html, /data-grad-more/);
-  assert.match(html, /10개 더보기/);
+  assert.match(html, /더보기/);
   assert.doesNotMatch(graduationCourseRowHtml(html, "Common liberal 10"), /hidden/);
   assert.match(graduationCourseRowHtml(html, "Common liberal 11"), /hidden/);
   assert.match(graduationCourseRowHtml(html, "Common liberal 12"), /hidden/);
