@@ -179,25 +179,21 @@ PY
 )
 
 if [[ -n "$VIEW_URL" ]]; then
-  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" VIEW_URL="$VIEW_URL" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" "$PYTHON_BIN" - <<'PY'
+  PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" VIEW_URL="$VIEW_URL" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
 with open(os.environ["RAW_STDOUT_FILE"], encoding="utf-8") as handle:
     raw = handle.read()
 view_url = os.environ["VIEW_URL"]
-view_data_type = os.environ["DATA_TYPE"]
-view_title = os.environ["TITLE"]
 
 try:
     data = json.loads(raw)
     if isinstance(data, dict):
         data["viewUrl"] = view_url
-        data["viewDataType"] = view_data_type
-        data["viewTitle"] = view_title
         print(json.dumps(data, ensure_ascii=False))
     else:
-        print(json.dumps({"data": data, "viewUrl": view_url, "viewDataType": view_data_type, "viewTitle": view_title}, ensure_ascii=False))
+        print(json.dumps({"data": data, "viewUrl": view_url}, ensure_ascii=False))
 except Exception:
     print(raw)
 PY
