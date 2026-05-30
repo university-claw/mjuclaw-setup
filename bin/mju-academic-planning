@@ -80,16 +80,17 @@ need_bin python3
 
 default_term() {
   python3 - <<'PY'
+import os
 from datetime import datetime
-now = datetime.now()
+
+override = os.environ.get("MJU_ACADEMIC_PLANNING_NOW", "").strip()
+now = datetime.fromisoformat(override.replace("Z", "+00:00")) if override else datetime.now()
 year = now.year
 month = now.month
-if month <= 2:
+if month <= 8:
     print(f"{year} 10")
-elif month <= 8:
-    print(f"{year} 20")
 else:
-    print(f"{year + 1} 10")
+    print(f"{year} 20")
 PY
 }
 
@@ -104,6 +105,106 @@ if [[ "${MJU_ACADEMIC_PLANNING_KEEP_TMP:-}" != "1" ]]; then
   trap 'rm -rf "$TMP_DIR"' EXIT
 fi
 
+diag_timestamp() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || python3 - <<'PY'
+from datetime import datetime, timezone
+print(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+PY
+}
+
+emit_diag() {
+  local status="$1"
+  local stage="$2"
+  local exit_code="$3"
+  local message="$4"
+  local command_display="$5"
+  local stdout_file="${6:-}"
+  local stderr_file="${7:-}"
+
+  PYTHONIOENCODING=utf-8 \
+  DIAG_STATUS="$status" \
+  DIAG_STAGE="$stage" \
+  DIAG_EXIT_CODE="$exit_code" \
+  DIAG_MESSAGE="$message" \
+  DIAG_COMMAND="$command_display" \
+  DIAG_STDOUT_FILE="$stdout_file" \
+  DIAG_STDERR_FILE="$stderr_file" \
+  DIAG_MODE="$MODE" \
+  DIAG_DISCORD_ID="$DISCORD_ID" \
+  DIAG_WHEN="$(diag_timestamp)" \
+  python3 - <<'PY' >&2
+import json
+import os
+import re
+from pathlib import Path
+
+def scrub(value: str) -> str:
+    discord_id = os.environ.get("DIAG_DISCORD_ID", "")
+    if discord_id:
+        value = value.replace(discord_id, "<discord_id>")
+    value = re.sub(r"\b\d{9,20}\b", "<number>", value)
+    return value[-2000:]
+
+def tail(path: str) -> str:
+    if not path:
+        return ""
+    try:
+        return scrub(Path(path).read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return ""
+
+payload = {
+    "feature": "academic-planning",
+    "mode": os.environ["DIAG_MODE"],
+    "status": os.environ["DIAG_STATUS"],
+    "stage": os.environ["DIAG_STAGE"],
+    "when": os.environ["DIAG_WHEN"],
+    "exitCode": int(os.environ["DIAG_EXIT_CODE"]),
+    "message": scrub(os.environ["DIAG_MESSAGE"]),
+    "command": scrub(os.environ["DIAG_COMMAND"]),
+}
+stderr_tail = tail(os.environ.get("DIAG_STDERR_FILE", ""))
+stdout_tail = tail(os.environ.get("DIAG_STDOUT_FILE", ""))
+if stderr_tail:
+    payload["stderrTail"] = stderr_tail
+if stdout_tail:
+    payload["stdoutTail"] = stdout_tail
+print("MJU_ACADEMIC_PLANNING_DIAG " + json.dumps(payload, ensure_ascii=False))
+PY
+}
+
+run_context_stage() {
+  local stage="$1"
+  local output_file="$2"
+  local required="$3"
+  shift 3
+
+  local safe_stage="${stage//[^A-Za-z0-9_.-]/_}"
+  local stderr_file="$TMP_DIR/${safe_stage}.stderr"
+  local command_display="MJU_SKIP_VIEW=$SKIP_VIEW_ENV $*"
+
+  set +e
+  MJU_SKIP_VIEW="$SKIP_VIEW_ENV" "$@" > "$output_file" 2>"$stderr_file"
+  local exit_code=$?
+  set -e
+
+  if [[ $exit_code -ne 0 ]]; then
+    local status="warning"
+    local message="optional context command failed; continuing with fallback"
+    if [[ "$required" == "1" ]]; then
+      status="failed"
+      message="required context command failed"
+    fi
+    emit_diag "$status" "$stage" "$exit_code" "$message" "$command_display" "$output_file" "$stderr_file"
+    if [[ "$required" == "1" ]]; then
+      exit "$exit_code"
+    fi
+    printf '{}\n' > "$output_file"
+  elif [[ "${MJU_ACADEMIC_PLANNING_DEBUG:-}" == "1" ]]; then
+    emit_diag "succeeded" "$stage" "0" "context command succeeded" "$command_display" "$output_file" "$stderr_file"
+  fi
+}
+
 APP_DIR="/data/users/$DISCORD_ID"
 PROFILE_JSON="$TMP_DIR/profile.json"
 GRADE_HISTORY_JSON="$TMP_DIR/grade-history.json"
@@ -116,27 +217,16 @@ INFO_JSON="$TMP_DIR/info.json"
 # final mju-news call below still uses the normal VIEW_API_URL.
 SKIP_VIEW_ENV="${MJU_ACADEMIC_PLANNING_SKIP_VIEW:-1}"
 
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json profile get > "$PROFILE_JSON"; then
-  printf '{}\n' > "$PROFILE_JSON"
-fi
-
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi grade-history > "$GRADE_HISTORY_JSON"; then
-  echo "ERR: failed to read MSI grade history for academic planning" >&2
-  cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
-  exit 1
-fi
-
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi timetable > "$CURRENT_TIMETABLE_JSON"; then
-  printf '{}\n' > "$CURRENT_TIMETABLE_JSON"
-fi
+run_context_stage "profile.get" "$PROFILE_JSON" "0" mju --app-dir "$APP_DIR" --format json profile get
+run_context_stage "msi.grade-history" "$GRADE_HISTORY_JSON" "1" mju --app-dir "$APP_DIR" --format json msi grade-history
+run_context_stage "msi.timetable.current" "$CURRENT_TIMETABLE_JSON" "0" mju --app-dir "$APP_DIR" --format json msi timetable
 
 DEPARTMENT_ARGS=("--app-dir" "$APP_DIR" "--format" "json" "msi" "department-timetable")
 if [[ -n "$YEAR" ]]; then DEPARTMENT_ARGS+=("--year" "$YEAR"); fi
 if [[ -n "$TERM_CODE" ]]; then DEPARTMENT_ARGS+=("--term-code" "$TERM_CODE"); fi
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju "${DEPARTMENT_ARGS[@]}" > "$DEPARTMENT_TIMETABLE_JSON"; then
-  if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi department-timetable > "$DEPARTMENT_TIMETABLE_JSON"; then
-    printf '{}\n' > "$DEPARTMENT_TIMETABLE_JSON"
-  fi
+run_context_stage "msi.department-timetable.requested" "$DEPARTMENT_TIMETABLE_JSON" "0" mju "${DEPARTMENT_ARGS[@]}"
+if [[ "$(tr -d '[:space:]' < "$DEPARTMENT_TIMETABLE_JSON" 2>/dev/null || true)" == "{}" ]]; then
+  run_context_stage "msi.department-timetable.default" "$DEPARTMENT_TIMETABLE_JSON" "0" mju --app-dir "$APP_DIR" --format json msi department-timetable
 fi
 
 EXPLICIT_DEPARTMENT="$DEPARTMENT" \
@@ -304,4 +394,53 @@ fi
 MJU_NEWS_ARGS+=("--personal-msi-json" "$PERSONAL_JSON")
 MJU_NEWS_ARGS+=("--completed-courses-json" "$GRADE_HISTORY_JSON")
 
-mju-news "${MJU_NEWS_ARGS[@]}"
+EXPECTED_VIEW_DATA_TYPE="graduation"
+if [[ "$MODE" == "timetable" ]]; then
+  EXPECTED_VIEW_DATA_TYPE="timetable-planner"
+fi
+
+MJU_NEWS_STDOUT="$TMP_DIR/mju-news-output.json"
+MJU_NEWS_STDERR="$TMP_DIR/mju-news.stderr"
+set +e
+mju-news "${MJU_NEWS_ARGS[@]}" > "$MJU_NEWS_STDOUT" 2>"$MJU_NEWS_STDERR"
+MJU_NEWS_EXIT=$?
+set -e
+
+if [[ $MJU_NEWS_EXIT -ne 0 ]]; then
+  emit_diag "failed" "mju-news.academic-planning" "$MJU_NEWS_EXIT" "academic planning reader command failed" "mju-news ${MJU_NEWS_ARGS[*]}" "$MJU_NEWS_STDOUT" "$MJU_NEWS_STDERR"
+  cat "$MJU_NEWS_STDOUT"
+  exit "$MJU_NEWS_EXIT"
+fi
+
+VALIDATE_STDERR="$TMP_DIR/view-validate.stderr"
+if ! EXPECTED_VIEW_DATA_TYPE="$EXPECTED_VIEW_DATA_TYPE" OUTPUT_FILE="$MJU_NEWS_STDOUT" python3 - <<'PY' 2>"$VALIDATE_STDERR"
+import json
+import os
+import sys
+from pathlib import Path
+
+expected = os.environ["EXPECTED_VIEW_DATA_TYPE"]
+try:
+    data = json.loads(Path(os.environ["OUTPUT_FILE"]).read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"invalid helper output JSON: {exc}", file=sys.stderr)
+    sys.exit(20)
+
+if not isinstance(data, dict):
+    print("helper output is not a JSON object", file=sys.stderr)
+    sys.exit(21)
+if not data.get("viewUrl"):
+    print("helper output is missing viewUrl", file=sys.stderr)
+    sys.exit(22)
+actual = data.get("viewDataType")
+if actual != expected:
+    print(f"helper output viewDataType mismatch: expected={expected} actual={actual!r}", file=sys.stderr)
+    sys.exit(23)
+PY
+then
+  emit_diag "failed" "view.validate" "1" "academic planning webview output did not match expected type" "mju-news ${MJU_NEWS_ARGS[*]}" "$MJU_NEWS_STDOUT" "$VALIDATE_STDERR"
+  cat "$MJU_NEWS_STDOUT"
+  exit 1
+fi
+
+cat "$MJU_NEWS_STDOUT"
