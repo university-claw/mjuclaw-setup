@@ -2823,6 +2823,55 @@ body {
   border: 1px solid var(--rule); border-radius: 8px; padding: 13px 14px;
   background: rgba(255,255,255,0.035); color: var(--ink-2);
 }
+.planner-diagnostics {
+  display: grid; gap: 12px; margin-top: 14px; padding: 14px;
+  border: 1px dashed rgba(255,255,255,0.24); border-radius: 8px;
+  background: rgba(255,255,255,0.026); color: var(--ink-2);
+}
+.planner-diag-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.planner-diag-head div { display: grid; gap: 3px; }
+.planner-diag-head strong { color: var(--ink); font-size: 13px; }
+.planner-diag-head span, .planner-diag-head small {
+  color: var(--ink-3); font-size: 11px; line-height: 1.4; word-break: keep-all;
+}
+.planner-diag-section { display: grid; gap: 7px; }
+.planner-diag-section h3 {
+  margin: 0; color: var(--ink-3); font-size: 11px; font-weight: 850;
+}
+.planner-diag-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px;
+}
+.planner-diag-chip {
+  min-width: 0; display: grid; gap: 4px; padding: 9px 10px;
+  border: 1px solid var(--rule); border-radius: 8px; background: rgba(0,0,0,0.16);
+}
+.planner-diag-chip span { color: var(--ink-3); font-size: 11px; font-weight: 800; }
+.planner-diag-chip strong { color: var(--ink); font-size: 20px; line-height: 1; font-variant-numeric: tabular-nums; }
+.planner-diag-chip small { color: var(--ink-4); font-size: 10px; line-height: 1.35; }
+.planner-diag-chip.empty { border-color: rgba(255,185,90,0.36); }
+.planner-diag-chip.error { border-color: rgba(255,110,110,0.42); }
+.planner-diag-buckets {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px;
+}
+.planner-diag-bucket {
+  min-width: 0; padding: 9px 10px; border: 1px solid var(--rule); border-radius: 8px;
+  background: rgba(0,0,0,0.13); display: grid; gap: 6px;
+}
+.planner-diag-bucket strong { color: var(--ink); font-size: 11px; }
+.planner-diag-bucket div { display: flex; flex-wrap: wrap; gap: 5px; }
+.planner-diag-bucket span {
+  color: var(--ink-3); font-size: 10px; line-height: 1.3; word-break: break-word;
+}
+.planner-diag-bucket div span {
+  padding: 3px 6px; border-radius: 999px; background: rgba(255,255,255,0.055);
+}
+.planner-diag-bucket em { color: var(--ink); font-style: normal; font-weight: 850; }
+.planner-diag-empty, .planner-diag-hints p {
+  margin: 0; color: var(--ink-3); font-size: 11px; line-height: 1.45;
+}
+.planner-diag-hints { display: grid; gap: 4px; }
 .planner-status-sr {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -3091,6 +3140,58 @@ type PlannerGradeFilter = {
   available: number;
 };
 
+type PlannerDiagnosticBucket = {
+  key: string;
+  count: number;
+};
+
+type PlannerDiagnosticStage = {
+  key: string;
+  label: string;
+  count: number;
+  status: "ok" | "empty" | "error";
+  message?: string;
+};
+
+type PlannerReaderDiagnostics = {
+  source: string;
+  scope: string;
+  departmentCandidates: string[];
+  stages: PlannerDiagnosticStage[];
+  categoryCounts: {
+    allTerm: PlannerDiagnosticBucket[];
+    departmentMatched: PlannerDiagnosticBucket[];
+    readerOutput: PlannerDiagnosticBucket[];
+  };
+  departmentCounts: {
+    allTerm: PlannerDiagnosticBucket[];
+    departmentMatched: PlannerDiagnosticBucket[];
+    readerOutput: PlannerDiagnosticBucket[];
+  };
+  hints: string[];
+};
+
+type PlannerUiDiagnostics = {
+  rawCourses: number;
+  completedKeys: number;
+  afterCompleted: number;
+  completedExcluded: number;
+  afterChoice: number;
+  initialSchedule: number;
+  choiceBlocked: boolean;
+  noSolution: boolean;
+  allCategoryCounts: PlannerDiagnosticBucket[];
+  afterCompletedCategoryCounts: PlannerDiagnosticBucket[];
+  selectableCategoryCounts: PlannerDiagnosticBucket[];
+  selectableGradeCounts: PlannerDiagnosticBucket[];
+  hints: string[];
+};
+
+type TimetablePlannerDiagnostics = {
+  reader?: PlannerReaderDiagnostics;
+  ui: PlannerUiDiagnostics;
+};
+
 type CatalogMeetingInput = {
   weekday?: string | number;
   day?: string | number;
@@ -3192,6 +3293,7 @@ export type TimetablePlannerModel = {
   selectedChoiceKeys: RequirementChoiceSelections;
   choiceBlocked: boolean;
   choiceMissingLabels: string[];
+  diagnostics: TimetablePlannerDiagnostics;
 };
 
 type PlannerScheduleItem = {
@@ -3210,7 +3312,7 @@ type PlannerGenerateOptions = {
 function renderTimetablePlanner(data: unknown): string {
   const model = buildTimetablePlannerModel(data);
   if (!model.courses.length) {
-    return `<section class="section planner-section"><div class="planner-empty">시간표 설계에 사용할 강의 목록이 없습니다.</div>${model.queryMeta ? `<div class="section-sub">${model.queryMeta} 기준</div>` : ""}</section>`;
+    return `<section class="section planner-section"><div class="planner-empty">시간표 설계에 사용할 강의 목록이 없습니다.</div>${model.queryMeta ? `<div class="section-sub">${model.queryMeta} 기준</div>` : ""}${renderPlannerDiagnostics(model.diagnostics)}</section>`;
   }
 
   const term = model.queryMeta || joinMeta([
@@ -3235,6 +3337,7 @@ function renderTimetablePlanner(data: unknown): string {
     choiceGroups: model.choiceGroups,
     selectedChoiceKeys: model.selectedChoiceKeys,
     choiceBlocked: model.choiceBlocked,
+    diagnostics: model.diagnostics,
   });
 
   let html = `<section class="section planner-section" data-timetable-planner>`;
@@ -3252,6 +3355,7 @@ function renderTimetablePlanner(data: unknown): string {
   html += `<div class="planner-result" data-planner-result>${scheduleHtml}</div>`;
   html += renderPlannerSearchPanel();
   html += `</div>`;
+  html += renderPlannerDiagnostics(model.diagnostics);
   html += `<script type="application/json" id="planner-data">${dataJson}</script>`;
   html += `<script>${plannerClientScript()}</script>`;
   html += `</section>`;
@@ -3269,6 +3373,58 @@ function renderPlannerControl(kind: string, label: string, value: number, max: n
 
 function renderPlannerSearchPanel(): string {
   return `<div class="planner-search-panel"><div class="planner-search-head"><input class="planner-search-input" type="search" placeholder="과목명, 교수명, 구분으로 검색" data-planner-search><span data-planner-search-count>직접 추가</span></div><div class="planner-search-results" data-planner-search-results><div class="planner-search-empty">검색어를 입력하면 추가 가능한 과목이 표시됩니다.</div></div></div>`;
+}
+
+function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): string {
+  const reader = diagnostics.reader;
+  const readerStages = reader?.stages.length
+    ? reader.stages.map(renderPlannerDiagnosticStage).join("")
+    : `<div class="planner-diag-empty">reader 진단 payload가 없습니다.</div>`;
+  const uiStages = [
+    { key: "ui.raw", label: "UI payload", count: diagnostics.ui.rawCourses, status: diagnostics.ui.rawCourses ? "ok" as const : "empty" as const },
+    { key: "ui.completedKeys", label: "이수 키", count: diagnostics.ui.completedKeys, status: "ok" as const },
+    { key: "ui.completedExcluded", label: "이수 제외", count: diagnostics.ui.completedExcluded, status: "ok" as const },
+    { key: "ui.afterCompleted", label: "이수/수강중 제외 후", count: diagnostics.ui.afterCompleted, status: diagnostics.ui.afterCompleted ? "ok" as const : "empty" as const },
+    { key: "ui.afterChoice", label: "선택조건 후", count: diagnostics.ui.afterChoice, status: diagnostics.ui.afterChoice ? "ok" as const : "empty" as const },
+    { key: "ui.initialSchedule", label: "초기 시간표", count: diagnostics.ui.initialSchedule, status: diagnostics.ui.initialSchedule ? "ok" as const : "empty" as const },
+  ].map(renderPlannerDiagnosticStage).join("");
+  const hints = [
+    ...(reader?.hints ?? []),
+    ...diagnostics.ui.hints,
+  ].filter(Boolean);
+
+  return `<div class="planner-diagnostics" data-planner-diagnostics>
+    <div class="planner-diag-head">
+      <div><strong>임시 진단 카드</strong><span>시간표 누락 원인을 찾기 위한 숫자입니다. 확인 후 제거할 수 있습니다.</span></div>
+      ${reader ? `<small>${esc(joinMeta([reader.source, reader.scope]))}</small>` : ""}
+    </div>
+    <div class="planner-diag-section"><h3>reader 단계</h3><div class="planner-diag-grid">${readerStages}</div></div>
+    <div class="planner-diag-section"><h3>웹뷰 단계</h3><div class="planner-diag-grid">${uiStages}</div></div>
+    <div class="planner-diag-section"><h3>분류 카운트</h3><div class="planner-diag-buckets">
+      ${renderPlannerDiagnosticBuckets("reader 출력", reader?.categoryCounts.readerOutput)}
+      ${renderPlannerDiagnosticBuckets("선택 가능", diagnostics.ui.selectableCategoryCounts)}
+      ${renderPlannerDiagnosticBuckets("학년", diagnostics.ui.selectableGradeCounts)}
+    </div></div>
+    <div class="planner-diag-section"><h3>학과 필터</h3><div class="planner-diag-buckets">
+      ${renderPlannerDiagnosticBuckets("학과 후보", (reader?.departmentCandidates ?? []).map((key) => ({ key, count: 1 })))}
+      ${renderPlannerDiagnosticBuckets("DB/JSON 학과", reader?.departmentCounts.departmentMatched)}
+    </div></div>
+    ${hints.length ? `<div class="planner-diag-hints">${hints.map((hint) => `<p>${esc(hint)}</p>`).join("")}</div>` : ""}
+  </div>`;
+}
+
+function renderPlannerDiagnosticStage(stage: PlannerDiagnosticStage): string {
+  return `<div class="planner-diag-chip ${esc(stage.status)}" data-diag-stage="${esc(stage.key)}"><span>${esc(stage.label)}</span><strong>${stage.count}</strong>${stage.message ? `<small>${esc(stage.message)}</small>` : ""}</div>`;
+}
+
+function renderPlannerDiagnosticBuckets(
+  label: string,
+  buckets: PlannerDiagnosticBucket[] | undefined,
+): string {
+  if (!buckets?.length) {
+    return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><span>없음</span></div>`;
+  }
+  return `<div class="planner-diag-bucket"><strong>${esc(label)}</strong><div>${buckets.slice(0, 8).map((bucket) => `<span>${esc(bucket.key)} <em>${bucket.count}</em></span>`).join("")}</div></div>`;
 }
 
 function renderPlannerAvailabilityControls(model: TimetablePlannerModel): string {
@@ -3461,6 +3617,16 @@ export function buildTimetablePlannerModel(data: unknown): TimetablePlannerModel
     : showAllCourses
       ? selectableCourses.filter((course) => course.meetings.length > 0)
       : generateTimetableSchedule(selectableCourses, majorCount, electiveCount, 0);
+  const noSolution = !choiceBlocked && !showAllCourses && initialSchedule.length !== majorCount + electiveCount;
+  const diagnostics = buildTimetablePlannerDiagnostics(d, {
+    allCourses,
+    completedKeys,
+    courses,
+    selectableCourses,
+    initialSchedule,
+    choiceBlocked,
+    noSolution,
+  });
   return {
     courses,
     queryMeta,
@@ -3473,13 +3639,152 @@ export function buildTimetablePlannerModel(data: unknown): TimetablePlannerModel
     unknownCourses,
     initialSchedule,
     completedExcludedCount: allCourses.length - courses.length,
-    noSolution: !choiceBlocked && !showAllCourses && initialSchedule.length !== majorCount + electiveCount,
+    noSolution,
     showAllCourses,
     choiceGroups,
     selectedChoiceKeys,
     choiceBlocked,
     choiceMissingLabels: choiceMissing.map((group) => group.label),
+    diagnostics,
   };
+}
+
+function buildTimetablePlannerDiagnostics(
+  rawData: Record<string, unknown>,
+  args: {
+    allCourses: PlannerCourse[];
+    completedKeys: Set<string>;
+    courses: PlannerCourse[];
+    selectableCourses: PlannerCourse[];
+    initialSchedule: PlannerCourse[];
+    choiceBlocked: boolean;
+    noSolution: boolean;
+  },
+): TimetablePlannerDiagnostics {
+  const uiHints: string[] = [];
+  if (!args.allCourses.length) {
+    uiHints.push("웹뷰 payload에서 강의 목록을 찾지 못했습니다. reader 출력 또는 wrapper 데이터 매핑을 확인해야 합니다.");
+  } else if (!args.courses.length) {
+    uiHints.push("강의 목록은 들어왔지만 이수/수강 중 제외 단계에서 모두 제거되었습니다. 이수 과목 매칭 키를 확인해야 합니다.");
+  } else if (!args.selectableCourses.length) {
+    uiHints.push("이수 제외 후 강의는 있지만 졸업요건 선택값 필터 후 모두 제거되었습니다. 영어/수학 등 선택형 기준 매핑을 확인해야 합니다.");
+  }
+  if (args.selectableCourses.length && !args.selectableCourses.some((course) => course.category === "major")) {
+    uiHints.push("웹뷰 선택 가능 목록에 전공 과목이 없습니다. reader category 값 또는 웹뷰 분류 규칙을 확인해야 합니다.");
+  }
+  if (args.selectableCourses.length && !args.selectableCourses.some((course) => course.category === "elective")) {
+    uiHints.push("웹뷰 선택 가능 목록에 교양/선택 과목이 없습니다. 공통교양 공유 필터와 웹뷰 분류 규칙을 확인해야 합니다.");
+  }
+  if (args.noSolution) {
+    uiHints.push("선택 가능 강의는 있지만 요청 개수만큼 충돌 없는 초기 시간표를 만들지 못했습니다. 시간표 생성 조건을 확인해야 합니다.");
+  }
+  if (args.choiceBlocked) {
+    uiHints.push("필수 선택형 졸업요건이 선택되지 않아 시간표 생성이 대기 중입니다.");
+  }
+
+  return {
+    reader: normalizePlannerReaderDiagnostics(rawData.courseCatalogDiagnostics ?? rawData.catalogDiagnostics),
+    ui: {
+      rawCourses: args.allCourses.length,
+      completedKeys: args.completedKeys.size,
+      afterCompleted: args.courses.length,
+      completedExcluded: args.allCourses.length - args.courses.length,
+      afterChoice: args.selectableCourses.length,
+      initialSchedule: args.initialSchedule.length,
+      choiceBlocked: args.choiceBlocked,
+      noSolution: args.noSolution,
+      allCategoryCounts: plannerDiagnosticBucketsFromCourses(args.allCourses, "category"),
+      afterCompletedCategoryCounts: plannerDiagnosticBucketsFromCourses(args.courses, "category"),
+      selectableCategoryCounts: plannerDiagnosticBucketsFromCourses(args.selectableCourses, "category"),
+      selectableGradeCounts: plannerDiagnosticBucketsFromCourses(args.selectableCourses, "grade"),
+      hints: uiHints,
+    },
+  };
+}
+
+function normalizePlannerReaderDiagnostics(value: unknown): PlannerReaderDiagnostics | undefined {
+  const record = unknownRecord(value);
+  if (!Object.keys(record).length) return undefined;
+  const categoryCounts = unknownRecord(record.categoryCounts);
+  const departmentCounts = unknownRecord(record.departmentCounts);
+  const scope = unknownRecord(record.scope);
+  return {
+    source: stringFrom(record.source) || "unknown",
+    scope: joinMeta([
+      numberFrom(scope.year) ?? stringFrom(scope.year),
+      plannerTermCodeLabel(stringFrom(scope.termCode)),
+      stringFrom(scope.department),
+    ]),
+    departmentCandidates: unknownStringArray(record.departmentCandidates),
+    stages: unknownArray(record.stages).map((stage, index) => {
+      const item = unknownRecord(stage);
+      const status = stringFrom(item.status);
+      return {
+        key: stringFrom(item.key) || `reader.${index + 1}`,
+        label: stringFrom(item.label) || stringFrom(item.key) || `reader ${index + 1}`,
+        count: numberFrom(item.count) ?? 0,
+        status: status === "error" ? "error" : status === "empty" ? "empty" : "ok",
+        ...(stringFrom(item.message) ? { message: stringFrom(item.message) } : {}),
+      };
+    }),
+    categoryCounts: {
+      allTerm: normalizePlannerDiagnosticBuckets(categoryCounts.allTerm),
+      departmentMatched: normalizePlannerDiagnosticBuckets(categoryCounts.departmentMatched),
+      readerOutput: normalizePlannerDiagnosticBuckets(categoryCounts.readerOutput),
+    },
+    departmentCounts: {
+      allTerm: normalizePlannerDiagnosticBuckets(departmentCounts.allTerm),
+      departmentMatched: normalizePlannerDiagnosticBuckets(departmentCounts.departmentMatched),
+      readerOutput: normalizePlannerDiagnosticBuckets(departmentCounts.readerOutput),
+    },
+    hints: unknownStringArray(record.hints),
+  };
+}
+
+function unknownRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function unknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function unknownStringArray(value: unknown): string[] {
+  return unknownArray(value).map(stringFrom).filter(Boolean);
+}
+
+function normalizePlannerDiagnosticBuckets(value: unknown): PlannerDiagnosticBucket[] {
+  return unknownArray(value).map((item) => {
+    const record = unknownRecord(item);
+    return {
+      key: stringFrom(record.key) || "(empty)",
+      count: numberFrom(record.count) ?? 0,
+    };
+  }).filter((bucket) => bucket.key || bucket.count);
+}
+
+function plannerDiagnosticBucketsFromCourses(
+  courses: PlannerCourse[],
+  field: "category" | "grade",
+): PlannerDiagnosticBucket[] {
+  const counts = new Map<string, number>();
+  for (const course of courses) {
+    const key = field === "category"
+      ? plannerDiagnosticCategoryLabel(course.category)
+      : course.gradeLevel || "학년 미제공";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"))
+    .map(([key, count]) => ({ key, count }));
+}
+
+function plannerDiagnosticCategoryLabel(category: PlannerCategory): string {
+  if (category === "major") return "전공";
+  if (category === "elective") return "교양/선택";
+  return "미분류";
 }
 
 function extractCatalogCourses(d: Record<string, unknown>): CatalogCourseInput[] {
