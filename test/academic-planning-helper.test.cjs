@@ -71,6 +71,8 @@ async function createFixture(t) {
 
   const stubBin = path.join(testDir, "bin");
   await fs.mkdir(stubBin, { recursive: true });
+  const usersRoot = path.join(testDir, "users");
+  await fs.mkdir(usersRoot, { recursive: true });
   const mjuCalls = path.join(testDir, "mju-calls.txt");
   const mjuNewsArgs = path.join(testDir, "mju-news-args.txt");
 
@@ -89,6 +91,14 @@ if [[ "\${MJU_SKIP_VIEW:-}" != "1" ]]; then
   exit 3
 fi
 printf '%s\\n' "$*" >> "${toBashPath(mjuCalls)}"
+APP_DIR=""
+previous=""
+for arg in "$@"; do
+  if [[ "$previous" == "--app-dir" ]]; then
+    APP_DIR="$arg"
+  fi
+  previous="$arg"
+done
 joined=" $* "
 case "$joined" in
   *" profile get"*)
@@ -97,6 +107,16 @@ case "$joined" in
 JSON
     ;;
   *" msi grade-history"*)
+    if [[ "\${MJU_STUB_GRADE_HISTORY_FAILURE:-}" == "main_context" ]]; then
+      echo '{"error":{"message":"[msi.open_menu.main_context_failed] missing csrf"}}' >&2
+      exit 1
+    fi
+    if [[ "\${MJU_STUB_GRADE_HISTORY_FAILURE:-}" == "password_change" ]]; then
+      mkdir -p "$APP_DIR/snapshots"
+      printf '%s\\n' '<html><body>비밀번호 변경</body></html>' > "$APP_DIR/snapshots/msi-main.html"
+      echo '{"error":{"message":"[msi.login.password_change_interstitial_detected] MSI login landed on a password-change interstitial"}}' >&2
+      exit 1
+    fi
     cat <<'JSON'
 {"studentInfo":{"학과":"컴퓨터공학과","학번":"202112345"},"termRecords":[{"year":2021,"termLabel":"1학기","courses":[{"courseTitle":"미적분학1","courseCode":"KME02101","credit":3,"categoryLabel":"학문기초교양"}]}]}
 JSON
@@ -127,14 +147,19 @@ printf '{"viewUrl":"http://view.local/%s","ok":true}\\n' "\${2:-unknown}"
 `, "utf8");
   await fs.chmod(mjuNewsStub, 0o755);
 
-  return { stubBin, mjuCalls, mjuNewsArgs };
+  return { stubBin, usersRoot, mjuCalls, mjuNewsArgs };
 }
 
-async function runHelper(fixture, args) {
+async function runHelper(fixture, args, env = {}) {
   const helper = toBashPath(path.join(root, "bin", "mju-academic-planning"));
+  const envPrefix = Object.entries(env).map(
+    ([key, value]) => `${key}=${shellQuote(value)}`
+  );
   const command = [
     `PATH=${shellQuote(toBashPath(fixture.stubBin))}:$PATH`,
     "MJU_ACADEMIC_PLANNING_KEEP_TMP=1",
+    `USER_DATA_ROOT=${shellQuote(toBashPath(fixture.usersRoot))}`,
+    ...envPrefix,
     shellQuote(helper),
     ...args.map(shellQuote),
   ].join(" ");
@@ -208,4 +233,38 @@ bashTest("academic planning helper routes timetable generation without UCheck", 
   assert.match(mjuCalls, /msi grade-history/);
   assert.match(mjuCalls, /msi department-timetable/);
   assert.doesNotMatch(mjuCalls, /ucheck/);
+});
+
+bashTest("academic planning helper reports a specific grade-history menu context failure", async (t) => {
+  const fixture = await createFixture(t);
+  const result = await runHelper(
+    fixture,
+    [
+      "graduation-roadmap",
+      "123456789012345678",
+      "--format",
+      "json",
+    ],
+    { MJU_STUB_GRADE_HISTORY_FAILURE: "main_context" }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_main_context_failed/);
+});
+
+bashTest("academic planning helper reports a password-change interstitial candidate", async (t) => {
+  const fixture = await createFixture(t);
+  const result = await runHelper(
+    fixture,
+    [
+      "graduation-roadmap",
+      "123456789012345678",
+      "--format",
+      "json",
+    ],
+    { MJU_STUB_GRADE_HISTORY_FAILURE: "password_change" }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_password_change_interstitial_detected/);
 });
