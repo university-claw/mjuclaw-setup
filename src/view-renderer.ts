@@ -5860,7 +5860,7 @@ function graduationMoreButton(
   const hiddenCount = rows.filter((row) => row.moreHidden).length;
   const potentialCount = rows.filter((row) => !row.choicePrompt).length;
   if (hiddenCount === 0 && potentialCount <= GRADUATION_MORE_BATCH_SIZE) return "";
-  return `<button class="grad-more-button" type="button" data-grad-more data-grad-more-batch="${GRADUATION_MORE_BATCH_SIZE}"${hiddenCount ? "" : " hidden"}>${GRADUATION_MORE_BATCH_SIZE}개 더보기</button>`;
+  return `<button class="grad-more-button" type="button" data-grad-more data-grad-more-batch="${GRADUATION_MORE_BATCH_SIZE}"${hiddenCount ? "" : " hidden"}>더보기</button>`;
 }
 
 function renderGraduationSourceSummary(
@@ -6315,7 +6315,7 @@ const updateMore = (body) => {
   }
   if (button) {
     button.hidden = hidden === 0;
-    button.textContent = batch + "개 더보기";
+    button.textContent = "더보기";
   }
 };
 const syncChoices = (resetMore) => {
@@ -6856,11 +6856,51 @@ function graduationCourseMatchesSectionScore(course: GraduationCourseRef, sectio
   return 0;
 }
 
+function graduationBestRequiredSection(
+  sections: GraduationRequirementSection[],
+  predicate: (section: GraduationRequirementSection) => boolean,
+): GraduationRequirementSection | undefined {
+  return sections
+    .filter(predicate)
+    .sort((a, b) => (graduationCreditNumber(b.required) ?? 0) - (graduationCreditNumber(a.required) ?? 0))[0];
+}
+
+function graduationCappedSectionCredits(section: GraduationRequirementSection | undefined): number {
+  if (!section) return 0;
+  const earned = graduationCreditNumber(section.earned) ?? 0;
+  const required = graduationCreditNumber(section.required);
+  return required == null ? earned : Math.min(earned, required);
+}
+
+function graduationResidualFreeElectiveCredits(
+  sections: GraduationRequirementSection[],
+  completedCourses: GraduationCourseRef[],
+): number {
+  const totalSection = sections.find(graduationSectionLooksLikeTotal);
+  const totalEarned = graduationCreditNumber(totalSection?.earned) ??
+    completedCourses.reduce((sum, course) => sum + graduationCourseCredit(course), 0);
+  if (!totalEarned) return 0;
+
+  const majorSection = graduationBestRequiredSection(
+    sections,
+    (section) => !graduationFreeElectiveSection(section) && graduationMajorSection(section),
+  );
+  const liberalSection = sections.find(graduationSectionLooksLikeLiberalCreditRollup) ??
+    graduationBestRequiredSection(
+      sections,
+      (section) => !graduationFreeElectiveSection(section) && /교양|liberal/i.test(section.label),
+    );
+
+  const allocated = graduationCappedSectionCredits(majorSection) +
+    graduationCappedSectionCredits(liberalSection);
+  return Math.max(0, totalEarned - allocated);
+}
+
 function graduationApplyCompletedCourses(
   creditGaps: GraduationRequirementSection[],
   completedCourses: GraduationCourseRef[],
 ): GraduationRequirementSection[] {
-  if (!completedCourses.length || !creditGaps.length) return creditGaps;
+  if (!creditGaps.length) return creditGaps;
 
   // Graduation roadmap readers can provide official requirements and taken-course history
   // as separate top-level payloads. The view must merge them before rendering area cards.
@@ -6870,20 +6910,22 @@ function graduationApplyCompletedCourses(
   }));
   const assignments = new Map<number, GraduationCourseRef[]>();
 
-  completedCourses.forEach((course) => {
-    let bestIndex = -1;
-    let bestScore = 0;
-    sections.forEach((section, index) => {
-      if (graduationSectionLooksLikeTotal(section)) return;
-      const score = graduationCourseMatchesSectionScore(course, section);
-      if (score > bestScore) {
-        bestIndex = index;
-        bestScore = score;
-      }
+  if (completedCourses.length) {
+    completedCourses.forEach((course) => {
+      let bestIndex = -1;
+      let bestScore = 0;
+      sections.forEach((section, index) => {
+        if (graduationSectionLooksLikeTotal(section)) return;
+        const score = graduationCourseMatchesSectionScore(course, section);
+        if (score > bestScore) {
+          bestIndex = index;
+          bestScore = score;
+        }
+      });
+      if (bestIndex < 0 || bestScore <= 0) return;
+      assignments.set(bestIndex, [...(assignments.get(bestIndex) ?? []), course]);
     });
-    if (bestIndex < 0 || bestScore <= 0) return;
-    assignments.set(bestIndex, [...(assignments.get(bestIndex) ?? []), course]);
-  });
+  }
 
   sections.forEach((section, index) => {
     const completed = assignments.get(index) ?? [];
@@ -6918,6 +6960,16 @@ function graduationApplyCompletedCourses(
     const required = graduationCreditNumber(totalSection.required);
     const earned = graduationCreditNumber(totalSection.earned);
     if (required != null && earned != null) totalSection.gap = Math.max(0, required - earned);
+  }
+
+  const freeElectiveSection = sections.find(graduationFreeElectiveSection);
+  if (freeElectiveSection) {
+    const residualCredits = graduationResidualFreeElectiveCredits(sections, completedCourses);
+    const currentEarned = graduationCreditNumber(freeElectiveSection.earned) ?? 0;
+    if (residualCredits > currentEarned) freeElectiveSection.earned = residualCredits;
+    const required = graduationCreditNumber(freeElectiveSection.required);
+    const earned = graduationCreditNumber(freeElectiveSection.earned);
+    if (required != null && earned != null) freeElectiveSection.gap = Math.max(0, required - earned);
   }
 
   return sections;
