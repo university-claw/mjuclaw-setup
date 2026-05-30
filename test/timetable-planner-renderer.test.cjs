@@ -114,6 +114,56 @@ test("timetable planner keeps course catalog query context", () => {
   assert.match(html, /분류 전공/);
 });
 
+test("timetable planner renders temporary catalog diagnostics", () => {
+  const rawData = {
+    majorCount: 0,
+    electiveCount: 1,
+    query: {
+      year: 2026,
+      termCode: "10",
+      department: "15611 컴퓨터공학전공",
+    },
+    completedCourses: [
+      { courseTitle: "Data Structures" },
+    ],
+    items: [
+      { courseTitle: "Data Structures", category: "major", credit: 3, meetings: [{ dayOfWeek: 1, rawTime: "09:00-09:50" }] },
+      { courseTitle: "Writing", category: "liberal", credit: 2, meetings: [{ dayOfWeek: 2, rawTime: "10:00-10:50" }] },
+    ],
+    courseCatalogDiagnostics: {
+      source: "database",
+      scope: { year: 2026, termCode: "10", department: "15611 컴퓨터공학전공" },
+      departmentCandidates: ["15611", "컴퓨터공학전공"],
+      stages: [
+        { key: "db.term.all", label: "DB term", count: 10, status: "ok" },
+        { key: "db.term.departmentMatched", label: "DB department", count: 2, status: "ok" },
+        { key: "reader.output", label: "reader output", count: 2, status: "ok" },
+      ],
+      categoryCounts: {
+        allTerm: [{ key: "major", count: 4 }, { key: "liberal", count: 6 }],
+        departmentMatched: [{ key: "major", count: 1 }, { key: "liberal", count: 1 }],
+        readerOutput: [{ key: "major", count: 1 }, { key: "liberal", count: 1 }],
+      },
+      departmentCounts: {
+        allTerm: [{ key: "15611 컴퓨터공학전공", count: 1 }],
+        departmentMatched: [{ key: "15611 컴퓨터공학전공", count: 1 }],
+        readerOutput: [{ key: "15611 컴퓨터공학전공", count: 1 }],
+      },
+      hints: ["diagnostic hint"],
+    },
+  };
+  const html = renderViewHtml(plannerEntry(rawData));
+
+  assert.match(html, /data-planner-diagnostics/);
+  assert.match(html, /data-diag-stage="db.term.all"/);
+  assert.match(html, /data-diag-stage="db.term.departmentMatched"/);
+  assert.match(html, /data-diag-stage="reader.output"/);
+  assert.match(html, /data-diag-stage="ui.completedExcluded"/);
+  assert.match(html, /diagnostic hint/);
+  assert.match(html, /major <em>1<\/em>/);
+  assert.match(html, /liberal <em>1<\/em>/);
+});
+
 test("timetable planner hides curriculum codes from category labels", () => {
   const model = buildTimetablePlannerModel({
     entries: [
