@@ -42,6 +42,22 @@ test("runtime instructions avoid removed current-grade commands", () => {
   assert.match(bootstrap, /target `scope`가 `department`[\s\S]*`course`[\s\S]*강의별 강의평가/);
 });
 
+test("runtime instructions route notification domains to distinct alert helpers", () => {
+  const bootstrap = fs.readFileSync(path.join(root, "workspace", "BOOTSTRAP.md"), "utf8");
+  const sharedSkill = fs.readFileSync(path.join(root, "skills", "mju-shared", "SKILL.md"), "utf8");
+
+  for (const content of [bootstrap, sharedSkill]) {
+    assert.match(content, /공지[\s\S]*mju-news-alert/);
+    assert.match(content, /출석[\s\S]*mju-attendance-alert/);
+    assert.match(content, /셔틀[\s\S]*mju-shuttle-alert/);
+    assert.match(content, /셔틀 알림 켜줘[\s\S]*mju-shuttle-alert subscribe/);
+    assert.match(content, /셔틀 알림 등록된[\s\S]*mju-shuttle-alert status/);
+    assert.match(content, /mju-news-alert[\s\S]*sources[\s\S]*shuttle[\s\S]*추가[\s\S]*대체하지/);
+    assert.match(content, /등록된 알림[\s\S]*mju-news-alert status[\s\S]*mju-attendance-alert status[\s\S]*mju-shuttle-alert status/);
+    assert.match(content, /status helper 없이[\s\S]*확인해보니/);
+  }
+});
+
 test("runtime instructions route academic planning away from legacy MSI and UCheck", () => {
   const bootstrap = fs.readFileSync(path.join(root, "workspace", "BOOTSTRAP.md"), "utf8");
   const soul = fs.readFileSync(path.join(root, "workspace", "SOUL.md"), "utf8");

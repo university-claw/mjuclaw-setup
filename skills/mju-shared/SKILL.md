@@ -75,6 +75,26 @@ metadata:
 - Skills catalog: `mju skills list`
 - 셔틀 알림: `mju-shuttle-alert subscribe|refresh|unsubscribe|status <DISCORD_USER_ID>`
 
+## 알림 Helper 선택
+
+알림 요청은 공지/출석/셔틀 도메인별로 helper가 다릅니다. "알림"이라는 단어만 보고 공지 알림으로 처리하지 말고, 사용자가 말한 대상을 먼저 분류하세요.
+
+| 요청 도메인 | 대표 표현 | helper |
+|---|---|---|
+| 공지 알림 | 공지, 뉴스, 학사공지, 장학, 취업, 행사 | `mju-news-alert status|preset|subscribe|unsubscribe <DISCORD_USER_ID>` |
+| 출석 알림 | 출석, UCheck, 출석체크, 출결, 결석 | `mju-attendance-alert status|subscribe|refresh|unsubscribe <DISCORD_USER_ID>` |
+| 셔틀 알림 | 셔틀, 셔틀버스, 통학버스, 버스 출발, 마지막 수업 후 셔틀 | `mju-shuttle-alert status|subscribe|refresh|unsubscribe <DISCORD_USER_ID>` |
+
+규칙:
+
+- "셔틀 알림 켜줘"는 `mju-shuttle-alert subscribe <DISCORD_USER_ID>`입니다.
+- "셔틀 알림 등록된 거 있어?", "셔틀 알림 상태 확인"은 `mju-shuttle-alert status <DISCORD_USER_ID>`입니다.
+- 셔틀 알림 요청을 `mju-news-alert`로 처리하지 않습니다.
+- `mju-news-alert` sources에 `shuttle`을 추가해 셔틀 출발 알림을 대체하지 않습니다.
+- 출석 알림 요청도 공지 알림이 아니므로 `mju-news-alert`로 처리하지 않습니다.
+- "등록된 알림 뭐 있어?", "알림 상태 보여줘"처럼 도메인이 특정되지 않은 전체 상태 질문은 `mju-news-alert status`, `mju-attendance-alert status`, `mju-shuttle-alert status`를 모두 실행한 뒤 공지/출석/셔틀로 나누어 요약합니다.
+- status helper 없이 "확인해보니"라고 답하지 않습니다.
+
 ## 데이터 표시
 
 학사 데이터를 조회한 후 상세 결과를 보여줘야 할 때:
@@ -90,7 +110,7 @@ metadata:
 
 ## 셔틀 출발 알림
 
-- 사용자가 “마지막 수업 끝나고 셔틀 알려줘”, “셔틀 출발 알림 켜줘”처럼 명시적으로 신청하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID>`를 실행합니다.
+- 사용자가 “마지막 수업 끝나고 셔틀 알려줘”, “셔틀 출발 알림 켜줘”, “셔틀 알림 켜줘”처럼 명시적으로 신청하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID>`를 실행합니다.
 - 기본 리드타임은 10분입니다. 사용자가 “5분 전”처럼 지정하면 `mju-shuttle-alert subscribe <DISCORD_USER_ID> 5`를 사용합니다.
 - 셔틀 시간표는 학기별 공지 PDF를 사람이 검수한 정적 JSON(`/opt/mjuclaw/shuttles/current.json`)을 사용합니다.
 - 사용자 시간표나 정적 셔틀 JSON이 바뀐 뒤 재계산이 필요하면 `mju-shuttle-alert refresh <DISCORD_USER_ID>`를 실행합니다.

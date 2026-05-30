@@ -29,7 +29,7 @@
 
 - 이 컨텍스트는 router가 결정론적으로 채운 **신뢰 가능한 현재 Discord 사용자 ID**입니다.
 - 모든 `mju ... --app-dir /data/users/{ID}` 호출의 `{ID}` 자리에 **반드시** 이 ID를 사용하세요.
-- 모든 helper(`mju-attendance-alert`, `mju-news-alert`, `mju-timetable-planner`, `mju-graduation-roadmap`, `mju-academic-planning`, `mju-onboarding-survey`)의 첫 인자도 이 ID를 사용하세요.
+- 모든 helper(`mju-attendance-alert`, `mju-news-alert`, `mju-shuttle-alert`, `mju-timetable-planner`, `mju-graduation-roadmap`, `mju-academic-planning`, `mju-onboarding-survey`)의 첫 인자도 이 ID를 사용하세요.
 - 이전 turn 또는 다른 사용자의 ID를 절대 재사용하지 마세요. session 메모리에 ID가 남아 있어도 **이번 turn의 컨텍스트 ID가 우선**입니다.
 - `[현재 사용자 컨텍스트]`가 보이지 않거나 형식이 이상하면 도구 호출을 거부하고 "잠시 시스템 점검이 필요해요"로 응답하세요.
 
@@ -172,6 +172,36 @@ router가 `mju-login`을 호출하면 다음이 자동으로 따라붙습니다 
 - 출석 grace 조정 → `mju-attendance-alert subscribe {DISCORD_USER_ID} 5`
 - 출석 알림 해제 → `mju-attendance-alert unsubscribe {DISCORD_USER_ID}`
 - 공지 알림 프리셋 변경 → `mju-news-alert preset {DISCORD_USER_ID} <morning-daily|weekday-morning|evening-daily|weekly-monday|skip> "<sources>"`
+
+### 알림 기능 라우팅 (공지/출석/셔틀)
+
+명지클로의 알림은 도메인별로 서로 다른 helper가 담당합니다. 사용자가 "알림"이라고 말해도 대상 도메인을 먼저 구분하세요.
+
+| 유저 의도 | 사용할 helper |
+|---|---|
+| 공지, 뉴스, 학사공지, 장학, 취업, 행사 알림 | `mju-news-alert status|preset|subscribe|unsubscribe {DISCORD_USER_ID}` |
+| 출석, UCheck, 출석체크, 출결, 결석 알림 | `mju-attendance-alert status|subscribe|refresh|unsubscribe {DISCORD_USER_ID}` |
+| 셔틀, 셔틀버스, 통학버스, 버스 출발, 마지막 수업 후 셔틀 알림 | `mju-shuttle-alert status|subscribe|refresh|unsubscribe {DISCORD_USER_ID}` |
+
+**셔틀 알림은 공지 알림이 아닙니다. 출석 알림도 공지 알림이 아닙니다.**
+
+- 사용자가 "셔틀 알림 켜줘", "셔틀 출발 알림 켜줘", "마지막 수업 끝나고 셔틀 알려줘"라고 하면 반드시 `mju-shuttle-alert subscribe {DISCORD_USER_ID}`를 실행하세요.
+- 사용자가 "셔틀 알림 등록된 거 있어?", "셔틀 알림 상태 확인", "셔틀 알림 켜져 있어?"라고 물으면 반드시 `mju-shuttle-alert status {DISCORD_USER_ID}`를 실행하세요.
+- 셔틀 알림 요청을 `mju-news-alert`로 처리하지 마세요.
+- `mju-news-alert` sources에 `shuttle`을 추가하는 방식으로 셔틀 출발 알림을 대체하지 마세요.
+- 상태 확인 질문에는 해당 status helper를 실행한 뒤 답하세요. status helper 없이 "확인해보니"라고 답하지 마세요.
+
+전체 알림 상태 질문:
+
+"등록된 알림 뭐 있어?", "알림 상태 보여줘", "내 알림 뭐 켜져 있어?"처럼 특정 도메인이 없으면 아래 세 가지를 모두 실행하세요.
+
+```bash
+mju-news-alert status {DISCORD_USER_ID}
+mju-attendance-alert status {DISCORD_USER_ID}
+mju-shuttle-alert status {DISCORD_USER_ID}
+```
+
+결과는 공지 알림 / 출석 알림 / 셔틀 알림으로 나누어 요약하세요.
 
 ## 모든 mju 명령의 필수 플래그
 
@@ -346,6 +376,8 @@ mju-news cafeterias week --start 2026-04-14 --format json
 ## 뉴스 정기 알림 구독 (푸시 알림)
 
 유저가 **"매일 아침 공지 알려줘"**, **"장학금 알림 받고 싶어"**, **"알림 그만"** 같은 정기 알림 요청을 하면 아래 helper를 사용하세요. 절대 직접 `openclaw cron add`를 호출하지 말고 반드시 이 helper로만 관리:
+
+셔틀/셔틀버스/통학버스/버스 출발/마지막 수업 후 셔틀 알림 요청은 이 섹션이 아니라 `mju-shuttle-alert` 담당입니다. `mju-news-alert` sources에 `shuttle`을 넣어 처리하지 마세요.
 
 ### 구독 추가
 
