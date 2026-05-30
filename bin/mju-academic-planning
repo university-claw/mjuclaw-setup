@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deterministic academic-planning helper for the OpenClaw agent.
+# Deterministic academic-planning helper for mjuclaw.
 #
 # It gathers the current Discord user's MSI context first, then calls
 # mju-news academic-planning with stable department/student/course inputs.
@@ -106,6 +106,7 @@ need_bin python3
 default_term() {
   python3 - <<'PY'
 from datetime import datetime
+
 now = datetime.now()
 year = now.year
 month = now.month
@@ -127,6 +128,7 @@ classify_grade_history_failure() {
   GRADE_HISTORY_APP_DIR="$app_dir" \
   python3 - <<'PY'
 import os
+import re
 from pathlib import Path
 
 def read(path: str) -> str:
@@ -137,10 +139,15 @@ def read(path: str) -> str:
 
 stdout_text = read(os.environ["GRADE_HISTORY_STDOUT"])
 stderr_text = read(os.environ["GRADE_HISTORY_STDERR"])
-app_dir = Path(os.environ["GRADE_HISTORY_APP_DIR"])
-main_html = read(str(app_dir / "snapshots" / "msi-main.html"))
-combined = "\n".join([stdout_text, stderr_text, main_html])
+combined = "\n".join([stdout_text, stderr_text])
 lower = combined.lower()
+
+def last_msi_diagnostic() -> str:
+    matches = re.findall(r"\[msi\.([A-Za-z0-9_.-]+)\]", combined)
+    if not matches:
+        return ""
+    detail = re.sub(r"[^A-Za-z0-9_-]+", "_", matches[-1]).strip("_")
+    return f"grade_history_{detail}" if detail else ""
 
 def has_password_change_interstitial() -> bool:
     url_or_code_hit = any(
@@ -156,17 +163,20 @@ def has_password_change_interstitial() -> bool:
         "password" in lower
         or "passwd" in lower
         or "pwd" in lower
-        or "비밀번호" in combined
+        or "\ube44\ubc00\ubc88\ud638" in combined
     )
     change_hit = (
         "change" in lower
         or "update" in lower
-        or "변경" in combined
-        or "수정" in combined
+        or "\ubcc0\uacbd" in combined
+        or "\uc218\uc815" in combined
     )
     return url_or_code_hit or (password_hit and change_hit)
 
-if has_password_change_interstitial():
+msi_diagnostic = last_msi_diagnostic()
+if msi_diagnostic:
+    print(msi_diagnostic)
+elif has_password_change_interstitial():
     print("grade_history_password_change_interstitial_detected")
 elif "[msi.open_menu.main_context_failed]" in combined:
     print("grade_history_main_context_failed")
@@ -174,17 +184,17 @@ elif "[msi.open_menu.go_body_failed]" in combined:
     print("grade_history_go_body_failed")
 elif "[msi.open_menu.page_open_failed]" in combined:
     print("grade_history_page_open_failed")
-elif "저장된 로그인 정보가 없습니다" in combined:
+elif "\uc800\uc7a5\ub41c \ub85c\uadf8\uc778 \uc815\ubcf4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4" in combined:
     print("grade_history_stored_login_missing")
-elif "저장된 비밀번호를 읽지 못했습니다" in combined:
+elif "\uc800\uc7a5\ub41c \ube44\ubc00\ubc88\ud638\ub97c \uc77d\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4" in combined:
     print("grade_history_stored_password_unreadable")
-elif "SSO 로그인에 실패" in combined:
+elif "SSO \ub85c\uadf8\uc778\uc5d0 \uc2e4\ud328" in combined:
     print("grade_history_sso_login_failed")
 elif "signin-form" in lower or "sso form" in lower:
     print("grade_history_sso_form_parse_failed")
 elif "callback URL" in combined or "callback url" in lower:
     print("grade_history_sso_callback_missing")
-elif "code/_csrf" in combined or "code" in lower and "_csrf" in lower:
+elif "code/_csrf" in combined or ("code" in lower and "_csrf" in lower):
     print("grade_history_sso_callback_fields_missing")
 elif "login_security" in lower and "_csrf" in lower:
     print("grade_history_login_security_csrf_missing")
@@ -192,6 +202,172 @@ elif "csrf" in lower:
     print("grade_history_csrf_missing")
 else:
     print("grade_history_unknown_failed")
+PY
+}
+
+should_retry_grade_history() {
+  case "$1" in
+    grade_history_login_*|\
+    grade_history_saved_session_*|\
+    grade_history_open_menu_*|\
+    grade_history_password_change_interstitial_detected|\
+    grade_history_main_context_failed|\
+    grade_history_go_body_failed|\
+    grade_history_page_open_failed|\
+    grade_history_unknown_failed)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+classify_msi_session_reset_failure() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  MSI_SESSION_RESET_STDOUT="$stdout_file" \
+  MSI_SESSION_RESET_STDERR="$stderr_file" \
+  python3 - <<'PY'
+import os
+from pathlib import Path
+
+def read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")[:1000000]
+    except Exception:
+        return ""
+
+combined = "\n".join([
+    read(os.environ["MSI_SESSION_RESET_STDOUT"]),
+    read(os.environ["MSI_SESSION_RESET_STDERR"]),
+])
+lower = combined.lower()
+
+if "unknown command" in lower or "invalid command" in lower:
+    print("cli_unsupported")
+elif "permission denied" in lower or "errno 13" in lower:
+    print("permission_denied")
+elif "no space left" in lower or "errno 28" in lower:
+    print("no_space_left")
+elif "42p01" in lower or "does not exist" in lower:
+    print("db_table_missing")
+elif "econnrefused" in lower or "timeout" in lower:
+    print("db_unreachable")
+elif "postgres" in lower or "database" in lower or "pg" in lower:
+    print("db_failed")
+elif "json" in lower:
+    print("json_failed")
+else:
+    print("unknown_failed")
+PY
+}
+
+read_grade_history() {
+  MJU_SKIP_VIEW="$SKIP_VIEW_ENV" \
+    mju --app-dir "$APP_DIR" --format json msi grade-history \
+    > "$GRADE_HISTORY_JSON" 2> "$GRADE_HISTORY_STDERR"
+}
+
+reset_msi_session_for_retry() {
+  local logout_json="$TMP_DIR/msi-session-reset.json"
+  local logout_stderr="$TMP_DIR/msi-session-reset.stderr"
+  local reset_detail
+
+  diag "msi" "grade_history_msi_session_reset_start"
+  if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" \
+    mju --app-dir "$APP_DIR" --format json msi logout \
+    > "$logout_json" 2> "$logout_stderr"; then
+    reset_detail=$(classify_msi_session_reset_failure "$logout_json" "$logout_stderr")
+    diag "msi" "grade_history_msi_session_reset_${reset_detail}"
+    cat "$logout_stderr" >&2 2>/dev/null || true
+    cat "$logout_json" >&2 2>/dev/null || true
+    return 1
+  fi
+
+  diag "msi" "grade_history_msi_session_reset_succeeded"
+  return 0
+}
+
+classify_context_failure() {
+  local stderr_file="$1"
+  CONTEXT_STDERR="$stderr_file" python3 - <<'PY'
+import os
+from pathlib import Path
+
+try:
+    text = Path(os.environ["CONTEXT_STDERR"]).read_text(encoding="utf-8", errors="ignore")[:1000000]
+except Exception:
+    text = ""
+lower = text.lower()
+
+if "permission denied" in lower or "errno 13" in lower:
+    print("extract_from_msi_permission_denied")
+elif "no space left" in lower or "errno 28" in lower:
+    print("extract_from_msi_no_space_left")
+elif "json" in lower:
+    print("extract_from_msi_json_failed")
+else:
+    print("extract_from_msi_failed")
+PY
+}
+
+classify_public_data_failure() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  PUBLIC_DATA_STDOUT="$stdout_file" \
+  PUBLIC_DATA_STDERR="$stderr_file" \
+  python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+def read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")[:1000000]
+    except Exception:
+        return ""
+
+def envelope(text: str) -> dict:
+    start = text.find("{")
+    if start < 0:
+        return {}
+    try:
+        value = json.loads(text[start:])
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+stdout_text = read(os.environ["PUBLIC_DATA_STDOUT"])
+stderr_text = read(os.environ["PUBLIC_DATA_STDERR"])
+combined = "\n".join([stdout_text, stderr_text])
+lower = combined.lower()
+payload = envelope(stdout_text)
+error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+error_type = str(error.get("type") or "")
+message = str(error.get("message") or "")
+message_lower = message.lower()
+
+if "missing required env var: pg" in lower:
+    print("academic_planning_db_env_missing")
+elif "invalid pgport" in lower:
+    print("academic_planning_db_env_invalid")
+elif "required public-data table is missing" in lower or "code=42p01" in lower:
+    print("academic_planning_db_table_missing")
+elif "academic-planning course-catalog preflight failed" in lower:
+    print("academic_planning_course_catalog_db_failed")
+elif "academic-planning graduation-requirements preflight failed" in lower:
+    print("academic_planning_graduation_requirements_db_failed")
+elif error_type == "InputError" or "--admission-year is required" in message_lower:
+    print("academic_planning_input_invalid")
+elif error_type == "ConfigError":
+    print("academic_planning_config_failed")
+elif error_type == "DbError" or "public-data db read failed" in lower:
+    print("academic_planning_db_failed")
+elif "view_api_url" in lower or "api/view" in lower:
+    print("academic_planning_view_failed")
+else:
+    print("academic_planning_unknown_failed")
 PY
 }
 
@@ -218,9 +394,10 @@ CURRENT_TIMETABLE_JSON="$TMP_DIR/current-timetable.json"
 DEPARTMENT_TIMETABLE_JSON="$TMP_DIR/department-timetable.json"
 PERSONAL_JSON="$TMP_DIR/personal-msi.json"
 INFO_JSON="$TMP_DIR/info.json"
+CONTEXT_STDERR="$TMP_DIR/context.stderr"
+MJU_NEWS_STDOUT="$TMP_DIR/mju-news.stdout"
+MJU_NEWS_STDERR="$TMP_DIR/mju-news.stderr"
 
-# Avoid creating extra personal MSI webviews while collecting context. The
-# final mju-news call below still uses the normal VIEW_API_URL.
 SKIP_VIEW_ENV="${MJU_ACADEMIC_PLANNING_SKIP_VIEW:-1}"
 
 diag "msi" "profile_read"
@@ -230,9 +407,38 @@ if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json profi
 fi
 
 diag "msi" "grade_history_read"
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi grade-history > "$GRADE_HISTORY_JSON" 2> "$GRADE_HISTORY_STDERR"; then
+if ! read_grade_history; then
   DETAIL=$(classify_grade_history_failure "$GRADE_HISTORY_JSON" "$GRADE_HISTORY_STDERR" "$APP_DIR")
   diag "msi" "$DETAIL"
+
+  if should_retry_grade_history "$DETAIL"; then
+    diag "msi" "grade_history_retry_eligible"
+    if reset_msi_session_for_retry; then
+      diag "msi" "grade_history_retry_after_msi_session_reset"
+    else
+      diag "msi" "grade_history_retry_after_msi_session_reset_failed"
+    fi
+    diag "msi" "grade_history_retry_read"
+    if read_grade_history; then
+      diag "msi" "grade_history_retry_succeeded"
+    else
+      RETRY_DETAIL=$(classify_grade_history_failure "$GRADE_HISTORY_JSON" "$GRADE_HISTORY_STDERR" "$APP_DIR")
+      diag "msi" "grade_history_retry_${RETRY_DETAIL}"
+      echo "ERR: failed to read MSI grade history for academic planning after session reset retry" >&2
+      cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
+      cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
+      exit 1
+    fi
+  else
+    echo "ERR: failed to read MSI grade history for academic planning" >&2
+    cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
+    cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
+    exit 1
+  fi
+fi
+
+if [[ ! -s "$GRADE_HISTORY_JSON" ]]; then
+  diag "msi" "grade_history_empty_json"
   echo "ERR: failed to read MSI grade history for academic planning" >&2
   cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
   cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
@@ -259,7 +465,7 @@ if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju "${DEPARTMENT_ARGS[@]}" > "$DEPARTMENT_T
 fi
 
 diag "context" "extract_from_msi"
-EXPLICIT_DEPARTMENT="$DEPARTMENT" \
+if ! EXPLICIT_DEPARTMENT="$DEPARTMENT" \
 EXPLICIT_ADMISSION_YEAR="$ADMISSION_YEAR" \
 EXPLICIT_STUDENT_NUMBER="$STUDENT_NUMBER" \
 PROFILE_JSON="$PROFILE_JSON" \
@@ -268,7 +474,7 @@ CURRENT_TIMETABLE_JSON="$CURRENT_TIMETABLE_JSON" \
 DEPARTMENT_TIMETABLE_JSON="$DEPARTMENT_TIMETABLE_JSON" \
 PERSONAL_JSON="$PERSONAL_JSON" \
 INFO_JSON="$INFO_JSON" \
-python3 - <<'PY' || fail_stage "context" "extract_from_msi_failed"
+python3 - <<'PY' 2> "$CONTEXT_STDERR"
 import json
 import os
 import re
@@ -296,14 +502,6 @@ def first_text(*values: object) -> str:
         candidate = text(value)
         if candidate:
             return candidate
-    return ""
-
-def nested_get(source: dict, *keys: str) -> str:
-    for key in keys:
-        if key in source:
-            value = text(source.get(key))
-            if value:
-                return value
     return ""
 
 profile = record(load(os.environ["PROFILE_JSON"]))
@@ -339,7 +537,8 @@ admission_year = first_text(os.environ.get("EXPLICIT_ADMISSION_YEAR"))
 
 current_courses = []
 seen_current = set()
-for entry in current_timetable.get("entries", []) if isinstance(current_timetable.get("entries"), list) else []:
+entries = current_timetable.get("entries")
+for entry in entries if isinstance(entries, list) else []:
     if not isinstance(entry, dict):
         continue
     title = first_text(entry.get("courseTitle"), entry.get("title"), entry.get("name"))
@@ -382,6 +581,12 @@ Path(os.environ["INFO_JSON"]).write_text(
     encoding="utf-8",
 )
 PY
+then
+  DETAIL=$(classify_context_failure "$CONTEXT_STDERR")
+  diag "context" "$DETAIL"
+  cat "$CONTEXT_STDERR" >&2 2>/dev/null || true
+  exit 1
+fi
 
 json_field() {
   local field="$1"
@@ -396,9 +601,15 @@ print(value if isinstance(value, str) else "")
 PY
 }
 
-DEPARTMENT="$(json_field department)"
-STUDENT_NUMBER="$(json_field studentNumber)"
-ADMISSION_YEAR="$(json_field admissionYear)"
+if ! DEPARTMENT="$(json_field department)"; then
+  fail_stage "context" "department_field_read_failed"
+fi
+if ! STUDENT_NUMBER="$(json_field studentNumber)"; then
+  fail_stage "context" "student_number_field_read_failed"
+fi
+if ! ADMISSION_YEAR="$(json_field admissionYear)"; then
+  fail_stage "context" "admission_year_field_read_failed"
+fi
 
 if [[ -z "$DEPARTMENT" ]]; then
   fail_stage "context" "department_missing" 64
@@ -427,8 +638,14 @@ MJU_NEWS_ARGS+=("--personal-msi-json" "$PERSONAL_JSON")
 MJU_NEWS_ARGS+=("--completed-courses-json" "$GRADE_HISTORY_JSON")
 
 diag "public_data" "academic_planning_run"
-if ! mju-news "${MJU_NEWS_ARGS[@]}"; then
-  fail_stage "public_data" "academic_planning_failed"
+if ! mju-news "${MJU_NEWS_ARGS[@]}" > "$MJU_NEWS_STDOUT" 2> "$MJU_NEWS_STDERR"; then
+  DETAIL=$(classify_public_data_failure "$MJU_NEWS_STDOUT" "$MJU_NEWS_STDERR")
+  diag "public_data" "$DETAIL"
+  echo "ERR: failed to build academic planning payload" >&2
+  cat "$MJU_NEWS_STDERR" >&2 2>/dev/null || true
+  cat "$MJU_NEWS_STDOUT" >&2 2>/dev/null || true
+  exit 1
 fi
+cat "$MJU_NEWS_STDOUT"
 
 diag "success" "output_written"

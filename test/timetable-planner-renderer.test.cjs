@@ -194,7 +194,7 @@ test("timetable planner excludes already completed courses from random candidate
   const rawData = {
     majorCount: 2,
     electiveCount: 0,
-    completedCourses: [{ courseTitle: "Completed Major", courseCode: "CSE101" }],
+    completedCourses: [{ courseTitle: "Completed-Major", courseCode: "CSE101" }],
     entries: [
       { courseTitle: "Completed Major", courseCode: "CSE101", category: "major", credit: 3, meetings: [{ dayOfWeek: 1, rawTime: "09:00-09:50" }] },
       { courseTitle: "Open Major A", courseCode: "CSE102", category: "major", credit: 3, meetings: [{ dayOfWeek: 2, rawTime: "10:00-10:50" }] },

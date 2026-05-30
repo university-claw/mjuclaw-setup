@@ -35,6 +35,11 @@ test("academic planning helper defaults timetable planning to the available firs
   const helper = await fs.readFile(path.join(root, "bin", "mju-academic-planning"), "utf8");
 
   assert.match(helper, /elif month <= 8:\n    print\(f"\{year\} 10"\)/);
+  assert.match(helper, /grade_history_retry_eligible/);
+  assert.match(helper, /grade_history_msi_session_reset_start/);
+  assert.match(helper, /mju --app-dir "\$APP_DIR" --format json msi logout/);
+  assert.match(helper, /grade_history_retry_succeeded/);
+  assert.match(helper, /classify_public_data_failure/);
 });
 
 function toBashPath(filePath) {
@@ -119,6 +124,11 @@ JSON
     fi
     cat <<'JSON'
 {"studentInfo":{"학과":"컴퓨터공학과","학번":"202112345"},"termRecords":[{"year":2021,"termLabel":"1학기","courses":[{"courseTitle":"미적분학1","courseCode":"KME02101","credit":3,"categoryLabel":"학문기초교양"}]}]}
+JSON
+    ;;
+  *" msi logout"*)
+    cat <<'JSON'
+{"service":"msi","deletedSession":true}
 JSON
     ;;
   *" msi timetable"*)
@@ -249,7 +259,9 @@ bashTest("academic planning helper reports a specific grade-history menu context
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_main_context_failed/);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_open_menu_main_context_failed/);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_retry_eligible/);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_msi_session_reset_succeeded/);
 });
 
 bashTest("academic planning helper reports a password-change interstitial candidate", async (t) => {
@@ -266,5 +278,7 @@ bashTest("academic planning helper reports a password-change interstitial candid
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_password_change_interstitial_detected/);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_login_password_change_interstitial_detected/);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_retry_eligible/);
+  assert.match(result.stderr, /ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_msi_session_reset_succeeded/);
 });
