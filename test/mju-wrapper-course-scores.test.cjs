@@ -65,9 +65,14 @@ set -euo pipefail
 body=""
 while (($#)); do
   case "$1" in
-    -d)
+    -d|--data|--data-raw|--data-binary)
       shift
-      body="\${1:-}"
+      value="\${1:-}"
+      if [[ "$value" == @* ]]; then
+        body="$(cat "\${value#@}")"
+      else
+        body="$value"
+      fi
       ;;
   esac
   shift || true

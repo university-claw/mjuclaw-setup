@@ -76,7 +76,8 @@ title_for() {
 
 STDERR_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stderr.XXXXXX")
 STDOUT_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-stdout.XXXXXX")
-trap 'rm -f "$STDERR_FILE" "$STDOUT_FILE"' EXIT
+REQUEST_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/mju-news-view-body.XXXXXX")
+trap 'rm -f "$STDERR_FILE" "$STDOUT_FILE" "$REQUEST_BODY_FILE"' EXIT
 
 set +e
 STDOUT=$("$NODE_BIN" "$REAL_MJU_NEWS" "$@" 2>"$STDERR_FILE")
@@ -112,7 +113,9 @@ fi
 
 TITLE=$(title_for "$DATA_TYPE" "$*")
 
-REQUEST_BODY=$(PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" "$PYTHON_BIN" - <<'PY'
+# academic-planning 결과처럼 큰 JSON은 shell argv 제한을 넘을 수 있으므로
+# view-server 요청 body는 temp file로 넘긴다.
+PYTHONIOENCODING=utf-8 RAW_STDOUT_FILE="$STDOUT_FILE" DATA_TYPE="$DATA_TYPE" TITLE="$TITLE" REQUEST_BODY_FILE="$REQUEST_BODY_FILE" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 
@@ -123,20 +126,20 @@ try:
 except Exception:
     data = None
 
-print(json.dumps({
+with open(os.environ["REQUEST_BODY_FILE"], "w", encoding="utf-8") as handle:
+    json.dump({
     "dataType": os.environ["DATA_TYPE"],
     "title": os.environ["TITLE"],
     "summary": "",
     "rawData": data,
     "aiResponse": "",
-}))
+}, handle, ensure_ascii=False)
 PY
-)
 
 set +e
 VIEW_RESP=$("$CURL_BIN" -s --max-time 3 -X POST "$VIEW_API" \
   -H "Content-Type: application/json" \
-  -d "$REQUEST_BODY" 2>/dev/null)
+  --data-binary @"$REQUEST_BODY_FILE" 2>/dev/null)
 CURL_EXIT=$?
 set -e
 

@@ -58,20 +58,34 @@ async function createWrapperFixture(t, cliOutput, viewUrl) {
   const stubBin = path.join(testDir, "bin");
   await fs.mkdir(stubBin, { recursive: true });
   const curlCapture = path.join(testDir, "curl-body.json");
+  const curlModeCapture = path.join(testDir, "curl-mode.txt");
   const curlStub = path.join(stubBin, "curl");
   await fs.writeFile(curlStub, `#!/usr/bin/env bash
 set -euo pipefail
 body=""
+mode=""
 while (($#)); do
   case "$1" in
-    -d)
+    -d|--data|--data-raw|--data-binary)
+      flag="$1"
       shift
-      body="\${1:-}"
+      value="\${1:-}"
+      if [[ "$flag" == "-d" && \${#value} -gt 100000 ]]; then
+        exit 126
+      fi
+      if [[ "$value" == @* ]]; then
+        body="$(cat "\${value#@}")"
+        mode="file"
+      else
+        body="$value"
+        mode="inline"
+      fi
       ;;
   esac
   shift || true
 done
 printf '%s' "$body" > "${toBashPath(curlCapture)}"
+printf '%s' "$mode" > "${toBashPath(curlModeCapture)}"
 printf '%s\\n' '{"url":"${viewUrl}"}'
 `, "utf8");
   await fs.chmod(curlStub, 0o755);
@@ -81,7 +95,7 @@ printf '%s\\n' '{"url":"${viewUrl}"}'
 console.log(${JSON.stringify(JSON.stringify(cliOutput))});
 `, "utf8");
 
-  return { root, realMjuNews, curlStub, bashNode: bashNodePath, bashPython: bashPythonPath, curlCapture };
+  return { root, realMjuNews, curlStub, bashNode: bashNodePath, bashPython: bashPythonPath, curlCapture, curlModeCapture };
 }
 
 function wrapperCommand(fixture, args) {
@@ -198,6 +212,49 @@ bashTest("mju-news wrapper routes academic-planning timetable to the timetable p
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.viewUrl, "http://view.local/academic-timetable");
+});
+
+bashTest("mju-news wrapper posts large academic-planning payload through a body file", async (t) => {
+  const fixture = await createWrapperFixture(t, {
+    total: 1200,
+    items: Array.from({ length: 1200 }, (_, index) => ({
+      year: 2026,
+      termCode: "10",
+      termLabel: "1학기",
+      courseTitle: `대용량테스트과목-${index}`,
+      description: "x".repeat(300),
+      meetings: [],
+    })),
+    choiceGroups: [],
+    completedCourses: [],
+    currentCourses: [],
+    officialCoverage: { status: "confirmed" },
+  }, "http://view.local/large-academic-timetable");
+
+  const result = await run("bash", ["-lc", wrapperCommand(fixture, [
+    "academic-planning",
+    "timetable",
+    "--year",
+    "2026",
+    "--term-code",
+    "10",
+    "--department",
+    "15611",
+    "--student-number",
+    "TEST-99241234",
+    "--format",
+    "json",
+  ])], { cwd: fixture.root });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(await fs.readFile(fixture.curlModeCapture, "utf8"), "file");
+
+  const requestBody = JSON.parse(await fs.readFile(fixture.curlCapture, "utf8"));
+  assert.equal(requestBody.dataType, "timetable-planner");
+  assert.equal(requestBody.rawData.total, 1200);
+
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.viewUrl, "http://view.local/large-academic-timetable");
 });
 
 bashTest("mju-news wrapper routes academic-planning graduation-roadmap to the graduation webview", async (t) => {
