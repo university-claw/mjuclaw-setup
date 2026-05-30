@@ -3189,6 +3189,15 @@ type PlannerWrapperDiagnostics = {
   hints: string[];
 };
 
+type PlannerHelperDiagnostics = {
+  summary: string;
+  stages: PlannerDiagnosticStage[];
+  runtime: PlannerDiagnosticBucket[];
+  context: PlannerDiagnosticBucket[];
+  topLevelKeys: string[];
+  hints: string[];
+};
+
 type PlannerPayloadDiagnostics = {
   producer: string;
   diagnosticVersion?: string;
@@ -3224,6 +3233,7 @@ type PlannerUiDiagnostics = {
 
 type TimetablePlannerDiagnostics = {
   payload: PlannerPayloadDiagnostics;
+  helper?: PlannerHelperDiagnostics;
   wrapper?: PlannerWrapperDiagnostics;
   reader?: PlannerReaderDiagnostics;
   ui: PlannerUiDiagnostics;
@@ -3419,8 +3429,12 @@ function renderPlannerSearchPanel(): string {
 
 function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): string {
   const reader = diagnostics.reader;
+  const helper = diagnostics.helper;
   const wrapper = diagnostics.wrapper;
   const payload = diagnostics.payload;
+  const helperStages = helper?.stages.length
+    ? helper.stages.map(renderPlannerDiagnosticStage).join("")
+    : `<div class="planner-diag-empty">helper 진단 payload가 없습니다.</div>`;
   const wrapperStages = wrapper?.stages.length
     ? wrapper.stages.map(renderPlannerDiagnosticStage).join("")
     : `<div class="planner-diag-empty">wrapper 진단 payload가 없습니다.</div>`;
@@ -3436,6 +3450,7 @@ function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): str
     { key: "ui.initialSchedule", label: "초기 시간표", count: diagnostics.ui.initialSchedule, status: diagnostics.ui.initialSchedule ? "ok" as const : "empty" as const },
   ].map(renderPlannerDiagnosticStage).join("");
   const hints = [
+    ...(helper?.hints ?? []),
     ...(wrapper?.hints ?? []),
     ...payload.hints,
     ...(reader?.hints ?? []),
@@ -3445,7 +3460,7 @@ function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): str
   return `<div class="planner-diagnostics" data-planner-diagnostics>
     <div class="planner-diag-head">
       <div><strong>임시 진단 카드</strong><span>시간표 누락 원인을 찾기 위한 숫자입니다. 확인 후 제거할 수 있습니다.</span></div>
-      <small>${esc(joinMeta([wrapper?.summary, payload.producer, reader?.source, reader?.scope]))}</small>
+      <small>${esc(joinMeta([helper?.summary, wrapper?.summary, payload.producer, reader?.source, reader?.scope]))}</small>
     </div>
     <div class="planner-diag-section"><h3>payload 경로</h3><div class="planner-diag-grid">
       ${renderPlannerDiagnosticStage({ key: "payload.producer", label: payload.producer || "producer 없음", count: payload.diagnosticVersion ? Number(payload.diagnosticVersion) || 1 : 0, status: payload.producer ? "ok" : "empty" })}
@@ -3484,6 +3499,11 @@ function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): str
       ${renderPlannerDiagnosticSamples("reader allTerm sample", reader?.samples.allTerm)}
       ${renderPlannerDiagnosticSamples("reader department sample", reader?.samples.departmentMatched)}
       ${renderPlannerDiagnosticSamples("reader output sample", reader?.samples.readerOutput)}
+    </div></div>
+    <div class="planner-diag-section"><h3>helper 실행</h3><div class="planner-diag-grid">${helperStages}</div><div class="planner-diag-buckets">
+      ${renderPlannerDiagnosticBuckets("helper runtime", helper?.runtime)}
+      ${renderPlannerDiagnosticBuckets("helper context", helper?.context, 12)}
+      ${renderPlannerDiagnosticBuckets("helper rawData keys", helper?.topLevelKeys.map((key) => ({ key, count: 1 })), 14)}
     </div></div>
     ${hints.length ? `<div class="planner-diag-hints">${hints.map((hint) => `<p>${esc(hint)}</p>`).join("")}</div>` : ""}
   </div>`;
@@ -3775,6 +3795,7 @@ function buildTimetablePlannerDiagnostics(
   }
 
   const payload = buildPlannerPayloadDiagnostics(rawData, args.rawCourses, args.rawSourceKey);
+  const helper = normalizePlannerHelperDiagnostics(rawData.academicPlanningHelperDiagnostics);
   const wrapper = normalizePlannerWrapperDiagnostics(rawData.wrapperDiagnostics);
   const reader = normalizePlannerReaderDiagnostics(rawData.courseCatalogDiagnostics ?? rawData.catalogDiagnostics);
   uiHints.push(...plannerRootCauseHints({
@@ -3783,12 +3804,14 @@ function buildTimetablePlannerDiagnostics(
     courses: args.courses,
     selectableCourses: args.selectableCourses,
     payload,
+    helper,
     wrapper,
     reader,
   }));
 
   return {
     payload,
+    helper,
     wrapper,
     reader,
     ui: {
@@ -3815,6 +3838,7 @@ function plannerRootCauseHints(args: {
   courses: PlannerCourse[];
   selectableCourses: PlannerCourse[];
   payload: PlannerPayloadDiagnostics;
+  helper?: PlannerHelperDiagnostics;
   wrapper?: PlannerWrapperDiagnostics;
   reader?: PlannerReaderDiagnostics;
 }): string[] {
@@ -3824,19 +3848,20 @@ function plannerRootCauseHints(args: {
   const afterCompletedHasMajor = args.courses.some((course) => course.category === "major");
   const selectableHasMajor = args.selectableCourses.some((course) => course.category === "major");
   const wrapperPayloadOk = args.wrapper?.stages.some((stage) => stage.key.endsWith(".hasPayloadDiagnostics") && stage.status === "ok");
-  const wrapperCatalogOk = args.wrapper?.stages.some((stage) => stage.key.endsWith(".hasCourseCatalogDiagnostics") && stage.status === "ok");
   const readerAllTermHasMajor = args.reader?.categoryCounts.allTerm.some(plannerDiagnosticBucketLooksMajor) ?? false;
   const readerDepartmentHasMajor = args.reader?.categoryCounts.departmentMatched.some(plannerDiagnosticBucketLooksMajor) ?? false;
   const readerOutputHasMajor = args.reader?.categoryCounts.readerOutput.some(plannerDiagnosticBucketLooksMajor) ?? false;
 
-  if (!args.wrapper) {
+  if (!args.wrapper && args.helper) {
+    hints.push("(여기 H0) academic-planning helper가 최종 웹뷰를 만들었지만 mju-news wrapper 진단은 없습니다. 전용 helper 경로에서 nested mju-news view 생성을 건너뛰고 helper-owned view로 저장한 상태입니다.");
+  } else if (!args.wrapper) {
     hints.push("(여기 W0) wrapper 진단이 없습니다. 새 배포 이전에 생성된 웹뷰이거나 wrapper를 거치지 않은 저장 경로입니다.");
   } else if (!wrapperPayloadOk) {
     hints.push("(여기 W1) wrapper는 실행됐지만 reader payloadDiagnostics가 없습니다. 최신 setup은 떴지만 실행된 reader가 오래됐거나 다른 mju-news 경로를 탔는지 확인해야 합니다.");
   }
 
   if (!rawHasMajor) {
-    if (!args.reader || !wrapperCatalogOk) {
+    if (!args.reader) {
       hints.push("(여기 M0) raw 강의 배열에 전공이 없고 reader 상세 진단도 없습니다. 현재 payload만으로는 DB 누락과 학과 필터 실패를 구분할 수 없습니다.");
     } else if (!readerAllTermHasMajor) {
       hints.push("(여기 M1) DB/JSON의 해당 연도·학기 전체에도 전공 분류가 없습니다. 개설강좌 수집/import가 교양만 넣었거나 전공 category 수집이 누락된 상태입니다.");
@@ -4070,6 +4095,28 @@ function normalizePlannerReaderDiagnostics(value: unknown): PlannerReaderDiagnos
       departmentMatched: normalizePlannerDiagnosticSamples(unknownRecord(record.samples).departmentMatched),
       readerOutput: normalizePlannerDiagnosticSamples(unknownRecord(record.samples).readerOutput),
     },
+    hints: unknownStringArray(record.hints),
+  };
+}
+
+function normalizePlannerHelperDiagnostics(value: unknown): PlannerHelperDiagnostics | undefined {
+  const record = unknownRecord(value);
+  if (!Object.keys(record).length) return undefined;
+  const runtime = unknownRecord(record.runtime);
+  const context = unknownRecord(record.context);
+  const output = unknownRecord(record.mjuNewsOutput);
+  const summary = joinMeta([
+    stringFrom(record.producer) || "mju-academic-planning-helper",
+    stringFrom(record.mode),
+    stringFrom(record.dataType),
+    stringFrom(record.generatedAt),
+  ]);
+  return {
+    summary,
+    stages: plannerPayloadOutputStages(output, "helper.mjuNews"),
+    runtime: plannerDiagnosticBucketsFromRecord(runtime),
+    context: plannerDiagnosticBucketsFromRecord(context),
+    topLevelKeys: unknownStringArray(record.topLevelKeys),
     hints: unknownStringArray(record.hints),
   };
 }

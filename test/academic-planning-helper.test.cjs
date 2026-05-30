@@ -80,6 +80,7 @@ async function createFixture(t) {
   await fs.mkdir(usersRoot, { recursive: true });
   const mjuCalls = path.join(testDir, "mju-calls.txt");
   const mjuNewsArgs = path.join(testDir, "mju-news-args.txt");
+  const viewRequest = path.join(testDir, "view-request.json");
 
   const python3Stub = path.join(stubBin, "python3");
   await fs.writeFile(python3Stub, `#!/usr/bin/env bash
@@ -117,8 +118,8 @@ JSON
       exit 1
     fi
     if [[ "\${MJU_STUB_GRADE_HISTORY_FAILURE:-}" == "password_change" ]]; then
-      mkdir -p "$APP_DIR/snapshots"
-      printf '%s\\n' '<html><body>비밀번호 변경</body></html>' > "$APP_DIR/snapshots/msi-main.html"
+      mkdir -p "$APP_DIR/snapshots" 2>/dev/null || true
+      [[ -d "$APP_DIR/snapshots" ]] && printf '%s\\n' '<html><body>비밀번호 변경</body></html>' > "$APP_DIR/snapshots/msi-main.html" || true
       echo '{"error":{"message":"[msi.login.password_change_interstitial_detected] MSI login landed on a password-change interstitial"}}' >&2
       exit 1
     fi
@@ -152,12 +153,52 @@ esac
   const mjuNewsStub = path.join(stubBin, "mju-news");
   await fs.writeFile(mjuNewsStub, `#!/usr/bin/env bash
 set -euo pipefail
+if [[ "\${MJU_NEWS_SKIP_VIEW:-}" != "1" ]]; then
+  echo "MJU_NEWS_SKIP_VIEW=1 is required for helper-owned webviews" >&2
+  exit 4
+fi
 printf '%s\\n' "$@" > "${toBashPath(mjuNewsArgs)}"
-printf '{"viewUrl":"http://view.local/%s","ok":true}\\n' "\${2:-unknown}"
+MODE="\${2:-unknown}"
+if [[ "$MODE" == "timetable" ]]; then
+  cat <<'JSON'
+{"total":1,"items":[{"courseTitle":"AI프로그래밍","category":"major","credit":3,"meetings":[{"dayOfWeek":1,"rawTime":"09:00-09:50"}]}],"payloadDiagnostics":{"producer":"academic-planning.timetable","output":{"itemsCount":1}},"courseCatalogDiagnostics":{"source":"database","stages":[{"key":"reader.output","label":"reader output","count":1,"status":"ok"}]}}
+JSON
+else
+  cat <<'JSON'
+{"total":1,"items":[{"department":"컴퓨터공학전공","requirementName":"전공","requiredCredits":74}],"payloadDiagnostics":{"producer":"academic-planning.graduation-roadmap","output":{"itemsCount":1}}}
+JSON
+fi
 `, "utf8");
   await fs.chmod(mjuNewsStub, 0o755);
 
-  return { stubBin, usersRoot, mjuCalls, mjuNewsArgs };
+  const curlStub = path.join(stubBin, "curl");
+  await fs.writeFile(curlStub, `#!/usr/bin/env bash
+set -euo pipefail
+BODY=""
+previous=""
+for arg in "$@"; do
+  if [[ "$previous" == "--data-binary" ]]; then
+    BODY="\${arg#@}"
+  fi
+  previous="$arg"
+done
+if [[ -z "$BODY" ]]; then
+  echo "missing --data-binary body" >&2
+  exit 2
+fi
+cp "$BODY" "${toBashPath(viewRequest)}"
+exec ${shellQuote(bashPythonPath)} - "$BODY" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+body = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(json.dumps({"url": f"http://view.local/{body.get('dataType', 'unknown')}"}))
+PY
+`, "utf8");
+  await fs.chmod(curlStub, 0o755);
+
+  return { stubBin, usersRoot, mjuCalls, mjuNewsArgs, viewRequest };
 }
 
 async function runHelper(fixture, args, env = {}) {
@@ -196,7 +237,9 @@ bashTest("academic planning helper enriches graduation roadmap calls with MSI co
   ]);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /"viewUrl":"http:\/\/view\.local\/graduation-roadmap"/);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.viewUrl, "http://view.local/graduation");
+  assert.equal(output.academicPlanningHelperDiagnostics.producer, "mju-academic-planning-helper");
 
   const args = await readArgs(fixture.mjuNewsArgs);
   assert.deepEqual(args.slice(0, 2), ["academic-planning", "graduation-roadmap"]);
@@ -212,6 +255,11 @@ bashTest("academic planning helper enriches graduation roadmap calls with MSI co
   assert.match(mjuCalls, /msi timetable/);
   assert.match(mjuCalls, /msi department-timetable/);
   assert.doesNotMatch(mjuCalls, /ucheck/);
+
+  const request = JSON.parse(await fs.readFile(fixture.viewRequest, "utf8"));
+  assert.equal(request.dataType, "graduation");
+  assert.equal(request.rawData.academicPlanningHelperDiagnostics.producer, "mju-academic-planning-helper");
+  assert.equal(request.rawData.academicPlanningHelperDiagnostics.mjuNewsOutput.hasPayloadDiagnostics, true);
 });
 
 bashTest("academic planning helper routes timetable generation without UCheck", async (t) => {
@@ -228,7 +276,9 @@ bashTest("academic planning helper routes timetable generation without UCheck", 
   ]);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /"viewUrl":"http:\/\/view\.local\/timetable"/);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.viewUrl, "http://view.local/timetable-planner");
+  assert.equal(output.academicPlanningHelperDiagnostics.producer, "mju-academic-planning-helper");
 
   const args = await readArgs(fixture.mjuNewsArgs);
   assert.deepEqual(args.slice(0, 2), ["academic-planning", "timetable"]);
@@ -243,6 +293,11 @@ bashTest("academic planning helper routes timetable generation without UCheck", 
   assert.match(mjuCalls, /msi grade-history/);
   assert.match(mjuCalls, /msi department-timetable/);
   assert.doesNotMatch(mjuCalls, /ucheck/);
+
+  const request = JSON.parse(await fs.readFile(fixture.viewRequest, "utf8"));
+  assert.equal(request.dataType, "timetable-planner");
+  assert.equal(request.rawData.academicPlanningHelperDiagnostics.producer, "mju-academic-planning-helper");
+  assert.equal(request.rawData.academicPlanningHelperDiagnostics.mjuNewsOutput.hasCourseCatalogDiagnostics, true);
 });
 
 bashTest("academic planning helper reports a specific grade-history menu context failure", async (t) => {

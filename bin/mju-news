@@ -93,6 +93,11 @@ if [[ -n "$STDERR" ]]; then
 fi
 
 # 실패·view 대상 아님·JSON 아님이면 pass-through
+if [[ "${MJU_NEWS_SKIP_VIEW:-}" == "1" ]]; then
+  printf '%s\n' "$STDOUT"
+  exit "$EXIT"
+fi
+
 if [[ $EXIT -ne 0 ]] || ! should_view "$@"; then
   printf '%s\n' "$STDOUT"
   exit "$EXIT"

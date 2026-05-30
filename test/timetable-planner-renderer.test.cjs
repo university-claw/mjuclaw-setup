@@ -130,6 +130,15 @@ test("timetable planner renders temporary catalog diagnostics", () => {
       { courseTitle: "Data Structures", category: "major", credit: 3, meetings: [{ dayOfWeek: 1, rawTime: "09:00-09:50" }] },
       { courseTitle: "Writing", category: "liberal", credit: 2, meetings: [{ dayOfWeek: 2, rawTime: "10:00-10:50" }] },
     ],
+    academicPlanningHelperDiagnostics: {
+      producer: "mju-academic-planning-helper",
+      mode: "timetable",
+      dataType: "timetable-planner",
+      runtime: { mjuNewsPath: "/usr/local/bin/mju-news", skipNestedMjuNewsView: true },
+      context: { department: "15611 컴퓨터공학전공", year: "2026", termCode: "10" },
+      mjuNewsOutput: { hasPayloadDiagnostics: true, hasCourseCatalogDiagnostics: true, itemsCount: 2 },
+      topLevelKeys: ["items", "query"],
+    },
     courseCatalogDiagnostics: {
       source: "database",
       scope: { year: 2026, termCode: "10", department: "15611 컴퓨터공학전공" },
@@ -158,6 +167,8 @@ test("timetable planner renders temporary catalog diagnostics", () => {
   assert.match(html, /data-diag-stage="db.term.all"/);
   assert.match(html, /data-diag-stage="db.term.departmentMatched"/);
   assert.match(html, /data-diag-stage="reader.output"/);
+  assert.match(html, /helper 실행/);
+  assert.match(html, /mju-academic-planning-helper/);
   assert.match(html, /data-diag-stage="ui.completedExcluded"/);
   assert.match(html, /diagnostic hint/);
   assert.match(html, /major <em>1<\/em>/);
