@@ -69,6 +69,8 @@ test("timetable planner renders controls, button, and the interactive calendar",
   assert.match(html, /학점/);
   assert.match(html, /planner-calendar/);
   assert.match(html, /planner-calendar-block/);
+  assert.doesNotMatch(html, /최대 8개/);
+  assert.doesNotMatch(html, /data-planner-diagnostics/);
   assert.match(html, /Civil Procedure\(3\)/);
   assert.match(html, /Y5441/);
   assert.doesNotMatch(html, /Y5441\(/);
@@ -114,8 +116,9 @@ test("timetable planner keeps course catalog query context", () => {
   assert.match(html, /분류 전공/);
 });
 
-test("timetable planner renders temporary catalog diagnostics", () => {
+test("timetable planner renders catalog diagnostics only when requested", () => {
   const rawData = {
+    showDiagnostics: true,
     majorCount: 0,
     electiveCount: 1,
     query: {
@@ -571,7 +574,24 @@ test("timetable planner reports distinct course availability instead of section 
   assert.equal(model.majorAvailable, 1);
   assert.equal(model.majorCount, 1);
   assert.equal(model.categoryTargets.find((target) => target.label === "전공").available, 1);
-  assert.match(html, /전공 과목[\s\S]*가능 1개/);
+  assert.match(html, /전공 과목/);
+  assert.doesNotMatch(html, /가능 1개/);
+  assert.doesNotMatch(html, /최대 8개/);
+});
+
+test("timetable planner treats 50-minute calendar row collisions as conflicts", () => {
+  const rawData = {
+    majorCount: 2,
+    electiveCount: 0,
+    entries: [
+      { courseTitle: "Long Seminar", category: "major", meetings: [{ dayOfWeek: 1, rawTime: "15:00-16:15" }] },
+      { courseTitle: "Quarter Start", category: "major", meetings: [{ dayOfWeek: 1, rawTime: "16:15-17:00" }] },
+    ],
+  };
+  const model = buildTimetablePlannerModel(rawData);
+
+  assert.equal(hasPlannerConflict(model.courses[1], [model.courses[0]]), true);
+  assert.deepEqual(generateTimetableSchedule(model.courses, 2, 0, 1), []);
 });
 
 test("timetable planner supports Saturday courses with a day toggle and calendar column", () => {
