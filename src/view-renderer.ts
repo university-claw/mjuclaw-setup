@@ -3363,8 +3363,9 @@ type PlannerGenerateOptions = {
 
 function renderTimetablePlanner(data: unknown): string {
   const model = buildTimetablePlannerModel(data);
+  const diagnosticsHtml = renderPlannerDiagnostics(model.diagnostics, shouldRenderPlannerDiagnostics(data));
   if (!model.courses.length) {
-    return `<section class="section planner-section"><div class="planner-empty">시간표 설계에 사용할 강의 목록이 없습니다.</div>${model.queryMeta ? `<div class="section-sub">${model.queryMeta} 기준</div>` : ""}${renderPlannerDiagnostics(model.diagnostics)}</section>`;
+    return `<section class="section planner-section"><div class="planner-empty">시간표 설계에 사용할 강의 목록이 없습니다.</div>${model.queryMeta ? `<div class="section-sub">${model.queryMeta} 기준</div>` : ""}${diagnosticsHtml}</section>`;
   }
 
   const term = model.queryMeta || joinMeta([
@@ -3407,7 +3408,7 @@ function renderTimetablePlanner(data: unknown): string {
   html += `<div class="planner-result" data-planner-result>${scheduleHtml}</div>`;
   html += renderPlannerSearchPanel();
   html += `</div>`;
-  html += renderPlannerDiagnostics(model.diagnostics);
+  html += diagnosticsHtml;
   html += `<script type="application/json" id="planner-data">${dataJson}</script>`;
   html += `<script>${plannerClientScript()}</script>`;
   html += `</section>`;
@@ -3419,15 +3420,21 @@ function renderPlannerBlockedChoice(labels: string[]): string {
   return `<div class="planner-no-solution" data-planner-choice-blocked>선택형 요건을 먼저 선택해야 시간표를 만들 수 있습니다${esc(suffix)}.</div>`;
 }
 
-function renderPlannerControl(kind: string, label: string, value: number, max: number): string {
-  return `<div class="planner-control"><span>${esc(label)}</span><div class="planner-stepper"><button type="button" data-planner-step="${kind}" data-step-delta="-1" aria-label="${esc(`${label} 줄이기`)}">−</button><input type="text" readonly value="${value}" data-planner-count="${kind}" inputmode="numeric" aria-label="${esc(label)}"><button type="button" data-planner-step="${kind}" data-step-delta="1" aria-label="${esc(`${label} 늘리기`)}">+</button></div><small>최대 ${PLANNER_MAX_BASIC_COUNT}개 · 가능 ${max}개</small></div>`;
+function renderPlannerControl(kind: string, label: string, value: number, _max: number): string {
+  return `<div class="planner-control"><span>${esc(label)}</span><div class="planner-stepper"><button type="button" data-planner-step="${kind}" data-step-delta="-1" aria-label="${esc(`${label} 줄이기`)}">−</button><input type="text" readonly value="${value}" data-planner-count="${kind}" inputmode="numeric" aria-label="${esc(label)}"><button type="button" data-planner-step="${kind}" data-step-delta="1" aria-label="${esc(`${label} 늘리기`)}">+</button></div></div>`;
 }
 
 function renderPlannerSearchPanel(): string {
   return `<div class="planner-search-panel"><div class="planner-search-head"><input class="planner-search-input" type="search" placeholder="과목명, 교수명, 구분으로 검색" data-planner-search><span data-planner-search-count>직접 추가</span></div><div class="planner-search-results" data-planner-search-results><div class="planner-search-empty">검색어를 입력하면 추가 가능한 과목이 표시됩니다.</div></div></div>`;
 }
 
-function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics): string {
+function shouldRenderPlannerDiagnostics(data: unknown): boolean {
+  const d = (data && typeof data === "object" && !Array.isArray(data)) ? data as Record<string, unknown> : {};
+  return booleanFrom(d.showDiagnostics ?? d.showPlannerDiagnostics ?? d.debugDiagnostics);
+}
+
+function renderPlannerDiagnostics(diagnostics: TimetablePlannerDiagnostics, enabled = false): string {
+  if (!enabled) return "";
   const reader = diagnostics.reader;
   const helper = diagnostics.helper;
   const wrapper = diagnostics.wrapper;
@@ -3545,7 +3552,7 @@ function renderPlannerAvailabilityControls(model: TimetablePlannerModel): string
     `<button class="planner-toggle active" type="button" data-planner-grade="${esc(grade.key)}" aria-pressed="true"><span>${esc(grade.label)}</span><small>${grade.available}개</small></button>`,
   ).join("");
   const categoryInputs = model.categoryTargets.map((target) =>
-    `<label class="planner-control planner-category-control"><span>${esc(target.label)}</span><div class="planner-stepper"><button type="button" data-planner-step="${esc(target.key)}" data-step-delta="-1" aria-label="${esc(`${target.label} 줄이기`)}">−</button><input type="text" readonly value="${target.count}" data-planner-category="${esc(target.key)}" inputmode="numeric" aria-label="${esc(target.label)}"><button type="button" data-planner-step="${esc(target.key)}" data-step-delta="1" aria-label="${esc(`${target.label} 늘리기`)}">+</button></div><small>${esc(target.parentCategory === "major" ? "전공" : "교양/선택")} · 가능 ${target.available}개</small></label>`,
+    `<label class="planner-control planner-category-control"><span>${esc(target.label)}</span><div class="planner-stepper"><button type="button" data-planner-step="${esc(target.key)}" data-step-delta="-1" aria-label="${esc(`${target.label} 줄이기`)}">−</button><input type="text" readonly value="${target.count}" data-planner-category="${esc(target.key)}" inputmode="numeric" aria-label="${esc(target.label)}"><button type="button" data-planner-step="${esc(target.key)}" data-step-delta="1" aria-label="${esc(`${target.label} 늘리기`)}">+</button></div><small>${esc(target.parentCategory === "major" ? "전공" : "교양/선택")}</small></label>`,
   ).join("");
   const sourceSummary = renderRequirementChoiceSourceSummary(model.choiceGroups);
 
@@ -4962,7 +4969,17 @@ function plannerMutuallyExclusiveCourse(a: PlannerCourse, b: PlannerCourse): boo
 }
 
 function meetingsOverlap(a: PlannerMeeting, b: PlannerMeeting): boolean {
-  return a.dayIndex === b.dayIndex && a.startMinutes < b.endMinutes && b.startMinutes < a.endMinutes;
+  if (a.dayIndex !== b.dayIndex) return false;
+  if (a.startMinutes < b.endMinutes && b.startMinutes < a.endMinutes) return true;
+  return plannerMeetingDisplayOverlap(a, b);
+}
+
+function plannerMeetingDisplayOverlap(a: PlannerMeeting, b: PlannerMeeting): boolean {
+  const aStart = plannerMeetingStartPeriod(a);
+  const aEnd = plannerMeetingEndPeriod(a);
+  const bStart = plannerMeetingStartPeriod(b);
+  const bEnd = plannerMeetingEndPeriod(b);
+  return aStart < bEnd && bStart < aEnd;
 }
 
 function seededShuffle<T>(items: T[], seed: number): T[] {
@@ -5124,7 +5141,18 @@ const colorMapFor = (courses) => new Map(Array.from(new Set(courses.map(colorKey
 const colorForCourse = (course, colorMap) => {
   return colorMap.get(colorKey(course)) || colorAt(0);
 };
-const overlaps = (a, b) => a.dayIndex === b.dayIndex && a.startMinutes < b.endMinutes && b.startMinutes < a.endMinutes;
+const conflictStartSlot = (meeting) => {
+  const index = periods.findIndex(period => meeting.startMinutes < period.endMinutes);
+  return Math.max(0, index === -1 ? periods.length - 1 : index);
+};
+const conflictEndSlot = (meeting) => {
+  for (let index = periods.length - 1; index >= 0; index--) {
+    if (periods[index].startMinutes < meeting.endMinutes) return index + 1;
+  }
+  return conflictStartSlot(meeting) + 1;
+};
+const displayOverlaps = (a, b) => conflictStartSlot(a) < conflictEndSlot(b) && conflictStartSlot(b) < conflictEndSlot(a);
+const overlaps = (a, b) => a.dayIndex === b.dayIndex && ((a.startMinutes < b.endMinutes && b.startMinutes < a.endMinutes) || displayOverlaps(a, b));
 const matchKey = (value) => String(value || "").replace(/\\s+/g, "").trim().toLowerCase();
 const choiceSelections = new Map(Object.entries(data.selectedChoiceKeys || {}).map(([key, value]) => [matchKey(key), matchKey(value)]).filter(([, value]) => value));
 const sameCourse = (a, b) => {
