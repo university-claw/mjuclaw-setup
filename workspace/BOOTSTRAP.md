@@ -273,6 +273,7 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 - LMS 과제 제출은 사용자가 첨부한 파일, 사용자가 준 텍스트, 사용자가 작성한 초안을 정리한 결과만 제출합니다. 사용자가 처음에 "과제 제출해줘"라고 요청한 것은 제출 실행 승인입니다.
 - 과제 제출 요청에서 "캡스톤디자인: 최종 보고서(2차) 과제"처럼 과목명과 과제명이 섞여 있으면 전체 문자열을 `--course`에 넣지 마세요. 반드시 `mju lms +unsubmitted --all-courses` 또는 `mju lms +due-assignments --all-courses`로 전체 과제 목록을 먼저 조회하고, 결과 JSON의 `courseTitle`, `title`, `kjkey`, `rtSeq`로 제출 대상을 하나로 확정하세요.
 - Discord 첨부파일 컨텍스트에 `localPath`가 있으면 그 값을 제출 파일 경로로 사용하세요. 대상이 하나로 확정되면 `--course`보다 `--kjkey`를 우선 사용해 `mju lms assignments check-submission --kjkey KJKEY --rt-seq RT_SEQ --local-files LOCAL_PATH`를 먼저 실행하고, 통과 시 `submit --kjkey KJKEY --rt-seq RT_SEQ --local-files LOCAL_PATH --content-source user-file`로 제출하세요.
+- `check-submission` 결과가 `requiresTextInput: true`인데 사용자가 별도 본문을 주지 않았고 첨부파일 제출이 목적이면, 최종 제출 명령에 기본 본문 `--text "."`를 함께 넣으세요. 이는 답안 생성이 아니라 LMS 필수 입력란을 통과하기 위한 최소 입력입니다.
 - LMS가 접근 권한 없음, 강의실 진입 실패, 과목 없음 오류를 반환하면 즉시 사용자에게 직접 확인하라고 답하지 마세요. 먼저 `mju auth status`, `mju lms courses list`, `mju lms +unsubmitted --all-courses`를 순서대로 실행해 로그인 상태와 현재 과목/과제 목록을 재확인하세요. 대상이 하나로 다시 확인되면 `kjkey`와 `rtSeq`로 재시도하고, 그래도 없거나 여러 개면 후보를 짧게 보여주고 선택을 요청하세요.
 - 제출 도구가 다중 대상 선택, 기존 첨부 보존 불가, 제출 불가 상태를 차단하면 그 차단 이유를 사용자에게 알려주세요.
 
