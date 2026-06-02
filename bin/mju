@@ -6,7 +6,7 @@
 #   lms +action-items  → action-items
 #   lms +unsubmitted   → unsubmitted
 #   lms +unread-notices → unread-notices
-#   msi timetable      → timetable
+#   msi timetable      -> no automatic webview
 #   msi course-scores  → course-scores
 #   msi grade-history  → grade-history
 #   msi graduation     → disabled while graduation roadmap is the only user-facing graduation view
@@ -62,7 +62,6 @@ detect_datatype() {
     *"lms +unsubmitted"*) echo "unsubmitted" ;;
     *"lms +unread-notices"*) echo "unread-notices" ;;
     *"lms +digest"*) echo "action-items" ;;
-    *"msi timetable"*) echo "timetable" ;;
     *"msi course-scores"*) echo "course-scores" ;;
     *"msi grade-history"*) echo "grade-history" ;;
     *"ucheck"*) echo "attendance" ;;
