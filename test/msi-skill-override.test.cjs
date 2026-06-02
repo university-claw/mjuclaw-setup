@@ -5,6 +5,16 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 
+test("runtime instructions keep current timetable responses unviewed", () => {
+  const bootstrap = fs.readFileSync(path.join(root, "workspace", "BOOTSTRAP.md"), "utf8");
+  const msiSkill = fs.readFileSync(path.join(root, "skills", "mju-msi", "SKILL.md"), "utf8");
+
+  assert.match(bootstrap, /Current MSI timetable requests are intentionally not webview-backed/);
+  assert.match(bootstrap, /Exception: current MSI timetable lookup/);
+  assert.match(bootstrap, /Current MSI timetable has no expiring webview link/);
+  assert.match(msiSkill, /viewUrl/);
+});
+
 test("local mju-msi skill overrides current-term grades to course-scores", () => {
   const skill = fs.readFileSync(path.join(root, "skills", "mju-msi", "SKILL.md"), "utf8");
 
@@ -115,7 +125,8 @@ test("webview wrappers keep academic planning separate from legacy MSI and UChec
   assert.match(mjuNewsWrapper, /"timetable-planner"\) echo "시간표 설계"/);
   assert.match(mjuNewsWrapper, /"graduation"\) echo "졸업 로드맵"/);
 
-  assert.match(mjuWrapper, /msi timetable"\*\) echo "timetable"/);
+  assert.doesNotMatch(mjuWrapper, /msi timetable"\*\) echo "timetable"/);
+  assert.match(mjuWrapper, /msi timetable\s+-> no automatic webview/);
   assert.match(mjuWrapper, /MJU_SKIP_VIEW/);
   assert.doesNotMatch(mjuWrapper, /msi graduation"\*\) echo "graduation"/);
   assert.match(mjuWrapper, /ucheck"\*\) echo "attendance"/);

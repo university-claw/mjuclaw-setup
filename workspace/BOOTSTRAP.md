@@ -231,7 +231,7 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 | 유저 의도 | 사용할 명령 | dataType (자동) |
 |---|---|---|
 | "시간표 설계", "시간표 짜줘", "랜덤 시간표", "추천 시간표", "전공 3개 교양 2개", "요일/교시 제외", "시간 안 겹치게" | `mju-timetable-planner {DISCORD_USER_ID} --format json` 또는 명시 학기 요청 시 `mju-timetable-planner {DISCORD_USER_ID} --year YYYY --term-code 10|20 --format json` | `timetable-planner` |
-| "내 현재 시간표", "이번 학기 수강 시간표", "지금 듣는 수업 시간표" | `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` | `timetable` |
+| "내 현재 시간표", "이번 학기 수강 시간표", "지금 듣는 수업 시간표" | `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` | 없음 (`viewUrl` 없음) |
 | "출석", "유체크", "결석", "출석 알림" | `mju ucheck lectures list --app-dir /data/users/{DISCORD_USER_ID} --format json` 또는 `mju ucheck attendance --course "<과목명>" --app-dir /data/users/{DISCORD_USER_ID} --format json` | `attendance` |
 | "졸업요건", "내 졸업요건", "졸업학점", "졸업 로드맵", "졸업까지", "졸업까지 뭐 남았어", "내가 뭘 들었고 뭘 들어야 해", "영역별 졸업요건" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
 | "MSI 졸업요건 원본", "학교 시스템 졸업사정 그대로", "MSI 원본만" | `mju-graduation-roadmap {DISCORD_USER_ID} --format json` | `graduation` |
@@ -244,13 +244,19 @@ LMS 온라인 영상 요청에서 과목명, 주차, 영상 항목이 부족하�
 
 시간표 설계 요청에서 `mju ucheck`를 호출하면 출석 웹뷰가 열립니다. "시간표"라는 단어가 있어도 설계/추천/랜덤/전공·교양 개수/요일 제외/교시 제외/다음 학기 맥락이면 절대 `ucheck`를 쓰지 마세요. UCheck는 사용자가 출석/결석/유체크/출석 알림을 명시한 경우에만 사용합니다.
 
+Current MSI timetable requests are intentionally not webview-backed. `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` returns JSON without `viewUrl`; answer from the timetable entries directly. This is separate from timetable planning, which still uses `mju-timetable-planner` and returns the `timetable-planner` webview.
+
 ## 데이터 표시 — 3단계
 
 `mju lms`, `mju msi`, `mju ucheck`, `mju library`, `mju-news` 실행 시 **결과 JSON에 `viewUrl` 필드**가 자동으로 들어옵니다 (조회성 커맨드 한정). 이 URL은 웹뷰 링크입니다.
 
+Exception: current MSI timetable lookup (`mju msi timetable`) does not inject `viewUrl`; do not fabricate or request a webview link for it.
+
 ### 만료된 웹뷰 링크 재발급
 
 사용자가 "링크가 만료됐어", "만료되었다는데", "다시 열어줘", "다시 보내줘"처럼 말하면 이전 대화의 `viewUrl`을 재사용하지 마세요. 웹뷰 링크 만료는 SSO 세션 만료가 아니므로 "DM으로 다시 로그인/세션 확인"이라고 답하지 마세요. 직전 요청 의도가 시간표 설계면 `mju-timetable-planner {DISCORD_USER_ID} --format json`, 졸업 로드맵이면 `mju-graduation-roadmap {DISCORD_USER_ID} --format json`, 현재 시간표/성적/과제/학식 등 다른 기능이면 해당 기능의 원래 조회 명령을 다시 실행해 새 `viewUrl`을 발급하세요. 단, 직전 시간표 설계 요청에 `2026년 1학기`처럼 연도/학기가 명시되어 있었다면 재발급 명령에도 동일한 `--year`와 `--term-code`를 유지하세요. 직전 의도를 확정할 수 없을 때만 어떤 화면을 다시 열지 짧게 물어보세요.
+
+Current MSI timetable has no expiring webview link. If the previous intent was current timetable, rerun `mju msi timetable --app-dir /data/users/{DISCORD_USER_ID} --format json` and answer from JSON instead of issuing a new `viewUrl`.
 
 ### 성적 조회 — 의도와 명령 매핑 (중요)
 
